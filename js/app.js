@@ -36,6 +36,13 @@ const App = {
         window.switchInventoryTab = (tab) => this.switchInventoryTab(tab);
         window.handleSearch = (val) => this.handleGlobalSearch(val);
         window.deleteEntry = (id) => this.deleteInventoryEntry(id);
+        window.handleFilteredExport = () => this.handleFilteredExport();
+    },
+
+    async handleFilteredExport() {
+        const location = document.getElementById('export-filter-location').value;
+        const type = document.getElementById('export-filter-type').value;
+        this.exportToExcel('custom', { location, type });
     },
 
     inventoryTab: 'detailed',
@@ -254,8 +261,8 @@ const App = {
                 </div>
             </form>
         `);
-    }
-    async exportToExcel(type) {
+    },
+    async exportToExcel(type, options = {}) {
         const inventory = await DB.getAll('inventory');
         const masterData = await DB.getAll('medicineMaster');
         const masterMap = new Map(masterData.map(m => [m.id, m]));
@@ -270,6 +277,12 @@ const App = {
             dataToExport = inventory.filter(i => i.type === 'emergency');
         } else if (type === 'expiring') {
             dataToExport = inventory.filter(i => i.expiryDate && new Date(i.expiryDate) < sixMos);
+        } else if (type === 'custom') {
+            dataToExport = inventory.filter(i => {
+                const matchLoc = options.location === 'all' || i.location === options.location;
+                const matchType = options.type === 'all' || i.type === options.type;
+                return matchLoc && matchType;
+            });
         }
 
         if (dataToExport.length === 0) {

@@ -94,13 +94,44 @@ export const UI = {
         `).join('');
     },
 
-    renderReportsView() {
+    async renderReportsView() {
         const container = document.getElementById('view-reports');
         if (!container) return;
+
+        // Fetch locations for filter
+        const inventory = await window.DawaaDB.getAll('inventory');
+        const locations = Array.from(new Set(inventory.map(i => i.location))).filter(l => l);
+
         container.innerHTML = `
             <div class="view-header">
                 <h2>📊 تقارير وإحصائيات الإكسيل</h2>
             </div>
+
+            <div class="filter-section card">
+                <h3>تخصيص التصدير (فلترة)</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>المكان:</label>
+                        <select id="export-filter-location">
+                            <option value="all">الكل (All Locations)</option>
+                            ${locations.map(l => `<option value="${l}">${l}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>التصنيف:</label>
+                        <select id="export-filter-type">
+                            <option value="all">الكل (All Types)</option>
+                            <option value="medicine">الأدوية فقط</option>
+                            <option value="supply">المستلزمات فقط</option>
+                            <option value="emergency">الطوارئ فقط</option>
+                        </select>
+                    </div>
+                </div>
+                <button class="btn-primary" onclick="window.App.handleFilteredExport()">
+                    <i class='bx bx-download'></i> تصدير البيانات المفلترة
+                </button>
+            </div>
+
             <div class="reports-grid">
                 <div class="report-card" onclick="window.App.exportToExcel('full')">
                     <div class="report-icon"><i class='bx bxs-file-export'></i></div>
