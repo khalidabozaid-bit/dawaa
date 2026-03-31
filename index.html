@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>دواء | Dawaa Inventory</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
+    
+    <!-- UI Styles -->
+    <link rel="stylesheet" href="css/inventory.css">
+    
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#ffffff">
+    <link rel="apple-touch-icon" href="assets/icon-192.png">
+</head>
+<body class="light-mode">
+
+    <!-- App Header -->
+    <header class="app-header">
+        <div class="header-content container">
+            <div class="user-profile" onclick="openProfile()">
+                <div class="avatar"><i class='bx bxs-user-circle'></i></div>
+                <div class="user-info">
+                    <span class="greeting">أهلاً بك،</span>
+                    <span class="user-name" id="display-user-name">دكتور خـالـد</span>
+                </div>
+            </div>
+            <div class="app-logo">
+                <i class='bx bxs-capsule'></i>
+                <h1>دواء</h1>
+            </div>
+            <div class="header-actions">
+                <button class="icon-btn" onclick="toggleTheme()" title="تبديل الوضع">
+                    <i class='bx bx-moon' id="theme-icon"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="app-main container">
+        <!-- Dashboard Overview -->
+        <section id="view-dashboard" class="view active">
+            <div class="stats-grid">
+                <div class="stat-card total">
+                    <div class="stat-icon"><i class='bx bx-package'></i></div>
+                    <div class="stat-data">
+                        <span class="stat-value" id="stat-total-items">0</span>
+                        <span class="stat-label">إجمالي المواد</span>
+                    </div>
+                </div>
+                <div class="stat-card low-stock">
+                    <div class="stat-icon"><i class='bx bx-trending-down'></i></div>
+                    <div class="stat-data">
+                        <span class="stat-value" id="stat-low-stock">0</span>
+                        <span class="stat-label">أرصدة منخفضة</span>
+                    </div>
+                </div>
+                <div class="stat-card expiring">
+                    <div class="stat-icon"><i class='bx bx-time-five'></i></div>
+                    <div class="stat-data">
+                        <span class="stat-value" id="stat-expiring-items">0</span>
+                        <span class="stat-label">تنبيه الصلاحية</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Search Bar -->
+            <div class="search-section">
+                <div class="search-bar">
+                    <i class='bx bx-search'></i>
+                    <input type="text" id="global-search" placeholder="ابحث بالاسم أو المادة الفعالة..." oninput="handleSearch(this.value)">
+                </div>
+            </div>
+
+            <!-- Inventory Lists Container -->
+            <div class="list-section">
+                <div class="section-header">
+                    <h2>الجرد الأخير</h2>
+                    <button class="text-btn" onclick="switchView('view-inventory')">رؤية الكل</button>
+                </div>
+                <div id="dashboard-inventory-list" class="items-list">
+                    <!-- Dynamic Items Here -->
+                    <div class="empty-state">
+                        <i class='bx bx-layer-plus'></i>
+                        <p>ابدأ عملية الجرد الأولى الآن</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Inventory View -->
+        <section id="view-inventory" class="view">
+            <div class="view-header">
+                <h2>إدارة المخزون الكلي</h2>
+                <div class="view-toggle">
+                    <button class="toggle-btn active" onclick="window.switchInventoryTab('detailed')">تفصيلي</button>
+                    <button class="toggle-btn" onclick="window.switchInventoryTab('aggregated')">تجميعي</button>
+                </div>
+            </div>
+            <div id="inventory-items-list" class="items-list">
+                <!-- Data populated via app.js -->
+            </div>
+        </section>
+
+        <!-- Emergency View -->
+        <section id="view-emergency" class="view">
+            <div class="view-header">
+                <h2>🚨 جرد أدوية الطوارئ</h2>
+                <span class="badge danger">عالي الأهمية</span>
+            </div>
+            <div id="emergency-items-list" class="items-list"></div>
+        </section>
+
+        <!-- Supplies View -->
+        <section id="view-supplies" class="view">
+            <div class="view-header">
+                <h2>📦 جرد المستلزمات الطبية</h2>
+            </div>
+            <div id="supplies-items-list" class="items-list"></div>
+        </section>
+
+        <!-- Master Data View -->
+        <section id="view-master" class="view">
+            <div class="view-header">
+                <h2>⚙️ مستودع البيانات الأساسي</h2>
+                <button class="btn-primary sm-btn" onclick="window.openAddMasterItem()">إضافة بند جديد</button>
+            </div>
+            <div id="master-items-list" class="items-list"></div>
+        </section>
+
+        <!-- Reports & Export View -->
+        <section id="view-reports" class="view">
+            <!-- Content for exporting to Excel -->
+        </section>
+    </main>
+
+    <!-- Bottom Navigation -->
+    <nav class="bottom-nav">
+        <div class="nav-content container">
+            <button class="nav-item active" data-target="dashboard">
+                <i class='bx bxs-dashboard'></i>
+                <span>الرئيسية</span>
+            </button>
+            <button class="nav-item" data-target="inventory">
+                <i class='bx bx-list-ul'></i>
+                <span>الجرد</span>
+            </button>
+            <div class="nav-action-btn">
+                <button id="btn-quick-add" onclick="openQuickAdd()">
+                    <i class='bx bx-plus'></i>
+                </button>
+            </div>
+            <button class="nav-item" data-target="master">
+                <i class='bx bx-database'></i>
+                <span>البيانات</span>
+            </button>
+            <button class="nav-item" data-target="reports">
+                <i class='bx bxs-file-export'></i>
+                <span>الإكسيل</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Modals & Sheets -->
+    <div id="modal-container" class="modal-overlay"></div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>
