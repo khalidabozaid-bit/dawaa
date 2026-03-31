@@ -30,13 +30,8 @@ const App = {
     },
 
     setupAppListeners() {
-        // Global UI listeners that need access to App context
-        window.openQuickAdd = () => this.openQuickAddStock();
-        window.switchView = (viewId) => UI.switchView(viewId);
-        window.switchInventoryTab = (tab) => this.switchInventoryTab(tab);
-        window.handleSearch = (val) => this.handleGlobalSearch(val);
-        window.deleteEntry = (id) => this.deleteInventoryEntry(id);
-        window.handleFilteredExport = () => this.handleFilteredExport();
+        // App is already global, no need to re-assign if done at top-level
+        console.log('Dawaa App: App listeners configured.');
     },
 
     async handleFilteredExport() {
@@ -409,5 +404,13 @@ window.submitNewStock = async () => {
 };
 
 // Booting the App
+window.App = App;
+window.openQuickAdd = () => App.openQuickAddStock();
+window.switchView = (viewId) => UI.switchView(viewId);
+window.switchInventoryTab = (tab) => App.switchInventoryTab(tab);
+window.handleSearch = (val) => App.handleGlobalSearch(val);
+window.deleteEntry = (id) => App.deleteInventoryEntry(id);
+window.handleFilteredExport = () => App.handleFilteredExport();
+
 document.addEventListener('DOMContentLoaded', () => App.init());
 export { App };
