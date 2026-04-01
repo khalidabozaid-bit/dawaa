@@ -108,7 +108,11 @@ export const Sync = {
             UI.showToast(`تم نشر "${med.nameEN}" بنجاح ☁️`, 'success');
             if (window.App?.renderMasterData) window.App.renderMasterData();
             
+            // Re-pull to ensure absolute consistency
+            setTimeout(() => this.pull(), 1000);
+            
         } catch (err) {
+
             UI.showToast('فشل النشر العالمي. تحقق من الإنترنت.', 'danger');
             console.error('Push Error:', err);
         }

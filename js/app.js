@@ -655,14 +655,27 @@ const App = {
                 imagePath: imgData // Storing the base64 string
             };
 
-            await Categories.saveMedicine(data);
+            const medId = await Categories.saveMedicine(data);
             UI.showToast('تمت إضافة الصنف بنجاح', 'success');
             UI.closeModal();
             this.renderMasterData();
+
+            // Auto-Sync (Mashawiri Style)
+            if (this.userRole === 'admin') {
+                Sync.push(medId); // Background push
+            }
+            
+            // AUTOMATION: Open Stock Entry immediately after adding a new medicine (Mashawiri Efficiency)
+            setTimeout(() => {
+                UI.showToast('صنف جديد! لنقم بإضافة المخزون الآن...', 'info');
+                this.openEntryForm(medId);
+            }, 800);
+
         } catch (err) {
             UI.showToast('فشل حفظ الدواء', 'danger');
         }
     },
+
 
     async updateMasterMedicine(id) {
         try {
@@ -681,12 +694,20 @@ const App = {
                 activeIngredient: document.getElementById('e-active').value.trim(),
                 categoryId: document.getElementById('e-category').value,
                 type: document.getElementById('e-type').value,
-                imagePath: imgData
+                imagePath: imgData,
+                syncStatus: 'local', // Reset sync status on edit
+                lastUpdated: new Date().toISOString()
             };
+
             await Categories.saveMedicine(updated);
             UI.showToast('تم التحديث بنجاح', 'info');
             UI.closeModal();
             this.renderMasterData();
+
+            // Auto-Sync (Mashawiri Style)
+            if (this.userRole === 'admin') {
+                Sync.push(id); // Background push update
+            }
         } catch (err) {
             UI.showToast('فشل تحديث البيانات', 'danger');
         }
