@@ -84,11 +84,16 @@ export const Sync = {
 
             // 3. Merge/Update the medicine in the cloud list
             const existingIdx = masterData.findIndex(m => m.id === med.id);
+            
+            // STRIP IMAGE: Keep base64 out of Firestore to avoid 1MB limits (v9.7.5)
+            const { image, ...medWithoutImage } = med;
+            
             const syncMed = { 
-                ...med, 
+                ...medWithoutImage, 
                 syncStatus: 'global', 
                 lastSynced: new Date().toISOString() 
             };
+
 
             if (existingIdx > -1) {
                 masterData[existingIdx] = syncMed;
