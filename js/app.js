@@ -14,6 +14,8 @@ import { auth, db } from './core/firebase-config.js';
 
 const App = {
     inventoryTab: 'detailed',
+    selectedCategoryId: null, // Track active filter (v9.7.0)
+
 
     async init() {
         console.log('Dawaa App: Booting with Auth (v9.0.0)...');
@@ -218,33 +220,64 @@ const App = {
 
     async renderInventory(type = 'detailed') {
         try {
-            const container = document.getElementById('inventory-items-list');
+            const container = document.getElementById('inventory-list');
             if (!container) return;
-            
+
+            this.renderCategoryChips(); // Refresh filters
+
             let data = await DB.getAll('inventory');
-            let isAggregated = false;
+            const masterData = await DB.getAll('medicineMaster');
+            const masterMap = new Map(masterData.map(m => [m.id, m]));
             
+            // 1. Initial Filtering by Type
             if (type === 'expiry') {
-                const sixMonthsFromNow = new Date();
-                sixMonthsFromNow.setMonth(sixMonthsFromNow.getMonth() + 6);
-                data = data.filter(i => i.expiryDate && new Date(i.expiryDate) <= sixMonthsFromNow);
+                const sixMonths = new Date();
+                sixMonths.setMonth(sixMonths.getMonth() + 6);
+                data = data.filter(i => i.expiryDate && new Date(i.expiryDate) <= sixMonths);
             } else if (type === 'low-stock') {
                 data = await Inventory.getAggregatedStock();
                 data = data.filter(i => (i.totalQuantity || 0) <= 5);
-                isAggregated = true;
-            } else {
-                // Professional Alphabetical Sort (v6.6.2)
-                data.sort((a, b) => {
-                    const nameA = (masterMap.get(a.medicineId || a.id)?.nameEN || '').toLowerCase();
-                    const nameB = (masterMap.get(b.medicineId || b.id)?.nameEN || '').toLowerCase();
-                    return nameA.localeCompare(nameB);
+            }
+
+            // 2. Secondary Filtering by Category (Efficiency Protocol)
+            if (this.selectedCategoryId) {
+                data = data.filter(i => {
+                    const m = masterMap.get(i.medicineId || i.id);
+                    return m && m.categoryId === this.selectedCategoryId;
                 });
             }
 
-            this.renderReportData(data, container, isAggregated);
+            this.renderInventoryList(data, 'inventory-items-list', type === 'low-stock');
+        } catch (err) {
+            console.error('Inventory Render Error:', err);
+        }
+    },
+
+
+    async renderCategoryChips() {
+        const container = document.getElementById('category-chips');
+        if (!container) return;
+
+        try {
+            const cats = await Categories.getAllSorted();
+            container.innerHTML = `
+                <div class="category-chip ${!this.selectedCategoryId ? 'active' : ''}" onclick="window.App.filterByCategory(null)">
+                    <i class='bx bx-category'></i> <span>الكل</span>
+                </div>
+                ${cats.map(c => `
+                    <div class="category-chip ${this.selectedCategoryId === c.id ? 'active' : ''}" onclick="window.App.filterByCategory('${c.id}')">
+                        <i class='bx ${c.icon}'></i> <span>${c.nameAR}</span>
+                    </div>
+                `).join('')}
+            `;
         } catch (err) {
             console.error(err);
         }
+    },
+
+    filterByCategory(catId) {
+        this.selectedCategoryId = catId;
+        this.renderInventory();
     },
 
     async renderReportData(data, container, isAggregated = false) {
@@ -380,30 +413,10 @@ const App = {
 
         container.innerHTML = items.map(item => {
             const master = isAggregated ? item : masterMap.get(item.medicineId);
-            if (!master) return '';
-            
-            const exp = Utils.getExpiryStatus(isAggregated ? item.earliestExpiry : item.expiryDate);
-            
-            return `
-                <div class="inventory-card ${exp.class}">
-                    <div class="card-icon"><i class='bx ${master.type === 'supply' ? 'bx-plug' : 'bx-capsule'}'></i></div>
-                    <div class="card-info">
-                        <h3>${master.nameEN}</h3>
-                        <div class="card-meta">
-                            <span><i class='bx bx-map-pin'></i> ${isAggregated ? 'أماكن متعددة' : item.location}</span>
-                            <span><i class='bx bx-purchase-tag-alt'></i> ${isAggregated ? item.totalQuantity : item.quantity}</span>
-                        </div>
-                    </div>
-                    <div class="card-expiry">
-                        <span class="expiry-date">${isAggregated ? (item.earliestExpiry || 'N/A') : (item.expiryDate || 'N/A')}</span>
-                        <div class="card-actions">
-                            ${!isAggregated ? `<button class="icon-btn delete-btn" onclick="window.App.deleteEntry('${item.id}')"><i class='bx bx-trash'></i></button>` : ''}
-                        </div>
-                    </div>
-                </div>
-            `;
+            return Inventory.renderCard(item, master, isAggregated);
         }).join('');
     },
+
 
     // --- Dialogs (Standardized UI) ---
 
@@ -600,8 +613,6 @@ const App = {
                             ${cats.map(c => `<option value="${c.id}">${c.nameAR}</option>`).join('')}
                         </select>
                     </div>
-                        </select>
-                    </div>
 
                     <div class="form-group">
                         <label class="form-label">نوع البند:</label>
@@ -611,6 +622,7 @@ const App = {
                             <option value="supply">مستلزم طبي</option>
                         </select>
                     </div>
+
 
                     <div class="form-group checkbox-group mt-10" style="display: flex; align-items: center; gap: 8px; background: var(--bg-secondary); padding: 10px; border-radius: 8px;">
                         <input type="checkbox" id="m-sync" checked style="width: 18px; height: 18px;">
@@ -670,9 +682,6 @@ const App = {
                         </select>
                     </div>
 
-                        </select>
-                    </div>
-
                     <div class="form-group">
                         <label class="form-label">النوع:</label>
                         <select id="e-type" class="form-select">
@@ -681,6 +690,7 @@ const App = {
                             <option value="supply" ${med.type === 'supply' ? 'selected' : ''}>مستلزم طبي</option>
                         </select>
                     </div>
+
 
                     <div class="form-group checkbox-group mt-10" style="display: flex; align-items: center; gap: 8px; background: var(--bg-secondary); padding: 10px; border-radius: 8px;">
                         <input type="checkbox" id="e-sync" checked style="width: 18px; height: 18px;">
@@ -836,13 +846,18 @@ const App = {
     // --- Search & Utils ---
 
     async handleGlobalSearch(query) {
-        if (!query) return this.renderDashboard();
+        if (!query) {
+            this.selectedCategoryId = null; // Clear filter on empty search
+            return this.renderInventory();
+        }
+
         try {
             const inventory = await DB.getAll('inventory');
             const masterData = await DB.getAll('medicineMaster');
             const masterMap = new Map(masterData.map(m => [m.id, m]));
             
-            const filtered = inventory.filter(i => {
+            // 1. Filter Inventory
+            const filteredInventory = inventory.filter(i => {
                 const m = masterMap.get(i.medicineId);
                 return m && (
                     m.nameEN.toLowerCase().includes(query.toLowerCase()) || 
@@ -850,11 +865,52 @@ const App = {
                     (m.activeIngredient && m.activeIngredient.toLowerCase().includes(query.toLowerCase()))
                 );
             });
-            this.renderInventoryList(filtered, 'dashboard-inventory-list');
+
+            // 2. If results are low, search Master Data (Smart Lookup)
+            let masterResults = [];
+            if (filteredInventory.length < 5) {
+                masterResults = masterData.filter(m => 
+                    m.nameEN.toLowerCase().includes(query.toLowerCase()) || 
+                    (m.nameAR && m.nameAR.includes(query))
+                ).filter(m => !filteredInventory.some(i => i.medicineId === m.id));
+            }
+
+            this.renderSearchResults(filteredInventory, masterResults.slice(0, 5), masterMap);
         } catch (err) {
             console.error(err);
         }
     },
+
+    renderSearchResults(inventoryResults, masterResults, masterMap) {
+        const container = document.getElementById('inventory-items-list');
+        if (!container) return;
+
+
+        let html = inventoryResults.map(item => {
+            const med = masterMap.get(item.medicineId);
+            return Inventory.renderCard(item, med);
+        }).join('');
+
+        if (masterResults.length > 0) {
+            html += `
+                <div class="category-chip" style="margin: 20px auto; width: fit-content; background: var(--bg-light); border-style: dashed; pointer-events: none;">
+                    نتاج إضافية من المستودع
+                </div>
+            `;
+            html += masterResults.map(m => `
+                <div class="inventory-card" style="opacity: 0.8; border-style: dashed;" onclick="window.App.openEntryForm('${m.id}')">
+                    <div class="card-icon"><i class='bx bx-plus-circle'></i></div>
+                    <div class="card-info">
+                        <h3>${m.nameEN} / ${m.nameAR || ''}</h3>
+                        <div class="card-meta"><span><i class='bx bx-info-circle'></i> غير مسجل بالجرد - اضغط للإضافة</span></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        container.innerHTML = html || '<div class="empty-state">لا توجد نتائج مطابقة</div>';
+    },
+
 
     async handleMasterSearch(query) {
         if (!query) return this.renderMasterData();

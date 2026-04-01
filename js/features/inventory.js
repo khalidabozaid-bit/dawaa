@@ -97,5 +97,35 @@ export const Inventory = {
         });
 
         return Array.from(aggregated.values());
+    },
+
+    /**
+     * Standardized Card Rendering (Efficiency Protocol v9.7.1)
+     */
+    renderCard(item, master, isAggregated = false) {
+        if (!master) return '';
+        const exp = Utils.getExpiryStatus(isAggregated ? item.earliestExpiry : item.expiryDate);
+        const icon = master.type === 'supply' ? 'bx-plug' : 'bx-capsule';
+
+        
+        return `
+            <div class="inventory-card ${exp.class}">
+                <div class="card-icon"><i class='bx ${icon}'></i></div>
+                <div class="card-info">
+                    <h3>${master.nameEN} / ${master.nameAR || ''}</h3>
+                    <div class="card-meta">
+                        <span><i class='bx bx-map-pin'></i> ${isAggregated ? 'أماكن متعددة' : (item.location || 'غير محدد')}</span>
+                        <span><i class='bx bx-purchase-tag-alt'></i> ${isAggregated ? item.totalQuantity : item.quantity}</span>
+                    </div>
+                </div>
+                <div class="card-expiry">
+                    <span class="expiry-date">${isAggregated ? (item.earliestExpiry || 'N/A') : (item.expiryDate || 'N/A')}</span>
+                    <div class="card-actions">
+                        ${!isAggregated ? `<button class="icon-btn delete-btn" onclick="window.App.deleteEntry('${item.id}')"><i class='bx bx-trash'></i></button>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
     }
 };
+
