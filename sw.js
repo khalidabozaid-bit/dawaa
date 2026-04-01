@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'dawaa-cache-v9.6.3';
+const CACHE_NAME = 'dawaa-cache-v9.7.1';
 
 
 const ASSETS_TO_CACHE = [

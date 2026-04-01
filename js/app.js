@@ -749,14 +749,8 @@ const App = {
             if (this.userRole === 'admin' && shouldSync) {
                 Sync.push(medId); // Background push
             }
-            
-            // AUTOMATION: Open Stock Entry immediately (Mashawiri Efficiency)
-            setTimeout(() => {
-                this.openEntryForm(medId);
-            }, 800);
-
-
         } catch (err) {
+
             UI.showToast('فشل حفظ الدواء', 'danger');
         }
     },
@@ -1107,8 +1101,9 @@ App.handleBackup = async function() {
             medicineMaster: await DB.getAll('medicineMaster'),
             inventory: await DB.getAll('inventory'),
             exportDate: new Date().toISOString(),
-            version: '5.6'
+            version: '9.7.1'
         };
+
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
