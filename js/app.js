@@ -83,21 +83,17 @@ const App = {
 
         navigator.serviceWorker.register('./sw.js').then(reg => {
             console.log('SW: Registered.');
+            this.swRegistration = reg; // Store globally
 
-            // Check for updates
+            // Silence checking logic (v9.8.5)
             reg.addEventListener('updatefound', () => {
                 const newWorker = reg.installing;
                 newWorker.addEventListener('statechange', () => {
                     if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                        this.showUpdateBanner(reg);
+                        console.log('SW: Update available (Digital Silence).');
                     }
                 });
             });
-
-            // If a worker is already waiting
-            if (reg.waiting) {
-                this.showUpdateBanner(reg);
-            }
         });
 
         // Listen for the skipWaiting trigger to reload
@@ -109,11 +105,48 @@ const App = {
         });
     },
 
-    showUpdateBanner(registration) {
-        // SILENT: Store for the settings button (Efficiency Protocol)
-        this.swRegistration = registration;
-    },
+    /**
+     * The Double-Tap Update Protocol (v9.8.5)
+     */
+    async checkUpdate() {
+        const btn = document.querySelector('.setting-card[onclick*="checkUpdate"]');
+        const statusText = document.getElementById('update-status-text');
+        const title = btn?.querySelector('h3');
 
+        // Check if we are in Step 2 (Update Found)
+        if (this.swRegistration && this.swRegistration.waiting) {
+            UI.showToast('جاري تثبيت التحديث... يرجى الانتظار 🔄', 'info');
+            this.applyUpdate();
+            return;
+        }
+
+        // Step 1: Check for Updates
+        if (statusText) statusText.textContent = 'جاري البحث عن إصدارات جديدة... 🔍';
+        if (title) title.textContent = 'جاري الفحص...';
+        
+        try {
+            if (this.swRegistration) {
+                await this.swRegistration.update();
+                
+                // Allow some time for SW to detect
+                setTimeout(() => {
+                    if (this.swRegistration.waiting) {
+                        if (statusText) statusText.textContent = 'تم العثور على إصدار جديد! اضغط مرة أخرى للتثبيت ⚡';
+                        if (title) title.textContent = 'تثبيت التحديث الآن';
+                        if (btn) btn.classList.add('info-accent'); // Highlight
+                        UI.showToast('يوجد تحديث جاهز للتثبيت ✨', 'success');
+                    } else {
+                        if (statusText) statusText.textContent = 'أنت تستخدم أحدث إصدار من دواء ✅';
+                        if (title) title.textContent = 'النظام محدث';
+                        UI.showToast('نظامك محدث بالكامل ✅', 'success');
+                    }
+                }, 1500);
+            }
+        } catch (err) {
+            console.error('Update Check Fail:', err);
+            UI.showToast('فشل التحقق من التحديث', 'danger');
+        }
+    },
 
     applyUpdate() {
         // Send command to the waiting OR installing worker
@@ -124,6 +157,7 @@ const App = {
             window.location.reload(); // Fallback
         }
     },
+
 
 
 
