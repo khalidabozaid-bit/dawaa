@@ -1102,8 +1102,9 @@ App.handleBackup = async function() {
             medicineMaster: await DB.getAll('medicineMaster'),
             inventory: await DB.getAll('inventory'),
             exportDate: new Date().toISOString(),
-            version: '9.7.1'
+            version: '9.7.2'
         };
+
 
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
