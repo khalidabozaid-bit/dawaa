@@ -95,17 +95,20 @@ const App = {
         const banner = document.getElementById('update-banner');
         if (banner) {
             banner.classList.add('show');
-            this.waitingWorker = registration.waiting;
+            this.swRegistration = registration; // Store full registration (Robust Reliability)
         }
     },
 
     applyUpdate() {
-        if (this.waitingWorker) {
-            this.waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+        // Send command to the waiting OR installing worker
+        const worker = this.swRegistration?.waiting || this.swRegistration?.installing;
+        if (worker) {
+            worker.postMessage({ type: 'SKIP_WAITING' });
         } else {
             window.location.reload(); // Fallback
         }
     },
+
 
 
 
@@ -694,8 +697,9 @@ const App = {
                 </form>
             `);
         } catch (err) {
-            UI.showToast('خطأ في التحميل', 'danger');
+            console.warn('Category Load Error:', err);
         }
+
     },
 
     handleImagePreview(input, previewId) {
@@ -727,7 +731,6 @@ const App = {
             };
 
             const medId = await Categories.saveMedicine(data);
-            UI.showToast('تمت إضافة الصنف بنجاح', 'success');
             UI.closeModal();
             this.renderMasterData();
 
@@ -739,7 +742,6 @@ const App = {
             
             // AUTOMATION: Open Stock Entry immediately (Mashawiri Efficiency)
             setTimeout(() => {
-                UI.showToast('صنف جديد! لنقم بإضافة المخزون الآن...', 'info');
                 this.openEntryForm(medId);
             }, 800);
 
@@ -773,7 +775,6 @@ const App = {
             };
 
             await Categories.saveMedicine(updated);
-            UI.showToast('تم التحديث بنجاح', 'info');
             UI.closeModal();
             this.renderMasterData();
 
@@ -1111,38 +1112,34 @@ App.fullReset = async function() {
     }
 };
 
+App.updateStatus = function(msg) {
+    const el = document.getElementById('update-status-text');
+    if (el) el.textContent = msg;
+};
+
 App.checkUpdate = async function() {
-    UI.showToast('جاري البحث عن تحديثات...', 'info');
+    this.updateStatus('جاري البحث عن تحديثات...');
     if ('serviceWorker' in navigator) {
         const reg = await navigator.serviceWorker.getRegistration();
         if (reg) {
             await reg.update();
             
-            // Check if there's already a worker waiting
-            if (reg.waiting) {
-                this.showUpdateBanner();
-                UI.showToast('تحديث جديد متوفر! اضغط تفعيل.', 'success');
+            // Check if there's already a worker waiting OR installing
+            const newWorker = reg.waiting || reg.installing;
+            if (newWorker) {
+                this.showUpdateBanner(reg);
+                this.updateStatus('تحديث جديد جاهز! اضغط "تحديث الآن" بالأعلى.');
                 return;
             }
 
-            // Or if one is currently installing, wait for it
-            if (reg.installing) {
-                reg.installing.onstatechange = () => {
-                    if (reg.waiting) {
-                        this.showUpdateBanner();
-                        UI.showToast('تحديث جديد جاهز! اضغط تفعيل.', 'success');
-                    }
-                };
-                return;
-            }
-
-            // No updates detected
-            if (!reg.waiting && !reg.installing) {
-                UI.showToast('أنت تستخدم أحدث نسخة بالفعل', 'success');
-            }
+            // No updates detected (Quiet Clarity Protocol)
+            this.updateStatus('أنت تستخدم أحدث نسخة بالفعل ✅');
+            setTimeout(() => this.updateStatus('البحث عن إصدارات جديدة متوفرة'), 4000);
         }
     }
 };
+
+
 
 App.userRole = 'staff';
 App.user = null;
