@@ -113,10 +113,11 @@ export const Sync = {
             setTimeout(() => this.pull(), 1000);
             
         } catch (err) {
-
-            UI.showToast('فشل النشر العالمي. تحقق من الإنترنت.', 'danger');
-            console.error('Push Error:', err);
+            const msg = err.code || err.message || 'خطأ غير معروف';
+            UI.showToast(`فشل النشر العالمي: ${msg}`, 'danger');
+            console.error('Push Error Details:', err);
         }
+
     },
 
     async submit(medId) {

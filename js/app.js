@@ -1100,8 +1100,9 @@ App.handleBackup = async function() {
             medicineMaster: await DB.getAll('medicineMaster'),
             inventory: await DB.getAll('inventory'),
             exportDate: new Date().toISOString(),
-            version: '9.7.3'
+            version: '9.7.4'
         };
+
 
 
 
