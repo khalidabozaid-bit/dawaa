@@ -105,13 +105,15 @@ export const Inventory = {
     renderCard(item, master, isAggregated = false) {
         if (!master) return '';
         const exp = Utils.getExpiryStatus(isAggregated ? item.earliestExpiry : item.expiryDate);
-        const icon = master.type === 'supply' ? 'bx-plug' : 'bx-capsule';
-
+        const imgUrl = window.Categories ? window.Categories.getMedicineImage(master) : 'assets/icons/default-med.png';
         
         return `
             <div class="inventory-card ${exp.class}">
-                <div class="card-icon"><i class='bx ${icon}'></i></div>
+                <div class="card-img mini" style="width:50px; height:50px; border-radius:8px; overflow:hidden; margin-left:12px">
+                    <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover">
+                </div>
                 <div class="card-info">
+
                     <h3>${master.nameEN} / ${master.nameAR || ''}</h3>
                     <div class="card-meta">
                         <span><i class='bx bx-map-pin'></i> ${isAggregated ? 'أماكن متعددة' : (item.location || 'غير محدد')}</span>

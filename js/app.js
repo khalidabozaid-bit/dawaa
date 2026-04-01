@@ -383,7 +383,7 @@ const App = {
 
             container.innerHTML = master.sort((a, b) => (a.id || '').localeCompare(b.id || '')).map(m => {
                 const cat = catMap.get(m.categoryId) || { nameAR: m.categoryId, icon: 'bx-package', color: '#64748b' };
-                const hasImg = m.imagePath && m.imagePath.includes('base64');
+                const imgUrl = Categories.getMedicineImage(m);
                 const isGlobal = m.syncStatus === 'global';
                 const isAdmin = this.userRole === 'admin';
                 
@@ -392,10 +392,11 @@ const App = {
                         <span class="sync-badge ${isGlobal ? 'global' : 'local'}">
                             <i class='bx ${isGlobal ? 'bx-cloud-check' : 'bx-time-five'}'></i>
                         </span>
-                        <div class="card-img">
-                            ${hasImg ? `<img src="${m.imagePath}">` : `<div class="default-med-icon mini"><i class='bx bx-capsule'></i></div>`}
+                        <div class="card-img" style="overflow:hidden">
+                            <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover">
                         </div>
                         <div class="card-info">
+
                             <h3>${m.nameEN} <span class="ar-name">/ ${m.nameAR || ''}</span></h3>
                             <div class="card-meta">
                                 <span><i class='bx bx-barcode'></i> ${m.id}</span>
