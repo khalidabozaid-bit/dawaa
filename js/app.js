@@ -5,16 +5,32 @@ import { Categories } from './features/categories.js';
 import { Exporter } from './features/export.js';
 import { Utils } from './core/utils.js';
 import { Sync } from './core/sync.js';
-import { auth, db } from './core/firebase-config.js';
+import { auth, db, storage } from './core/firebase-config.js';
 
 /**
- * Dawaa App Orchestrator (v6.1 - Cloud Edition)
+ * Dawaa App Orchestrator (v9.8.0 - Cloud Storage Edition)
  * Master Data Sync & Admin Control Enabled.
  */
-
 const App = {
     inventoryTab: 'detailed',
     selectedCategoryId: null, // Track active filter (v9.7.0)
+
+    /**
+     * Image Upload Helper for Cloud Storage (v9.8.0)
+     */
+    async uploadImage(file, medId) {
+        if (!file) return null;
+        try {
+            const storageRef = storage.ref(`medicine_images/${medId}_${Date.now()}.jpg`);
+            const snapshot = await storageRef.put(file);
+            return await snapshot.ref.getDownloadURL();
+        } catch (err) {
+            console.error('Storage Upload Error:', err);
+            return null;
+        }
+    },
+
+
 
 
     async init() {
@@ -725,9 +741,12 @@ const App = {
     async saveMasterMedicine() {
         try {
             const fileInput = document.getElementById('m-file');
-            let imgData = '';
+            let imgData = ''; // Local base64 for instant preview
+            let file = null;
+
             if (fileInput.files && fileInput.files[0]) {
-                imgData = await Utils.fileToBase64(fileInput.files[0]);
+                file = fileInput.files[0];
+                imgData = await Utils.fileToBase64(file);
             }
 
             const data = {
@@ -736,33 +755,45 @@ const App = {
                 activeIngredient: document.getElementById('m-active').value.trim(),
                 categoryId: document.getElementById('m-category').value,
                 type: document.getElementById('m-type').value,
-                imagePath: imgData // Storing the base64 string
+                imagePath: imgData,
+                syncStatus: 'local'
             };
 
             const medId = await Categories.saveMedicine(data);
             UI.closeModal();
             this.renderMasterData();
 
-            // Auto-Sync Option (Mashawiri Style)
-            const shouldSync = document.getElementById('m-sync')?.checked;
-            if (this.userRole === 'admin' && shouldSync) {
-                Sync.push(medId); // Background push
+            // Background Cloud Upload (v9.8.0)
+            if (file && this.userRole === 'admin') {
+                UI.showToast('جاري رفع صورة الدواء للسحابة...', 'info');
+                this.uploadImage(file, medId).then(async (url) => {
+                    if (url) {
+                        const med = await DB.get('medicineMaster', medId);
+                        med.imagePath = url; // Replace base64 with Cloud URL
+                        await Categories.saveMedicine(med);
+                        Sync.push(medId); // Force sync with new URL
+                    }
+                });
+            } else if (this.userRole === 'admin') {
+                Sync.push(medId);
             }
         } catch (err) {
-
             UI.showToast('فشل حفظ الدواء', 'danger');
         }
     },
+
 
 
     async updateMasterMedicine(id) {
         try {
             const fileInput = document.getElementById('e-file');
             const med = await DB.get('medicineMaster', id);
+            let file = null;
             
             let imgData = med.imagePath;
             if (fileInput.files && fileInput.files[0]) {
-                imgData = await Utils.fileToBase64(fileInput.files[0]);
+                file = fileInput.files[0];
+                imgData = await Utils.fileToBase64(file);
             }
 
             const updated = {
@@ -773,7 +804,7 @@ const App = {
                 categoryId: document.getElementById('e-category').value,
                 type: document.getElementById('e-type').value,
                 imagePath: imgData,
-                syncStatus: 'local', // Reset sync status on edit
+                syncStatus: 'local',
                 lastUpdated: new Date().toISOString()
             };
 
@@ -781,16 +812,25 @@ const App = {
             UI.closeModal();
             this.renderMasterData();
 
-            // Auto-Sync Option (Mashawiri Style)
-            const shouldSync = document.getElementById('e-sync')?.checked;
-            if (this.userRole === 'admin' && shouldSync) {
-                Sync.push(id); // Background push update
+            // Background Cloud Upload (v9.8.0)
+            if (file && this.userRole === 'admin') {
+                UI.showToast('جاري تحديث الصورة في السحابة...', 'info');
+                this.uploadImage(file, id).then(async (url) => {
+                    if (url) {
+                        const m = await DB.get('medicineMaster', id);
+                        m.imagePath = url;
+                        await Categories.saveMedicine(m);
+                        Sync.push(id);
+                    }
+                });
+            } else if (this.userRole === 'admin') {
+                Sync.push(id);
             }
         } catch (err) {
-
             UI.showToast('فشل تحديث البيانات', 'danger');
         }
     },
+
 
     async deleteMasterMedicine(id) {
         if (confirm('هل أنت متأكد؟ سيتم حذف الصنف من المستودع نهائياً.')) {
@@ -1100,8 +1140,9 @@ App.handleBackup = async function() {
             medicineMaster: await DB.getAll('medicineMaster'),
             inventory: await DB.getAll('inventory'),
             exportDate: new Date().toISOString(),
-            version: '9.7.5'
+            version: '9.8.0'
         };
+
 
 
 

@@ -4,7 +4,8 @@ import { UI } from './ui.js';
 import { db } from './firebase-config.js';
 
 /**
- * Dawaa Cloud Sync Engine (v8.0.0 - Firebase Edition)
+ * Dawaa Cloud Sync Engine (v9.8.0 - Firebase Edition)
+
  * Handles Managed Master Data Synchronization with Firestore.
  */
 
@@ -85,14 +86,13 @@ export const Sync = {
             // 3. Merge/Update the medicine in the cloud list
             const existingIdx = masterData.findIndex(m => m.id === med.id);
             
-            // STRIP IMAGE: Keep base64 out of Firestore to avoid 1MB limits (v9.7.5)
-            const { image, ...medWithoutImage } = med;
-            
+            // v9.8.0: Image is now a light Cloud URL (or local base64 waiting for upload)
             const syncMed = { 
-                ...medWithoutImage, 
+                ...med, 
                 syncStatus: 'global', 
                 lastSynced: new Date().toISOString() 
             };
+
 
 
             if (existingIdx > -1) {

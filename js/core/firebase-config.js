@@ -22,6 +22,8 @@ if (!firebase.apps.length) {
 
 export const auth = firebase.auth();
 export const db = firebase.firestore();
+export const storage = firebase.storage();
+
 
 // Persistence for Firestore (Offline-First) - Essential for PWA
 db.enablePersistence().catch((err) => {
