@@ -25,8 +25,35 @@
     <link rel="stylesheet" href="css/modules/components.css">
     <link rel="stylesheet" href="css/modules/views.css">
     <link rel="stylesheet" href="css/modules/dark.css">
+    <link rel="stylesheet" href="css/modules/auth.css">
 </head>
 <body class="light-mode">
+
+    <!-- Auth View (Hidden by default, shown by App.init if needed) -->
+    <section id="view-login" class="view-login-container">
+        <div class="auth-card">
+            <div class="auth-logo"><i class='bx bxs-capsule'></i></div>
+            <h2 id="auth-title">تسجيل الدخول</h2>
+            <p id="auth-subtitle">مرحباً بك في نظام دواء لجرد الأدوية</p>
+            
+            <form id="auth-form" class="auth-form" onsubmit="event.preventDefault(); window.App.handleAuthSubmit();">
+                <div class="auth-group">
+                    <label>الاسم الأول</label>
+                    <input type="text" id="auth-name" class="auth-input" placeholder="مثال: خالد" required>
+                </div>
+                <div class="auth-group">
+                    <label>رقم الباي رول (Employee ID)</label>
+                    <input type="number" id="auth-email" class="auth-input" placeholder="مثال: 1001" required>
+                </div>
+                <button type="submit" class="auth-btn" id="auth-submit-btn">دخول النظام</button>
+            </form>
+
+            <div class="auth-toggle" style="display: none;">
+                <span id="auth-toggle-text"></span>
+                <button class="auth-toggle-btn" onclick="window.App.toggleAuthMode()"></button>
+            </div>
+        </div>
+    </section>
 
     <!-- Update Notification (Mashawiri Style) -->
     <div id="update-banner" class="update-banner">
@@ -46,7 +73,7 @@
                 <div class="avatar"><i class='bx bxs-user-circle'></i></div>
                 <div class="user-info">
                     <span class="greeting">أهلاً بك،</span>
-                    <span class="user-name" id="display-user-name">دكتور خـالـد</span>
+                    <span class="user-name" id="display-user-name">...</span>
                 </div>
             </div>
             <div class="app-logo">
@@ -187,20 +214,12 @@
                         <p>للمراجعة والاعتماد والنشر العالمي</p>
                     </div>
                 </div>
-                <!-- Backup & Restore -->
-                <div class="setting-card" onclick="window.App.handleBackup()">
-                    <div class="setting-icon bg-primary"><i class='bx bx-cloud-upload'></i></div>
+                <!-- Logout -->
+                <div class="setting-card" onclick="window.App.handleLogout()">
+                    <div class="setting-icon bg-danger-light"><i class='bx bx-log-out'></i></div>
                     <div class="setting-info">
-                        <h3>نسخة احتياطية (Backup)</h3>
-                        <p>تصدير كافة البيانات في ملف واحد</p>
-                    </div>
-                </div>
-                <div class="setting-card" onclick="document.getElementById('restore-input').click()">
-                    <div class="setting-icon bg-warning"><i class='bx bx-cloud-download'></i></div>
-                    <div class="setting-info">
-                        <h3>استعادة البيانات (Restore)</h3>
-                        <p>رفع ملف بيانات سابق محفوظ</p>
-                        <input type="file" id="restore-input" style="display:none" accept=".dawaa" onchange="window.App.handleRestore(this)">
+                        <h3 class="text-danger">تسجيل الخروج</h3>
+                        <p>الخروج من الحساب الحالي</p>
                     </div>
                 </div>
                 <!-- System Utility -->

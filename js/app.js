@@ -1,4 +1,3 @@
-// js/app.js
 import { DB } from './core/db.js';
 import { UI } from './core/ui.js';
 import { Inventory } from './features/inventory.js';
@@ -6,6 +5,7 @@ import { Categories } from './features/categories.js';
 import { Exporter } from './features/export.js';
 import { Utils } from './core/utils.js';
 import { Sync } from './core/sync.js';
+import { auth, db } from './core/firebase-config.js';
 
 /**
  * Dawaa App Orchestrator (v6.1 - Cloud Edition)
@@ -16,34 +16,82 @@ const App = {
     inventoryTab: 'detailed',
 
     async init() {
-        console.log('Dawaa App: Rebooting system...');
-        
-        // Immediate Global Exposure
+        console.log('Dawaa App: Booting with Auth (v9.0.0)...');
         window.App = App;
         window.UI = UI;
 
-        try {
-            await DB.init();
+        // Initialize Services
+        await DB.init();
+        await Categories.seedInitialData();
+        UI.init();
+        this.registerServiceWorker();
 
-            // Native Initialization (v6.6.0)
-            await Categories.seedInitialData();
+        // Auth Monitor (The Heart of v9.0.0)
+        auth.onAuthStateChanged(async (user) => {
+            if (user) {
+                console.log('Auth: User active:', user.email);
+                await this.handleUserSession(user);
+            } else {
+                console.log('Auth: No session found.');
+                this.showLogin();
+            }
+        });
+    },
+
+    async handleUserSession(user) {
+        try {
+            // 1. Fetch Profile from Cloud
+            let profileDoc = await db.collection('users').doc(user.uid).get();
             
-            UI.init();
+            // 2. Initialize new user if profile missing
+            if (!profileDoc.exists) {
+                const usersCount = (await db.collection('users').get()).size;
+                const role = usersCount === 0 ? 'admin' : 'staff'; // First user is Admin
+                
+                const profile = {
+                    uid: user.uid,
+                    email: user.email,
+                    displayName: localStorage.getItem('dawaa-temp-name') || user.email.split('@')[0],
+                    role: role,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                };
+                
+                await db.collection('users').doc(user.uid).set(profile);
+                profileDoc = await db.collection('users').doc(user.uid).get();
+                localStorage.removeItem('dawaa-temp-name');
+            }
+
+            const profile = profileDoc.data();
+            
+            // 3. Set App Context
+            this.user = profile;
+            this.userRole = profile.role;
+            this.pharmacyCode = 'default_pharmacy'; // Hardcoded for single-pharmacy setup
+            
+            // 4. Update UI
+            document.getElementById('display-user-name').textContent = profile.displayName || profile.email;
+            this.hideLogin();
             this.renderDashboard();
-            this.registerServiceWorker();
             this.updateAdminUI();
             this.updateSyncStatusUI();
             
-            // Background Sync (v6.1 Pull)
+            // 5. Initial Pull
             Sync.pull();
             
-            console.log('Dawaa App: Ready (v6.6.0).');
         } catch (err) {
-            console.error('Dawaa App: Boot Conflict:', err);
-            if (typeof UI !== 'undefined' && UI.showToast) {
-                UI.showToast(`خطأ في التشغيل: ${err.message}`, 'danger');
-            }
+            console.error('Session Error:', err);
+            UI.showToast('خطأ في تحميل ملف المستخدم', 'danger');
         }
+    },
+
+    showLogin() {
+        const loginView = document.getElementById('view-login');
+        if (loginView) loginView.style.display = 'flex';
+    },
+
+    hideLogin() {
+        const loginView = document.getElementById('view-login');
+        if (loginView) loginView.style.display = 'none';
     },
 
     registerServiceWorker() {
@@ -971,28 +1019,57 @@ App.checkUpdate = async function() {
     }
 };
 
-App.userRole = localStorage.getItem('dawaa-role') || 'staff';
-App.pharmacyCode = localStorage.getItem('dawaa-pharmacy-code') || '';
+App.userRole = 'staff';
+App.user = null;
+App.SILENT_PASS = 'dawaa@2026';
 
-App.handleAdminUnlock = function() {
-    if (this.userRole === 'admin') {
-        if (confirm('هل تريد الخروج من وضع المدير والعودة لوضع الموظف؟')) {
-            this.userRole = 'staff';
-            localStorage.setItem('dawaa-role', 'staff');
-            UI.showToast('تم العودة لوضع الموظف', 'info');
-            this.updateAdminUI();
-        }
+App.toggleAuthMode = function() {
+    // Legacy toggle removed in v9.4 - both fields are always shown
+};
+
+App.handleAuthSubmit = async function() {
+    const name = document.getElementById('auth-name').value.trim();
+    const payrollNo = document.getElementById('auth-email').value.trim();
+    const email = `${payrollNo}@dawaa.internal`;
+
+    if (!name || !payrollNo) {
+        UI.showToast('يرجى إدخال الاسم ورقم الباي رول', 'warning');
         return;
     }
 
-    const key = prompt('أدخل كود المدير لتفعيل الصلاحيات (ADMIN77):');
-    if (key === 'ADMIN77') {
-        this.userRole = 'admin';
-        localStorage.setItem('dawaa-role', 'admin');
-        UI.showToast('تم تفعيل وضع المدير بنجاح 🛡️', 'success');
-        this.updateAdminUI();
-    } else if (key !== null) {
-        UI.showToast('كود غير صحيح!', 'danger');
+    try {
+        UI.showToast('جاري التحقق من الهوية...', 'info');
+        localStorage.setItem('dawaa-temp-name', name);
+        
+        // 1. Try to Login
+        try {
+            await auth.signInWithEmailAndPassword(email, this.SILENT_PASS);
+            UI.showToast(`أهلاً بك مجدداً يا ${name}!`, 'success');
+        } catch (loginErr) {
+            // 2. If user doesn't exist, Create Account
+            if (loginErr.code === 'auth/user-not-found' || loginErr.code === 'auth/invalid-credential') {
+                await auth.createUserWithEmailAndPassword(email, this.SILENT_PASS);
+                UI.showToast('تم إنشاء حسابك بنجاح! ✨', 'success');
+            } else {
+                throw loginErr;
+            }
+        }
+    } catch (err) {
+        console.error('Auth Error:', err);
+        UI.showToast(`خطأ في الدخول: ${err.message}`, 'danger');
+    }
+};
+
+App.handleLogout = async function() {
+    if (confirm('هل أنت متأكد من تسجيل الخروج؟')) {
+        try {
+            await auth.signOut();
+            // Clear local states if any
+            localStorage.removeItem('dawaa-temp-name');
+            window.location.reload();
+        } catch (err) {
+            UI.showToast('فشل في تسجيل الخروج', 'danger');
+        }
     }
 };
 
@@ -1001,8 +1078,8 @@ App.updateAdminUI = function() {
     const statusText = document.getElementById('admin-status-text');
     const icon = document.getElementById('admin-icon');
     
-    if (statusText) statusText.textContent = isAdmin ? 'وضع المدير (مفعل)' : 'تفعيل وضع المدير';
-    if (icon) icon.className = isAdmin ? 'bx bxs-shield-check' : 'bx bx-shield-quarter';
+    if (statusText) statusText.textContent = isAdmin ? 'وضع المدير (مفعل)' : 'صلاحيات الموظف (مفعلة)';
+    if (icon) icon.className = isAdmin ? 'bx bxs-shield-check' : 'bx bx-user';
     
     // Update Master Data View to show publish buttons if admin
     if (window.UI && UI.currentView === 'master') App.renderMasterData();
