@@ -80,9 +80,10 @@ const App = {
             
         } catch (err) {
             console.error('Session Error:', err);
-            UI.showToast('خطأ في تحميل ملف المستخدم', 'danger');
+            UI.showToast(`خطأ في تحميل ملف المستخدم (${err.code || err.message})`, 'danger');
         }
     },
+
 
     showLogin() {
         const loginView = document.getElementById('view-login');
@@ -1056,9 +1057,13 @@ App.handleAuthSubmit = async function() {
         }
     } catch (err) {
         console.error('Auth Error:', err);
-        UI.showToast(`خطأ في الدخول: ${err.message}`, 'danger');
+        let msg = 'خطأ في الدخول';
+        if (err.code === 'auth/operation-not-allowed') msg = 'يرجى تفعيل البريد الإلكتروني في كونسول فيربيس';
+        if (err.code === 'auth/network-request-failed') msg = 'تأكد من اتصالك بالإنترنت';
+        UI.showToast(`${msg} (${err.code || err.message})`, 'danger');
     }
 };
+
 
 App.handleLogout = async function() {
     if (confirm('هل أنت متأكد من تسجيل الخروج؟')) {
