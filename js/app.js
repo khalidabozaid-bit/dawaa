@@ -94,12 +94,10 @@ const App = {
     },
 
     showUpdateBanner(registration) {
-        const banner = document.getElementById('update-banner');
-        if (banner) {
-            banner.classList.add('show');
-            this.swRegistration = registration; // Store full registration (Robust Reliability)
-        }
+        // SILENT: Store for the settings button (Efficiency Protocol)
+        this.swRegistration = registration;
     },
+
 
     applyUpdate() {
         // Send command to the waiting OR installing worker
@@ -1102,8 +1100,9 @@ App.handleBackup = async function() {
             medicineMaster: await DB.getAll('medicineMaster'),
             inventory: await DB.getAll('inventory'),
             exportDate: new Date().toISOString(),
-            version: '9.7.2'
+            version: '9.7.3'
         };
+
 
 
 
