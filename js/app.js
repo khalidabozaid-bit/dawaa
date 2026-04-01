@@ -55,7 +55,58 @@ const App = {
 
         // Initialize first state
         history.replaceState({ viewId: 'view-dashboard' }, "", "#dashboard");
+
+        // Service Worker Management (Mashawiri Style)
+        this.initServiceWorker();
     },
+
+    initServiceWorker() {
+        if (!('serviceWorker' in navigator)) return;
+
+        navigator.serviceWorker.register('./sw.js').then(reg => {
+            console.log('SW: Registered.');
+
+            // Check for updates
+            reg.addEventListener('updatefound', () => {
+                const newWorker = reg.installing;
+                newWorker.addEventListener('statechange', () => {
+                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                        this.showUpdateBanner(reg);
+                    }
+                });
+            });
+
+            // If a worker is already waiting
+            if (reg.waiting) {
+                this.showUpdateBanner(reg);
+            }
+        });
+
+        // Listen for the skipWaiting trigger to reload
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (refreshing) return;
+            window.location.reload();
+            refreshing = true;
+        });
+    },
+
+    showUpdateBanner(registration) {
+        const banner = document.getElementById('update-banner');
+        if (banner) {
+            banner.classList.add('show');
+            this.waitingWorker = registration.waiting;
+        }
+    },
+
+    applyUpdate() {
+        if (this.waitingWorker) {
+            this.waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+        } else {
+            window.location.reload(); // Fallback
+        }
+    },
+
 
 
     async handleUserSession(user) {

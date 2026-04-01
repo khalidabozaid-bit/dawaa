@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'dawaa-cache-v9.6.0';
+const CACHE_NAME = 'dawaa-cache-v9.6.2';
 
 const ASSETS_TO_CACHE = [
   './',
@@ -34,7 +34,7 @@ self.addEventListener('install', (event) => {
       return cache.addAll(ASSETS_TO_CACHE);
     })
   );
-  self.skipWaiting(); // Basic skip for first install
+  // Removed self.skipWaiting() - Mashawiri Stability Protocol
 });
 
 self.addEventListener('message', (event) => {
@@ -55,7 +55,7 @@ self.addEventListener('activate', (event) => {
       );
     })
   );
-  self.clients.claim();
+  // self.clients.claim(); // Removed for stability
 });
 
 self.addEventListener('fetch', (event) => {
@@ -65,3 +65,4 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+

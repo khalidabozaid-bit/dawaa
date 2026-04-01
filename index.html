@@ -300,26 +300,7 @@
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
     <script type="module" src="js/app.js"></script>
     
-    <!-- Service Worker Registration -->
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js').then(reg => {
-                    console.log('Dawaa SW: Registered (v7.0.0)');
-                    
-                    // Detect Update
-                    reg.onupdatefound = () => {
-                        const newWorker = reg.installing;
-                        newWorker.onstatechange = () => {
-                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                console.log('Dawaa SW: New version found, reloading...');
-                                window.location.reload();
-                            }
-                        };
-                    };
-                }).catch(err => console.error('Dawaa SW Error:', err));
-            });
-        }
-    </script>
+    <!-- Navigation Logic managed by js/app.js -->
 </body>
 </html>
+

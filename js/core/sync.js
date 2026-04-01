@@ -46,7 +46,7 @@ export const Sync = {
                 syncCount++;
             }
             
-            UI.showToast(`تم مزامنة ${syncCount} صنف من السحابة ✨`, 'success');
+            console.log(`Sync: Pulled ${syncCount} items from cloud.`);
             if (window.App?.renderMasterData) window.App.renderMasterData();
         } catch (err) {
             console.warn('Sync Pull Failed:', err);
@@ -105,7 +105,7 @@ export const Sync = {
             // 5. Update local status to reflect successful sync
             await DB.put('medicineMaster', syncMed);
             
-            UI.showToast(`تم نشر "${med.nameEN}" بنجاح ☁️`, 'success');
+            console.log(`Sync: Pushed "${med.nameEN}" successfully.`);
             if (window.App?.renderMasterData) window.App.renderMasterData();
             
             // Re-pull to ensure absolute consistency
