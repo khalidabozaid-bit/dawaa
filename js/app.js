@@ -8,7 +8,7 @@ import { Sync } from './core/sync.js';
 import { auth, db, storage } from './core/firebase-config.js';
 
 /**
- * Dawaa App Orchestrator (v9.9.5 - Ironclad Sync)
+ * Dawaa App Orchestrator (v9.9.6 - Unified Visualizer)
  * Cloud Storage & Intelligent Push Enabled.
  */
 

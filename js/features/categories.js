@@ -117,11 +117,18 @@ export const Categories = {
     },
 
     getMedicineImage(med, options = {}) {
-        if (med && med.imagePath && med.imagePath.includes('base64')) {
+        if (!med || !med.imagePath || med.imagePath === '') {
+            return `assets/icons/default-med.png`; // Fallback
+        }
+        
+        // v9.9.6: Unified Visualizer - Support Base64 AND Cloud URLs
+        if (med.imagePath.startsWith('data:image') || med.imagePath.startsWith('http')) {
             return med.imagePath;
         }
-        return `assets/icons/default-med.png`; // Fallback path
+        
+        return `assets/icons/default-med.png`;
     },
+
 
     async deleteMedicine(id) {
         await DB.delete('medicineMaster', id);
