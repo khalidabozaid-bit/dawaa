@@ -3,7 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>دواء | Dawaa Inventory</title>
+    <title>دواء | Dawaa Medical Inventory</title>
+    
+    <!-- PWA & SEO -->
+    <meta name="description" content="نظام جرد وتتبع الأدوية والمستلزمات الطبية">
+    <meta name="theme-color" content="#3b82f6">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
     
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,20 +19,30 @@
     <!-- Icons -->
     <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
     
-    <!-- UI Styles -->
-    <link rel="stylesheet" href="css/inventory.css">
-    
-    <!-- PWA -->
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#ffffff">
-    <link rel="apple-touch-icon" href="assets/icon-192.png">
+    <!-- Modular CSS -->
+    <link rel="stylesheet" href="css/modules/base.css">
+    <link rel="stylesheet" href="css/modules/layout.css">
+    <link rel="stylesheet" href="css/modules/components.css">
+    <link rel="stylesheet" href="css/modules/views.css">
+    <link rel="stylesheet" href="css/modules/dark.css">
 </head>
 <body class="light-mode">
+
+    <!-- Update Notification (Mashawiri Style) -->
+    <div id="update-banner" class="update-banner">
+        <div class="banner-content container">
+            <div class="banner-text">
+                <i class='bx bx-cloud-download'></i>
+                <span>تحديث جديد متوفر لتحسين الأداء</span>
+            </div>
+            <button class="update-btn" onclick="window.App.applyUpdate()">تحديث الآن</button>
+        </div>
+    </div>
 
     <!-- App Header -->
     <header class="app-header">
         <div class="header-content container">
-            <div class="user-profile" onclick="openProfile()">
+            <div class="user-profile" onclick="window.App.openProfile()">
                 <div class="avatar"><i class='bx bxs-user-circle'></i></div>
                 <div class="user-info">
                     <span class="greeting">أهلاً بك،</span>
@@ -35,10 +51,10 @@
             </div>
             <div class="app-logo">
                 <i class='bx bxs-capsule'></i>
-                <h1>دواء</h1>
+                <h1>دواء <span style="font-size: 10px; opacity: 0.5">v7.0.0</span></h1>
             </div>
             <div class="header-actions">
-                <button class="icon-btn" onclick="toggleTheme()" title="تبديل الوضع">
+                <button class="icon-btn" onclick="window.toggleTheme()" title="تبديل الوضع">
                     <i class='bx bx-moon' id="theme-icon"></i>
                 </button>
             </div>
@@ -50,21 +66,21 @@
         <!-- Dashboard Overview -->
         <section id="view-dashboard" class="view active">
             <div class="stats-grid">
-                <div class="stat-card total">
+                <div class="stat-card total" onclick="switchView('view-inventory')">
                     <div class="stat-icon"><i class='bx bx-package'></i></div>
                     <div class="stat-data">
                         <span class="stat-value" id="stat-total-items">0</span>
                         <span class="stat-label">إجمالي المواد</span>
                     </div>
                 </div>
-                <div class="stat-card low-stock">
+                <div class="stat-card low-stock" onclick="window.App.showLowStock()">
                     <div class="stat-icon"><i class='bx bx-trending-down'></i></div>
                     <div class="stat-data">
                         <span class="stat-value" id="stat-low-stock">0</span>
                         <span class="stat-label">أرصدة منخفضة</span>
                     </div>
                 </div>
-                <div class="stat-card expiring">
+                <div class="stat-card expiring" onclick="window.App.showExpiring()">
                     <div class="stat-icon"><i class='bx bx-time-five'></i></div>
                     <div class="stat-data">
                         <span class="stat-value" id="stat-expiring-items">0</span>
@@ -73,73 +89,148 @@
                 </div>
             </div>
 
-            <!-- Quick Search Bar -->
-            <div class="search-section">
+            <!-- Global Search remains for quick access -->
+            <div class="search-section mt-20">
                 <div class="search-bar">
                     <i class='bx bx-search'></i>
-                    <input type="text" id="global-search" placeholder="ابحث بالاسم أو المادة الفعالة..." oninput="handleSearch(this.value)">
+                    <input type="text" id="global-search" placeholder="بحث سريع عن أي دواء..." oninput="handleSearch(this.value)">
                 </div>
             </div>
+        </section>
 
-            <!-- Inventory Lists Container -->
-            <div class="list-section">
-                <div class="section-header">
-                    <h2>الجرد الأخير</h2>
-                    <button class="text-btn" onclick="switchView('view-inventory')">رؤية الكل</button>
+        <!-- Smart Inventory View (The Active Entry Hub) -->
+        <section id="view-smart-inventory" class="view">
+            <div class="view-header">
+                <h2>الجرد الذكي</h2>
+                <p class="text-muted">اختر القسم لبدء إضافة الكمية</p>
+            </div>
+            
+            <div id="category-grid" class="category-grid mt-20">
+                <!-- Dynamic Categories Rendered Here -->
+            </div>
+        </section>
+
+        <!-- Inventory List View -->
+        <section id="view-inventory" class="view">
+            <div class="view-header">
+                <h2>تقارير الجرد والإحصائيات</h2>
+            </div>
+            
+            <div class="reports-grid">
+                <div class="report-card" onclick="window.App.renderInventory('detailed')">
+                    <div class="report-icon primary"><i class='bx bx-list-ul'></i></div>
+                    <div class="report-info">
+                        <h3>تقرير الجرد الكامل</h3>
+                        <p>تصدير كافة بيانات المخزون الحالية</p>
+                    </div>
                 </div>
-                <div id="dashboard-inventory-list" class="items-list">
-                    <!-- Dynamic Items Here -->
-                    <div class="empty-state">
-                        <i class='bx bx-layer-plus'></i>
-                        <p>ابدأ عملية الجرد الأولى الآن</p>
+                
+                <div class="report-card" onclick="window.App.renderInventory('expiry')">
+                    <div class="report-icon warning"><i class='bx bx-time-five'></i></div>
+                    <div class="report-info">
+                        <h3>تقرير نواقص الصلاحية</h3>
+                        <p>الأدوية التي تنتهي خلال 6 أشهر</p>
+                    </div>
+                </div>
+                
+                <div class="report-card" onclick="window.App.renderInventory('low-stock')">
+                    <div class="report-icon danger"><i class='bx bx-trending-down'></i></div>
+                    <div class="report-info">
+                        <h3>تقرير الأصناف الناقصة</h3>
+                        <p>الأدوية التي رصيدها أقل من 5</p>
                     </div>
                 </div>
             </div>
-        </section>
 
-        <!-- Inventory View -->
-        <section id="view-inventory" class="view">
-            <div class="view-header">
-                <h2>إدارة المخزون الكلي</h2>
-                <div class="view-toggle">
-                    <button class="toggle-btn active" onclick="window.switchInventoryTab('detailed')">تفصيلي</button>
-                    <button class="toggle-btn" onclick="window.switchInventoryTab('aggregated')">تجميعي</button>
-                </div>
-            </div>
-            <div id="inventory-items-list" class="items-list">
-                <!-- Data populated via app.js -->
-            </div>
-        </section>
-
-        <!-- Emergency View -->
-        <section id="view-emergency" class="view">
-            <div class="view-header">
-                <h2>🚨 جرد أدوية الطوارئ</h2>
-                <span class="badge danger">عالي الأهمية</span>
-            </div>
-            <div id="emergency-items-list" class="items-list"></div>
-        </section>
-
-        <!-- Supplies View -->
-        <section id="view-supplies" class="view">
-            <div class="view-header">
-                <h2>📦 جرد المستلزمات الطبية</h2>
-            </div>
-            <div id="supplies-items-list" class="items-list"></div>
+            <!-- Toggle removed as we now have direct cards for each type -->
+            <div id="inventory-items-list" class="items-list mt-20"></div>
         </section>
 
         <!-- Master Data View -->
         <section id="view-master" class="view">
             <div class="view-header">
-                <h2>⚙️ مستودع البيانات الأساسي</h2>
-                <button class="btn-primary sm-btn" onclick="window.openAddMasterItem()">إضافة بند جديد</button>
+                <h2>مستودع الأصناف</h2>
+                <div class="header-btns">
+                    <button class="btn-secondary sm-btn" onclick="window.App.openManageCategories()">إدارة الأقسام</button>
+                    <button class="btn-primary sm-btn" onclick="window.App.openAddMedicine()">إضافة دواء</button>
+                </div>
+            </div>
+            <div class="search-bar mb-20">
+                <i class='bx bx-search'></i>
+                <input type="text" id="master-search" placeholder="ابحث في المستودع..." oninput="window.App.handleMasterSearch(this.value)">
             </div>
             <div id="master-items-list" class="items-list"></div>
         </section>
 
-        <!-- Reports & Export View -->
-        <section id="view-reports" class="view">
-            <!-- Content for exporting to Excel -->
+        <!-- Settings View (Mashawiri Style) -->
+        <section id="view-settings" class="view">
+            <div class="view-header"><h2>الإعدادات والنظام</h2></div>
+            <div class="settings-grid">
+                <div class="setting-card primary-accent" onclick="window.switchView('master')">
+                    <div class="setting-icon bg-sync"><i class='bx bx-database'></i></div>
+                    <div class="setting-info">
+                        <h3>قاعدة البيانات (Database)</h3>
+                        <p>إدارة أصناف الأدوية، الإضافة والتعديل</p>
+                    </div>
+                </div>
+                <div class="setting-card" onclick="window.App.openSyncHub()">
+                    <div class="setting-icon bg-sync"><i class='bx bx-cloud-sync'></i></div>
+                    <div class="setting-info">
+                        <h3>مركز المزامنة السحابية</h3>
+                        <p id="sync-status-text">غير متصل - (نسخة محلية)</p>
+                    </div>
+                </div>
+                <div class="setting-card" onclick="window.App.handleAdminUnlock()">
+                    <div class="setting-icon bg-admin"><i class='bx bx-shield-quarter' id="admin-icon"></i></div>
+                    <div class="setting-info">
+                        <h3 id="admin-status-text">تفعيل وضع المدير</h3>
+                        <p>للمراجعة والاعتماد والنشر العالمي</p>
+                    </div>
+                </div>
+                <!-- Backup & Restore -->
+                <div class="setting-card" onclick="window.App.handleBackup()">
+                    <div class="setting-icon bg-primary"><i class='bx bx-cloud-upload'></i></div>
+                    <div class="setting-info">
+                        <h3>نسخة احتياطية (Backup)</h3>
+                        <p>تصدير كافة البيانات في ملف واحد</p>
+                    </div>
+                </div>
+                <div class="setting-card" onclick="document.getElementById('restore-input').click()">
+                    <div class="setting-icon bg-warning"><i class='bx bx-cloud-download'></i></div>
+                    <div class="setting-info">
+                        <h3>استعادة البيانات (Restore)</h3>
+                        <p>رفع ملف بيانات سابق محفوظ</p>
+                        <input type="file" id="restore-input" style="display:none" accept=".dawaa" onchange="window.App.handleRestore(this)">
+                    </div>
+                </div>
+                <!-- System Utility -->
+                <div class="setting-card" onclick="window.App.fullReset()">
+                    <div class="setting-icon bg-danger-light"><i class='bx bx-reset'></i></div>
+                    <div class="setting-info">
+                        <h3 class="text-danger">إعادة ضبط المصنع</h3>
+                        <p>حذف كافة البيانات والبدء من جديد</p>
+                    </div>
+                </div>
+                <div class="setting-card" onclick="window.App.checkUpdate()">
+                    <div class="setting-icon bg-info"><i class='bx bx-refresh'></i></div>
+                    <div class="setting-info">
+                        <h3>تحديث النظام</h3>
+                        <p>البحث عن إصدارات جديدة متوفرة</p>
+                    </div>
+                </div>
+                <div class="setting-card" onclick="window.toggleTheme()">
+                    <div class="setting-icon"><i class='bx bx-moon' id="settings-theme-icon"></i></div>
+                    <div class="setting-info">
+                        <h3>مظهر التطبيق</h3>
+                        <p>تبديل بين الوضع الليلي والنهاري</p>
+                    </div>
+                </div>
+            </div>
+            <div class="version-footer">
+                <p>دواء للمستودعات الذكية - v7.0.0</p>
+                <p style="font-size: 9px; opacity: 0.6">تم تحديث نظام الأكواد العالمي (1001)</p>
+                <p>Mashawiri Protocol Standards</p>
+            </div>
         </section>
     </main>
 
@@ -147,34 +238,61 @@
     <nav class="bottom-nav">
         <div class="nav-content container">
             <button class="nav-item active" data-target="dashboard">
-                <i class='bx bxs-dashboard'></i>
+                <i class='bx bxs-home-circle'></i>
                 <span>الرئيسية</span>
             </button>
-            <button class="nav-item" data-target="inventory">
-                <i class='bx bx-list-ul'></i>
-                <span>الجرد</span>
+            <button class="nav-item" data-target="smart-inventory">
+                <i class='bx bxs-category'></i>
+                <span>الجرد الذكي</span>
             </button>
             <div class="nav-action-btn">
-                <button id="btn-quick-add" onclick="openQuickAdd()">
+                <button id="btn-quick-add" onclick="window.App.openQuickAdd()">
                     <i class='bx bx-plus'></i>
                 </button>
             </div>
-            <button class="nav-item" data-target="master">
-                <i class='bx bx-database'></i>
-                <span>البيانات</span>
+            <button class="nav-item" data-target="inventory">
+                <i class='bx bxs-file-doc'></i>
+                <span>التقارير</span>
             </button>
-            <button class="nav-item" data-target="reports">
-                <i class='bx bxs-file-export'></i>
-                <span>الإكسيل</span>
+            <button class="nav-item" data-target="settings">
+                <i class='bx bxs-cog'></i>
+                <span>الإعدادات</span>
             </button>
         </div>
     </nav>
 
-    <!-- Modals & Sheets -->
+    <!-- Modals Overlay -->
     <div id="modal-container" class="modal-overlay"></div>
 
-    <!-- Scripts -->
+    <!-- Firebase SDK (Compat v10) -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+
+    <!-- App Scripts -->
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
     <script type="module" src="js/app.js"></script>
+    
+    <!-- Service Worker Registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').then(reg => {
+                    console.log('Dawaa SW: Registered (v7.0.0)');
+                    
+                    // Detect Update
+                    reg.onupdatefound = () => {
+                        const newWorker = reg.installing;
+                        newWorker.onstatechange = () => {
+                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                console.log('Dawaa SW: New version found, reloading...');
+                                window.location.reload();
+                            }
+                        };
+                    };
+                }).catch(err => console.error('Dawaa SW Error:', err));
+            });
+        }
+    </script>
 </body>
 </html>

@@ -1,196 +1,280 @@
 // js/app.js
-import { DB } from './db.js';
-import { UI } from './ui.js';
+import { DB } from './core/db.js';
+import { UI } from './core/ui.js';
+import { Inventory } from './features/inventory.js';
+import { Categories } from './features/categories.js';
+import { Exporter } from './features/export.js';
+import { Utils } from './core/utils.js';
+import { Sync } from './core/sync.js';
 
 /**
- * Dawaa App Controller
- * Main business logic and data orchestration.
+ * Dawaa App Orchestrator (v6.1 - Cloud Edition)
+ * Master Data Sync & Admin Control Enabled.
  */
 
 const App = {
+    inventoryTab: 'detailed',
+
     async init() {
+        console.log('Dawaa App: Rebooting system...');
+        
+        // Immediate Global Exposure
+        window.App = App;
+        window.UI = UI;
+
         try {
             await DB.init();
+
+            // Native Initialization (v6.6.0)
+            await Categories.seedInitialData();
+            
             UI.init();
-            this.setupAppListeners();
             this.renderDashboard();
             this.registerServiceWorker();
-            console.log('Dawaa App: Initialized successfully.');
+            this.updateAdminUI();
+            this.updateSyncStatusUI();
+            
+            // Background Sync (v6.1 Pull)
+            Sync.pull();
+            
+            console.log('Dawaa App: Ready (v6.6.0).');
         } catch (err) {
-            console.error('Dawaa App: Init failed.', err);
+            console.error('Dawaa App: Boot Conflict:', err);
+            if (typeof UI !== 'undefined' && UI.showToast) {
+                UI.showToast(`خطأ في التشغيل: ${err.message}`, 'danger');
+            }
         }
     },
 
     registerServiceWorker() {
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js')
-                .then(() => console.log('SW Registered'))
-                .catch(err => console.error('SW Registration Failed', err));
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').then(reg => {
+                    console.log('SW: Registered.');
+                }).catch(err => console.error('SW: Registration Error.', err));
+            });
         }
     },
 
-    setupAppListeners() {
-        // App is already global, no need to re-assign if done at top-level
-        console.log('Dawaa App: App listeners configured.');
+    showUpdateBanner() {
+        const banner = document.getElementById('update-banner');
+        if (banner) banner.classList.add('show');
     },
 
-    async handleFilteredExport() {
-        const location = document.getElementById('export-filter-location').value;
-        const type = document.getElementById('export-filter-type').value;
-        this.exportToExcel('custom', { location, type });
-    },
-
-    inventoryTab: 'detailed',
-    async switchInventoryTab(tab) {
-        this.inventoryTab = tab;
-        const btns = document.querySelectorAll('.toggle-btn');
-        btns.forEach(b => b.classList.toggle('active', (tab === 'detailed' && b.innerText.includes('تفصيلي')) || (tab === 'aggregated' && b.innerText.includes('تجميعي'))));
-        
-        const inventory = await DB.getAll('inventory');
-        this.renderInventoryList(inventory, 'inventory-items-list', false, tab === 'aggregated');
-    },
-
-    async handleGlobalSearch(query) {
-        if (!query) {
-            this.renderDashboard();
-            return;
-        }
-        
-        const inventory = await DB.getAll('inventory');
-        const masterData = await DB.getAll('medicineMaster');
-        const masterMap = new Map(masterData.map(m => [m.id, m]));
-        
-        const lowQuery = query.toLowerCase();
-        const filtered = inventory.filter(item => {
-            const master = masterMap.get(item.medicineId);
-            if (!master) return false;
-            return (master.nameEN && master.nameEN.toLowerCase().includes(lowQuery)) || 
-                   (master.nameAR && master.nameAR.includes(query)) ||
-                   (master.activeIngredient && master.activeIngredient.toLowerCase().includes(lowQuery));
-        });
-
-        this.renderInventoryList(filtered, 'dashboard-inventory-list', false);
-    },
-
-    // --- Master Data (Medicines & Supplies Registry) ---
-
-    async addMasterItem(data) {
-        // data: { id, nameEN, nameAR, activeIngredient, type }
-        if (!data.id) data.id = crypto.randomUUID();
-        await DB.add('medicineMaster', data);
-        UI.showToast(`تمت إضافة "${data.nameAR}" بنجاح`, 'success');
-    },
-
-    async getMasterSuggestions(query) {
-        if (!query || query.length < 1) return [];
-        const all = await DB.getAll('medicineMaster');
-        const lowQuery = query.toLowerCase();
-        
-        return all.filter(m => 
-            (m.nameEN && m.nameEN.toLowerCase().startsWith(lowQuery)) || 
-            (m.nameAR && m.nameAR.startsWith(query)) ||
-            (m.activeIngredient && m.activeIngredient.toLowerCase().includes(lowQuery))
-        ).slice(0, 10); // Limit results for performance
-    },
-
-    // --- Inventory Management ---
-
-    async addInventoryEntry(entry) {
-        // entry: { id, medicineId, location, quantity, expiryDate, type }
-        if (!entry.id) entry.id = crypto.randomUUID();
-        await DB.add('inventory', entry);
-        UI.showToast('تم تسجيل الجرد بنجاح', 'success');
-        this.renderDashboard();
-    },
-
-    async deleteInventoryEntry(id) {
-        if (confirm('هل أنت متأكد من رغبتك في حذف هذا السجل؟')) {
-            await DB.delete('inventory', id);
-            UI.showToast('تم الحذف بنجاح', 'info');
-            this.renderDashboard();
-            // Also re-render current view if not dashboard
-            if (UI.currentView !== 'dashboard') {
-                UI.renderCurrentView();
-            }
+    applyUpdate() {
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistration().then(reg => {
+                if (reg && reg.waiting) {
+                    reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                }
+            });
+            window.location.reload();
         }
     },
 
     // --- View Renderers ---
 
     async renderDashboard() {
-        const totalItemsEl = document.getElementById('stat-total-items');
-        const expiringItemsEl = document.getElementById('stat-expiring-items');
-        const lowStockEl = document.getElementById('stat-low-stock'); // We will add this to HTML
-        
-        const inventory = await DB.getAll('inventory');
-        if (totalItemsEl) totalItemsEl.textContent = inventory.length;
+        try {
+            const inventory = await DB.getAll('inventory');
+            const sixMonthsAway = new Date();
+            sixMonthsAway.setMonth(sixMonthsAway.getMonth() + 6);
 
-        // Logic for expiring and low stock
-        const today = new Date();
-        const threeMos = new Date(); threeMos.setMonth(threeMos.getMonth() + 3);
-        const sixMos = new Date(); sixMos.setMonth(sixMos.getMonth() + 6);
+            const stats = {
+                totalItems: inventory.length,
+                lowStockCount: inventory.filter(i => i.quantity <= 5).length,
+                expiringCount: inventory.filter(i => i.expiryDate && new Date(i.expiryDate) <= sixMonthsAway).length
+            };
 
-        const expiringCount = inventory.filter(i => i.expiryDate && new Date(i.expiryDate) < sixMos).length;
-        const lowStockCount = inventory.filter(i => (parseInt(i.quantity) || 0) < 5).length; // Assumption: 5 is threshold
-
-        if (expiringItemsEl) expiringItemsEl.textContent = expiringCount;
-        if (lowStockEl) lowStockEl.textContent = lowStockCount;
-
-        this.renderInventoryList(inventory, 'dashboard-inventory-list', true);
+            UI.updateDashboardStats(stats);
+            // Categories and Inventory list removed from dashboard for a 'Clean' look (v6.3)
+        } catch (err) {
+            console.error(err);
+        }
     },
 
-    async renderInventoryList(items, containerId, limit = false, aggregate = false) {
+    async renderInventory(type = 'detailed') {
+        try {
+            const container = document.getElementById('inventory-items-list');
+            if (!container) return;
+            
+            let data = await DB.getAll('inventory');
+            let isAggregated = false;
+            
+            if (type === 'expiry') {
+                const sixMonthsFromNow = new Date();
+                sixMonthsFromNow.setMonth(sixMonthsFromNow.getMonth() + 6);
+                data = data.filter(i => i.expiryDate && new Date(i.expiryDate) <= sixMonthsFromNow);
+            } else if (type === 'low-stock') {
+                data = await Inventory.getAggregatedStock();
+                data = data.filter(i => (i.totalQuantity || 0) <= 5);
+                isAggregated = true;
+            } else {
+                // Professional Alphabetical Sort (v6.6.2)
+                data.sort((a, b) => {
+                    const nameA = (masterMap.get(a.medicineId || a.id)?.nameEN || '').toLowerCase();
+                    const nameB = (masterMap.get(b.medicineId || b.id)?.nameEN || '').toLowerCase();
+                    return nameA.localeCompare(nameB);
+                });
+            }
+
+            this.renderReportData(data, container, isAggregated);
+        } catch (err) {
+            console.error(err);
+        }
+    },
+
+    async renderReportData(data, container, isAggregated = false) {
+        try {
+            const masterData = await DB.getAll('medicineMaster');
+            const masterMap = new Map(masterData.map(m => [m.id, m]));
+            
+            if (data.length === 0) {
+                container.innerHTML = '<div class="empty-state">لا يوجد بيانات لهذا التقرير</div>';
+                return;
+            }
+
+            container.innerHTML = data.map(item => {
+                const med = masterMap.get(item.medicineId || item.id);
+                if (!med) return '';
+                
+                const qty = isAggregated ? item.totalQuantity : item.quantity;
+                const loc = item.location || 'تجميعي';
+                const exp = isAggregated ? item.earliestExpiry : item.expiryDate;
+                
+                // Expiry styling
+                const isExpiring = exp && new Date(exp) <= new Date(new Date().setMonth(new Date().getMonth() + 6));
+                
+                return `
+                    <div class="report-result-card ${qty <= 5 ? 'border-danger' : ''}">
+                        <div class="result-header">
+                            <span class="badge ${loc === 'مخزن' ? 'bg-info' : 'bg-success'}">${loc}</span>
+                            <span class="qty-badge">${qty} قطعة</span>
+                        </div>
+                        <div class="result-body">
+                            <h3>${med.nameEN} <span class="ar-name">/ ${med.nameAR || ''}</span></h3>
+                            <div class="result-meta">
+                                <span><i class='bx bx-barcode'></i> كود: ${med.id}</span>
+                                ${exp ? `<span class="${isExpiring ? 'text-danger fw-800' : ''}">
+                                    <i class='bx bx-time-five'></i> انتهاء: ${exp}
+                                </span>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } catch (err) {
+            console.error(err);
+        }
+    },
+
+    async renderSmartInventory() {
+        try {
+            this.renderCategoriesGrid();
+        } catch (err) {
+            console.error(err);
+        }
+    },
+
+    async renderMasterData() {
+        try {
+            const container = document.getElementById('master-items-list');
+            if (!container) return;
+
+            const master = await DB.getAll('medicineMaster');
+            const cats = await Categories.getAllSorted();
+            const catMap = new Map(cats.map(c => [c.id, c]));
+
+            if (master.length === 0) {
+                container.innerHTML = '<div class="empty-state"><p>لا يوجد بيانات أدوية</p></div>';
+                return;
+            }
+
+            container.innerHTML = master.sort((a, b) => (a.id || '').localeCompare(b.id || '')).map(m => {
+                const cat = catMap.get(m.categoryId) || { nameAR: m.categoryId, icon: 'bx-package', color: '#64748b' };
+                const hasImg = m.imagePath && m.imagePath.includes('base64');
+                const isGlobal = m.syncStatus === 'global';
+                const isAdmin = this.userRole === 'admin';
+                
+                return `
+                    <div class="inventory-card ${isGlobal ? 'status-safe' : 'status-warning'}">
+                        <span class="sync-badge ${isGlobal ? 'global' : 'local'}">
+                            <i class='bx ${isGlobal ? 'bx-cloud-check' : 'bx-time-five'}'></i>
+                        </span>
+                        <div class="card-img">
+                            ${hasImg ? `<img src="${m.imagePath}">` : `<div class="default-med-icon mini"><i class='bx bx-capsule'></i></div>`}
+                        </div>
+                        <div class="card-info">
+                            <h3>${m.nameEN} <span class="ar-name">/ ${m.nameAR || ''}</span></h3>
+                            <div class="card-meta">
+                                <span><i class='bx bx-barcode'></i> ${m.id}</span>
+                                <span><i class='bx bx-purchase-tag-alt'></i> ${cat.nameAR}</span>
+                            </div>
+                        </div>
+                        <div class="card-actions-float">
+                            ${isAdmin && !isGlobal ? `<button class="icon-btn sync-btn" onclick="window.Sync.push('${m.id}')" title="نشر عالمي"><i class='bx bx-cloud-upload'></i></button>` : ''}
+                            <button class="icon-btn" onclick="window.App.openEditMedicine('${m.id}')"><i class='bx bx-edit-alt'></i></button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } catch (err) {
+            console.error(err);
+        }
+    },
+
+    async renderCategoriesGrid() {
+        try {
+            const container = document.getElementById('category-grid');
+            if (!container) return;
+
+            const categories = await Categories.getAllSorted();
+            
+            container.innerHTML = categories.map(cat => {
+                return `
+                    <div class="category-card" onclick="window.App.openCategory('${cat.id}')">
+                        <div class="category-icon" style="background: ${cat.color}"><i class='bx ${cat.icon}'></i></div>
+                        <span>${cat.nameAR}</span>
+                    </div>
+                `;
+            }).join('');
+        } catch (err) {
+            console.error(err);
+        }
+    },
+
+    async renderInventoryList(items, containerId, isAggregated = false) {
         const container = document.getElementById(containerId);
         if (!container) return;
 
         if (items.length === 0) {
-            container.innerHTML = `<div class="empty-state"><i class='bx bx-layer-plus'></i><p>لا يوجد جرد حالياً</p></div>`;
+            container.innerHTML = '<div class="empty-state"><i class="bx bx-package"></i><p>لا توجد سجلات حالياً</p></div>';
             return;
         }
 
-        let displayItems = limit ? items.slice(-5).reverse() : items;
-        
-        // Load master info for each item to show names
         const masterData = await DB.getAll('medicineMaster');
         const masterMap = new Map(masterData.map(m => [m.id, m]));
 
-        if (aggregate) {
-            const aggregated = new Map();
-            items.forEach(item => {
-                const key = item.medicineId;
-                if (!aggregated.has(key)) {
-                    aggregated.set(key, { ...item, quantity: 0, locations: new Set(), expiries: [] });
-                }
-                const entry = aggregated.get(key);
-                entry.quantity += parseInt(item.quantity) || 0;
-                entry.locations.add(item.location);
-                if (item.expiryDate) entry.expiries.push(item.expiryDate);
-            });
-            displayItems = Array.from(aggregated.values()).map(e => ({
-                ...e,
-                location: Array.from(e.locations).join('، '),
-                expiryDate: e.expiries.sort()[0] || 'N/A' // Show earliest expiry
-            }));
-        }
-
-        container.innerHTML = displayItems.map(item => {
-            const master = masterMap.get(item.medicineId) || { nameAR: 'غير معروف', nameEN: 'Unknown' };
-            const expiryStatus = this.getExpiryStatus(item.expiryDate);
+        container.innerHTML = items.map(item => {
+            const master = isAggregated ? item : masterMap.get(item.medicineId);
+            if (!master) return '';
+            
+            const exp = Utils.getExpiryStatus(isAggregated ? item.earliestExpiry : item.expiryDate);
             
             return `
-                <div class="inventory-card ${expiryStatus.class}">
-                    <div class="card-icon"><i class='bx ${item.type === 'supply' ? 'bx-plug' : 'bx-capsule'}'></i></div>
+                <div class="inventory-card ${exp.class}">
+                    <div class="card-icon"><i class='bx ${master.type === 'supply' ? 'bx-plug' : 'bx-capsule'}'></i></div>
                     <div class="card-info">
-                        <h3>${master.nameEN} <span class="ar-name">/ ${master.nameAR}</span></h3>
+                        <h3>${master.nameEN}</h3>
                         <div class="card-meta">
-                            <span><i class='bx bx-map-pin'></i> ${item.location}</span>
-                            <span><i class='bx bx-purchase-tag-alt'></i> ${item.quantity}</span>
+                            <span><i class='bx bx-map-pin'></i> ${isAggregated ? 'أماكن متعددة' : item.location}</span>
+                            <span><i class='bx bx-purchase-tag-alt'></i> ${isAggregated ? item.totalQuantity : item.quantity}</span>
                         </div>
                     </div>
                     <div class="card-expiry">
-                        <span class="expiry-date">${item.expiryDate || 'N/A'} ${aggregate ? '📅' : ''}</span>
+                        <span class="expiry-date">${isAggregated ? (item.earliestExpiry || 'N/A') : (item.expiryDate || 'N/A')}</span>
                         <div class="card-actions">
-                            ${!aggregate ? `<button class="icon-btn delete-btn" onclick="window.deleteEntry('${item.id}')"><i class='bx bx-trash'></i></button>` : ''}
+                            ${!isAggregated ? `<button class="icon-btn delete-btn" onclick="window.App.deleteEntry('${item.id}')"><i class='bx bx-trash'></i></button>` : ''}
                         </div>
                     </div>
                 </div>
@@ -198,219 +282,791 @@ const App = {
         }).join('');
     },
 
-    getExpiryStatus(dateStr) {
-        if (!dateStr) return { class: '', label: 'بدون تاريخ' };
-        const expiry = new Date(dateStr);
-        const today = new Date();
-        
-        // Accurate month diff
-        const diffTime = expiry - today;
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        const diffMonths = diffDays / 30;
+    // --- Dialogs (Standardized UI) ---
 
-        if (diffTime < 0) return { class: 'status-expired', label: 'منتهي الصلاحية' };
-        if (diffMonths < 3) return { class: 'status-critical', label: 'حرج (< 3 شهور)' };
-        if (diffMonths < 6) return { class: 'status-warning', label: 'تنبيه (< 6 شهور)' };
-        
-        return { class: 'status-safe', label: 'سليم الصلاحية' };
+    async openCategory(catId) {
+        try {
+            const medicines = await Categories.getMedicinesByCategoryId(catId);
+            const info = await Categories.getInfo(catId);
+
+            UI.showModal(`
+                <div class="modal-header">
+                    <h2>${info.nameAR}</h2>
+                    <div class="header-btns">
+                        <button class="btn-primary sm-btn" onclick="window.App.openTransferMedicine('${catId}')">➕ إضافة / نقل</button>
+                    </div>
+                </div>
+                <div class="medicine-selection-grid">
+                    ${medicines.map(m => {
+                        const hasImage = m.imagePath && m.imagePath.includes('base64');
+                        const imgSrc = hasImage ? m.imagePath : '';
+                        return `
+                            <div class="med-card-btn" onclick="window.App.openEntryForm('${m.id}')">
+                                <div class="med-image">
+                                    ${hasImage ? `<img src="${imgSrc}">` : `<div class="default-med-icon"><i class='bx bx-capsule'></i></div>`}
+                                </div>
+                                <div class="med-info-overlay">
+                                    <h4>${m.nameEN} <span class="med-id-badge">#${m.id}</span></h4>
+                                    <span class="med-active-sub">${m.activeIngredient || ''}</span>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                ${medicines.length === 0 ? '<p class="text-center p-20">لا توجد أدوية في هذا القسم حالياً</p>' : ''}
+                <div class="form-actions mt-20">
+                    <button class="btn-ghost" onclick="window.UI.closeModal()">إغلاق</button>
+                </div>
+            `);
+        } catch (err) {
+            UI.showToast('فشل فتح القسم', 'danger');
+        }
     },
 
-    // --- Modals Flows ---
+    async openTransferMedicine(targetCatId) {
+        try {
+            const allMeds = await DB.getAll('medicineMaster');
+            const medicines = allMeds
+                .filter(m => m.categoryId === catId)
+                .sort((a, b) => (a.nameEN || '').localeCompare(b.nameEN || '')); // Alphabetic Sort (v6.6.2)
+            const targetCat = await Categories.getInfo(targetCatId);
+            
+            UI.showModal(`
+                <div class="modal-header">
+                    <h2>نقل صنف إلى: ${targetCat.nameAR}</h2>
+                </div>
+                <div class="search-bar mb-20">
+                    <i class='bx bx-search'></i>
+                    <input type="text" placeholder="ابحث باسم الدواء لنقله..." oninput="window.App.handleTransferSearch(this.value, '${targetCatId}')">
+                </div>
+                <div id="transfer-search-results" class="items-list mini">
+                    <p class="text-center p-20 text-muted">ابحث عن الدواء لنقله لهذا القسم</p>
+                </div>
+                <div class="form-actions mt-20">
+                    <button class="btn-primary" onclick="window.App.openAddMedicineWithCat('${targetCatId}')">إضافة دواء جديد تماماً</button>
+                    <button class="btn-ghost" onclick="window.App.openCategory('${targetCatId}')">رجوع</button>
+                </div>
+            `);
+        } catch (err) {
+            UI.showToast('فشل فتح نافذة النقل', 'danger');
+        }
+    },
 
-    openQuickAddStock() {
+    async handleTransferSearch(val, targetCatId) {
+        if (!val) { document.getElementById('transfer-search-results').innerHTML = '<p class="text-center p-20 text-muted">ابحث عن الدواء لنقله لهذا القسم</p>'; return; }
+        try {
+            const results = await Categories.searchMaster(val);
+            const container = document.getElementById('transfer-search-results');
+            if (!container) return;
+
+            // Filter and Sort (v6.6.2)
+            const filtered = results
+                .filter(m => m.categoryId !== targetCatId)
+                .sort((a, b) => (a.nameEN || '').localeCompare(b.nameEN || ''));
+            
+            container.innerHTML = filtered.slice(0, 10).map(m => `
+                <div class="search-result-item" onclick="window.App.executeTransfer('${m.id}', '${targetCatId}')">
+                    <i class='bx bx-transfer-alt'></i>
+                    <div class="search-info">
+                        <span class="search-name">${m.nameEN} (كود #${m.id})</span>
+                        <span class="search-sub">من قسم: ${m.categoryId}</span>
+                    </div>
+                    <button class="sm-btn btn-secondary">سحب للقسم</button>
+                </div>
+            `).join('');
+            
+            if (filtered.length === 0) container.innerHTML = '<p class="text-center p-20">لا توجد نتائج أو الدواء موجود بالفعل هنا</p>';
+        } catch (err) {
+            console.error(err);
+        }
+    },
+
+    async executeTransfer(medicineId, targetCatId) {
+        try {
+            const med = await DB.get('medicineMaster', medicineId);
+            if (!med) return;
+            
+            med.categoryId = targetCatId;
+            await DB.put('medicineMaster', med);
+            
+            UI.showToast(`تم نقل ${med.nameEN} بنجاح`, 'success');
+            this.openCategory(targetCatId); // Refresh category view
+        } catch (err) {
+            UI.showToast('فشل عملية النقل', 'danger');
+        }
+    },
+
+    openAddMedicineWithCat(catId) {
+        this.openAddMedicine();
+        // Set the select value after modal renders
+        setTimeout(() => {
+            const sel = document.getElementById('m-category');
+            if (sel) sel.value = catId;
+        }, 100);
+    },
+
+    async openEntryForm(medicineId) {
+        try {
+            const med = await DB.get('medicineMaster', medicineId);
+            UI.showModal(`
+                <div class="sheet-handle"></div>
+                <div class="modal-header"><h2>إضافة جرد جديد ( Stock Entry )</h2></div>
+                <form id="form-inventory" onsubmit="event.preventDefault(); window.App.saveEntry('${medicineId}');">
+                    <div class="form-group">
+                        <label class="form-label">ابحث عن الدواء/المستلزم:</label>
+                        <input type="text" class="form-input" value="${med.nameEN}" readonly>
+                        <button type="button" class="text-btn" style="text-align:right" onclick="window.App.openAddMedicine()">+ غير مسجل؟ أضفه الآن</button>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">المكان:</label>
+                            <input type="text" id="entry-location" class="form-input" placeholder="مثلاً: الثلاجة، الرف A" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">الكمية:</label>
+                            <input type="number" id="entry-qty" class="form-input" value="0" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">تاريخ الصلاحية:</label>
+                        <input type="month" id="entry-expiry" class="form-input" required>
+                    </div>
+
+                    <div class="form-actions mt-20">
+                        <button type="submit" class="btn-primary">حفظ الجرد</button>
+                        <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+                    </div>
+                </form>
+            `);
+        } catch (err) {
+            UI.showToast('خطأ في تحميل النموذج', 'danger');
+        }
+    },
+
+    async openAddMedicine() {
+        try {
+            const cats = await Categories.getAllSorted();
+            UI.showModal(`
+                <div class="sheet-handle"></div>
+                <div class="modal-header"><h2>إضافة بند جديد للمستودع</h2></div>
+                <form id="form-master-med" onsubmit="event.preventDefault(); window.App.saveMasterMedicine();">
+                    <div class="image-upload-wrap">
+                        <div class="image-preview" id="m-img-preview"><i class='bx bx-camera'></i></div>
+                        <label for="m-file" class="btn-upload-label">اختر صورة الدواء</label>
+                        <input type="file" id="m-file" accept="image/*" style="display:none" onchange="window.App.handleImagePreview(this, 'm-img-preview')">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">الاسم بالإنجليزية:</label>
+                        <input type="text" id="m-name-en" class="form-input" placeholder="e.g. Panadol Extra" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">الاسم بالعربية:</label>
+                        <input type="text" id="m-name-ar" class="form-input" placeholder="مثلاً: بنادول إكسترا">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">المادة الفعالة (اختياري):</label>
+                        <input type="text" id="m-active" class="form-input" placeholder="Paracetamol">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">فئة البند:</label>
+                        <select id="m-category" class="form-select" required>
+                            <option value="">اختر القسم...</option>
+                            ${cats.map(c => `<option value="${c.id}">${c.nameAR}</option>`).join('')}
+                        </select>
+                    </div>
+                    
+                    <div class="form-actions mt-20">
+                        <button type="submit" class="btn-primary">حفظ في المستودع</button>
+                        <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">رجوع للجرد</button>
+                    </div>
+                </form>
+            `);
+        } catch (err) {
+            UI.showToast('خطأ في النافذة', 'danger');
+        }
+    },
+
+    async openEditMedicine(id) {
+        try {
+            const med = await DB.get('medicineMaster', id);
+            const cats = await Categories.getAllSorted();
+            const currentImg = Categories.getMedicineImage(med, { icon: 'bx-capsule' });
+            
+            UI.showModal(`
+                <div class="sheet-handle"></div>
+                <div class="modal-header"><h2>تعديل صنف المستودع</h2></div>
+                <form id="form-edit-med" onsubmit="event.preventDefault(); window.App.updateMasterMedicine('${id}');">
+                    <div class="image-upload-wrap">
+                        <div class="image-preview" id="e-img-preview">
+                            <img src="${currentImg}" onerror="this.src='assets/icons/default-med.png'">
+                        </div>
+                        <label for="e-file" class="btn-upload-label">تغيير الصورة</label>
+                        <input type="file" id="e-file" accept="image/*" style="display:none" onchange="window.App.handleImagePreview(this, 'e-img-preview')">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">الاسم بالإنجليزية:</label>
+                        <input type="text" id="e-name-en" class="form-input" value="${med.nameEN}" placeholder="e.g. Panadol" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">الاسم (العربية):</label>
+                        <input type="text" id="e-name-ar" class="form-input" value="${med.nameAR || ''}">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">المادة الفعالة:</label>
+                        <input type="text" id="e-active" class="form-input" value="${med.activeIngredient || ''}">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">القسم:</label>
+                        <select id="e-category" class="form-select" required>
+                            ${cats.map(c => `<option value="${c.id}" ${c.id === med.categoryId ? 'selected' : ''}>${c.nameAR}</option>`).join('')}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">النوع:</label>
+                        <select id="e-type" class="form-select">
+                            <option value="medicine" ${med.type === 'medicine' ? 'selected' : ''}>دواء عادي</option>
+                            <option value="emergency" ${med.type === 'emergency' ? 'selected' : ''}>دواء طوارئ</option>
+                            <option value="supply" ${med.type === 'supply' ? 'selected' : ''}>مستلزم طبي</option>
+                        </select>
+                    </div>
+
+                    <div class="form-actions mt-20">
+                        <button type="submit" class="btn-primary">حفظ التعديلات</button>
+                        <button type="button" class="btn-ghost" style="color:var(--danger)" onclick="window.App.deleteMasterMedicine('${id}')">حذف الصنف نهائياً</button>
+                        <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+                    </div>
+                </form>
+            `);
+        } catch (err) {
+            UI.showToast('خطأ في التحميل', 'danger');
+        }
+    },
+
+    handleImagePreview(input, previewId) {
+        if (input.files && input.files[0]) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const container = document.getElementById(previewId);
+                container.innerHTML = `<img src="${e.target.result}">`;
+            };
+            reader.readAsDataURL(input.files[0]);
+        }
+    },
+
+    async saveMasterMedicine() {
+        try {
+            const fileInput = document.getElementById('m-file');
+            let imgData = '';
+            if (fileInput.files && fileInput.files[0]) {
+                imgData = await Utils.fileToBase64(fileInput.files[0]);
+            }
+
+            const data = {
+                nameEN: document.getElementById('m-name-en').value.trim(),
+                nameAR: document.getElementById('m-name-ar').value.trim(),
+                activeIngredient: document.getElementById('m-active').value.trim(),
+                categoryId: document.getElementById('m-category').value,
+                type: document.getElementById('m-type').value,
+                imagePath: imgData // Storing the base64 string
+            };
+
+            await Categories.saveMedicine(data);
+            UI.showToast('تمت إضافة الصنف بنجاح', 'success');
+            UI.closeModal();
+            this.renderMasterData();
+        } catch (err) {
+            UI.showToast('فشل حفظ الدواء', 'danger');
+        }
+    },
+
+    async updateMasterMedicine(id) {
+        try {
+            const fileInput = document.getElementById('e-file');
+            const med = await DB.get('medicineMaster', id);
+            
+            let imgData = med.imagePath;
+            if (fileInput.files && fileInput.files[0]) {
+                imgData = await Utils.fileToBase64(fileInput.files[0]);
+            }
+
+            const updated = {
+                ...med,
+                nameEN: document.getElementById('e-name-en').value.trim(),
+                nameAR: document.getElementById('e-name-ar').value.trim(),
+                activeIngredient: document.getElementById('e-active').value.trim(),
+                categoryId: document.getElementById('e-category').value,
+                type: document.getElementById('e-type').value,
+                imagePath: imgData
+            };
+            await Categories.saveMedicine(updated);
+            UI.showToast('تم التحديث بنجاح', 'info');
+            UI.closeModal();
+            this.renderMasterData();
+        } catch (err) {
+            UI.showToast('فشل تحديث البيانات', 'danger');
+        }
+    },
+
+    async deleteMasterMedicine(id) {
+        if (confirm('هل أنت متأكد؟ سيتم حذف الصنف من المستودع نهائياً.')) {
+            try {
+                await Categories.deleteMedicine(id);
+                UI.showToast('تم الحذف', 'info');
+                UI.closeModal();
+                this.renderMasterData();
+            } catch (err) {
+                UI.showToast(err.message, 'danger');
+            }
+        }
+    },
+
+    async saveEntry(medicineId) {
+        try {
+            const data = {
+                medicineId,
+                location: document.getElementById('entry-location').value.trim(),
+                quantity: parseFloat(document.getElementById('entry-qty').value) || 0,
+                expiryDate: document.getElementById('entry-expiry').value,
+                dateAdded: new Date().toISOString()
+            };
+
+            await Inventory.addEntry(data);
+            UI.showToast('تم حفظ الجرد بنجاح', 'success');
+            UI.closeModal();
+            UI.renderCurrentView();
+        } catch (err) {
+            UI.showToast('فشل حفظ الجرد', 'danger');
+        }
+    },
+
+    async deleteEntry(id) {
+        if (confirm('حذف هذا السجل؟')) {
+            try {
+                await Inventory.deleteEntry(id);
+                UI.renderCurrentView();
+                UI.showToast('تم الحذف', 'info');
+            } catch (err) {
+                UI.showToast('فشل الحذف', 'danger');
+            }
+        }
+    },
+
+    // --- Search & Utils ---
+
+    async handleGlobalSearch(query) {
+        if (!query) return this.renderDashboard();
+        try {
+            const inventory = await DB.getAll('inventory');
+            const masterData = await DB.getAll('medicineMaster');
+            const masterMap = new Map(masterData.map(m => [m.id, m]));
+            
+            const filtered = inventory.filter(i => {
+                const m = masterMap.get(i.medicineId);
+                return m && (
+                    m.nameEN.toLowerCase().includes(query.toLowerCase()) || 
+                    (m.nameAR && m.nameAR.includes(query)) ||
+                    (m.activeIngredient && m.activeIngredient.toLowerCase().includes(query.toLowerCase()))
+                );
+            });
+            this.renderInventoryList(filtered, 'dashboard-inventory-list');
+        } catch (err) {
+            console.error(err);
+        }
+    },
+
+    async handleMasterSearch(query) {
+        if (!query) return this.renderMasterData();
+        try {
+            const results = await Categories.searchMaster(query);
+            const container = document.getElementById('master-items-list');
+            if (!container) return;
+
+            const cats = await Categories.getAllSorted();
+            const catMap = new Map(cats.map(c => [c.id, c]));
+            
+            container.innerHTML = results.map(m => {
+                const cat = catMap.get(m.categoryId) || { nameAR: m.categoryId, icon: 'bx-package', color: '#ccc' };
+                const imgSrc = Categories.getMedicineImage(m, cat);
+                return `
+                    <div class="inventory-card">
+                        <div class="card-img mini"><img src="${imgSrc}" onerror="this.src='assets/icons/default-med.png'"></div>
+                        <div class="card-info">
+                            <h3>${m.nameEN}</h3>
+                            <p class="card-meta"><span>${m.activeIngredient || ''}</span></p>
+                        </div>
+                        <div class="card-actions-float">
+                            <button class="icon-btn" onclick="window.App.openEditMedicine('${m.id}')"><i class='bx bx-edit-alt'></i></button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } catch (err) {
+            console.error(err);
+        }
+    },
+
+    openQuickAdd() {
         UI.showModal(`
-            <div class="modal-header">
-                <h2>إضافة جرد جديد ( Stock Entry )</h2>
+            <div class="modal-header"><h2>جرد سريع</h2></div>
+            <div class="search-bar mb-20">
+                <i class='bx bx-search'></i>
+                <input type="text" placeholder="ابحث باسم الدواء..." oninput="window.App.handleQuickSearch(this.value)">
             </div>
-            <form id="form-add-stock" onsubmit="event.preventDefault(); window.submitNewStock();">
-                <div class="form-group">
-                    <label>ابحث عن الدواء/المستلزم:</label>
-                    <div class="autocomplete">
-                        <input type="text" id="search-master" placeholder="اكتب اسم الدواء..." required oninput="window.handleMasterInput(this.value)">
-                        <div id="autocomplete-list" class="autocomplete-items"></div>
-                    </div>
-                    <button type="button" class="text-btn sm-btn" onclick="window.openAddMasterItem()">➕ غير مسجل؟ أضفه الآن</button>
-                </div>
-                <input type="hidden" id="selected-medicine-id">
-                <input type="hidden" id="selected-medicine-type">
-                
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>المكان:</label>
-                        <input type="text" id="stock-location" placeholder="مثلاً: الثلاجة، الرف A" required>
-                    </div>
-                    <div class="form-group">
-                        <label>الكمية:</label>
-                        <input type="number" id="stock-quantity" placeholder="0" required min="1">
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label>تاريخ الصلاحية:</label>
-                    <input type="month" id="stock-expiry">
-                </div>
-
-                <div class="form-actions">
-                    <button type="submit" class="btn-primary">حفظ الجرد</button>
-                    <button type="button" class="btn-ghost" onclick="UI.closeModal()">إلغاء</button>
-                </div>
-            </form>
+            <div id="quick-search-results" class="items-list mini"></div>
+            <button class="btn-ghost mt-20" onclick="window.UI.closeModal()">إلغاء</button>
         `);
     },
-    async exportToExcel(type, options = {}) {
-        const inventory = await DB.getAll('inventory');
-        const masterData = await DB.getAll('medicineMaster');
-        const masterMap = new Map(masterData.map(m => [m.id, m]));
-        
-        let dataToExport = [];
-        const today = new Date();
-        const sixMos = new Date(); sixMos.setMonth(sixMos.getMonth() + 6);
 
-        if (type === 'full') {
-            dataToExport = inventory;
-        } else if (type === 'emergency') {
-            dataToExport = inventory.filter(i => i.type === 'emergency');
-        } else if (type === 'expiring') {
-            dataToExport = inventory.filter(i => i.expiryDate && new Date(i.expiryDate) < sixMos);
-        } else if (type === 'custom') {
-            dataToExport = inventory.filter(i => {
-                const matchLoc = options.location === 'all' || i.location === options.location;
-                const matchType = options.type === 'all' || i.type === options.type;
-                return matchLoc && matchType;
-            });
+    async handleQuickSearch(val) {
+        if (!val) { document.getElementById('quick-search-results').innerHTML = ''; return; }
+        try {
+            const results = await Categories.searchMaster(val);
+            const container = document.getElementById('quick-search-results');
+            if (!container) return;
+            
+            container.innerHTML = results.slice(0, 5).map(m => `
+                <div class="search-result-item" onclick="window.App.openEntryForm('${m.id}')">
+                    <i class='bx bx-capsule'></i>
+                    <div class="search-info">
+                        <span class="search-name">${m.nameEN}</span>
+                        <span class="search-sub">${m.activeIngredient || ''}</span>
+                    </div>
+                </div>
+            `).join('');
+        } catch (err) {
+            console.error(err);
         }
+    },
 
-        if (dataToExport.length === 0) {
-            UI.showToast('لا توجد بيانات للتصدير في هذا القسم', 'info');
-            return;
-        }
-
-        // Prepare rows for SheetJS
-        const rows = dataToExport.map(item => {
-            const master = masterMap.get(item.medicineId) || {};
-            return {
-                'الأصناف (English)': master.nameEN || 'N/A',
-                'الأصناف (العربية)': master.nameAR || 'N/A',
-                'المادة الفعالة': master.activeIngredient || '-',
-                'المكان / الموقع': item.location,
-                'الكمية المتاحة': item.quantity,
-                'تاريخ الصلاحية': item.expiryDate || '-',
-                'النوع': item.type === 'medicine' ? 'دواء' : (item.type === 'supply' ? 'مستلزم' : 'طوارئ')
-            };
+    switchInventoryTab(tab) {
+        this.inventoryTab = tab;
+        document.querySelectorAll('.toggle-btn').forEach(b => {
+            b.classList.toggle('active', b.textContent === (tab === 'detailed' ? 'تفصيلي' : 'تجميعي'));
         });
+        this.renderInventory();
+    },
 
-        const worksheet = XLSX.utils.json_to_sheet(rows);
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, "Inventory");
-        
-        // Save file
-        const fileName = `Dawaa_Inventory_${type}_${new Date().toLocaleDateString('ar-EG').replace(/\//g, '-')}.xlsx`;
-        XLSX.writeFile(workbook, fileName);
-        UI.showToast(`تم تصدير ملف الإكسيل بنجاح`, 'success');
+    async export(type) {
+        try {
+            await Exporter.exportToExcel(type);
+            UI.showToast('تم التصدير بنجاح', 'success');
+        } catch (err) {
+            UI.showToast('فشل التصدير', 'danger');
+        }
+    },
+
+    async openManageCategories() {
+        try {
+            const cats = await Categories.getAllSorted();
+            UI.showModal(`
+                <div class="modal-header">
+                    <h2>إدارة الأقسام والتبويب</h2>
+                    <button class="btn-primary sm-btn" onclick="UI.showToast('ميزة إضافة قسم قريباً في v6.4.1', 'info')">+ قسم جديد</button>
+                </div>
+                <div class="items-list mini">
+                    ${cats.map(c => `
+                        <div class="cat-manage-item">
+                            <div class="cat-info">
+                                <i class='bx ${c.icon}' style="color: ${c.color}; font-size: 24px;"></i>
+                                <div style="display:flex; flex-direction:column">
+                                    <span style="font-weight:800">${c.nameAR}</span>
+                                    <span class="text-muted" style="font-size:10px">ID: ${c.id}</span>
+                                </div>
+                            </div>
+                            <div class="cat-actions">
+                                <button class="icon-btn" onclick="window.App.confirmDeleteCategory('${c.id}')"><i class='bx bx-trash' style="color:var(--danger)"></i></button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                <button class="btn-ghost mt-20" onclick="window.UI.closeModal()">إغلاق</button>
+            `);
+        } catch (err) {
+            UI.showToast('خطأ في تحميل الأقسام', 'danger');
+        }
+    },
+
+    async confirmDeleteCategory(catId) {
+        try {
+            const meds = await Categories.getMedicinesByCategoryId(catId);
+            const cat = await Categories.getInfo(catId);
+            
+            if (meds.length === 0) {
+                if (confirm(`هل أنت متأكد من حذف قسم "${cat.nameAR}"؟`)) {
+                    await Categories.deleteCategory(catId);
+                    UI.showToast('تم حذف القسم', 'success');
+                    this.openManageCategories();
+                }
+                return;
+            }
+
+            UI.showModal(`
+                <div class="modal-header"><h2>حذف قسم: ${cat.nameAR}</h2></div>
+                <div class="info-card warning mb-20">
+                    <i class='bx bx-error'></i>
+                    <p>هذا القسم يحتوي على <strong>${meds.length}</strong> دواء مسجل. ماذا تريد أن تفعل بالأدوية؟</p>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:12px">
+                    <button class="btn-primary" onclick="window.App.executeDeleteCategory('${catId}', 'move')">📦 نقل الأدوية لـ "غير مصنف" ثم الحذف</button>
+                    <button class="btn-secondary" style="background:#fee2e2; color:#ef4444" onclick="window.App.executeDeleteCategory('${catId}', 'delete_all')">🗑️ حذف القسم بكل ما فيه نهائياً</button>
+                    <button class="btn-ghost" onclick="window.App.openManageCategories()">إلغاء</button>
+                </div>
+            `);
+        } catch (err) {
+            UI.showToast('خطأ في معالجة الحذف', 'danger');
+        }
+    },
+
+    async executeDeleteCategory(catId, action) {
+        try {
+            const meds = await Categories.getMedicinesByCategoryId(catId);
+            
+            if (action === 'move') {
+                // Ensure 'Uncategorized' exists or use a default
+                for (const med of meds) {
+                    med.categoryId = 'uncategorized';
+                    await DB.put('medicineMaster', med);
+                }
+                UI.showToast(`تم نقل ${meds.length} دواء لـ "غير مصنف"`, 'info');
+            } else if (action === 'delete_all') {
+                for (const med of meds) {
+                    await DB.delete('medicineMaster', med.id);
+                }
+                UI.showToast(`تم حذف القسم و ${meds.length} دواء`, 'warning');
+            }
+
+            await Categories.deleteCategory(catId);
+            UI.closeModal();
+            this.openManageCategories();
+        } catch (err) {
+            UI.showToast('فشل إتمام العملية', 'danger');
+        }
+    },
+};
+
+// Global Bindings
+window.App = App;
+window.UI = UI;
+
+// Bridges
+window.switchView = (id) => {
+    // Standardize IDs from nav (e.g., 'dashboard' -> 'view-dashboard')
+    const finalId = id.startsWith('view-') ? id : `view-${id}`;
+    UI.switchView(finalId);
+};
+window.handleSearch = (query) => App.handleGlobalSearch(query);
+window.toggleTheme = () => {
+    UI.toggleTheme();
+    if (typeof UI.updateSettingsIcons === 'function') UI.updateSettingsIcons();
+};
+
+// --- Settings Logic ---
+App.handleBackup = async function() {
+    try {
+        UI.showToast('جاري تحضير الملف...', 'info');
+        const data = {
+            categories: await DB.getAll('categories'),
+            medicineMaster: await DB.getAll('medicineMaster'),
+            inventory: await DB.getAll('inventory'),
+            exportDate: new Date().toISOString(),
+            version: '5.6'
+        };
+
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `dawaa_backup_${new Date().toISOString().split('T')[0]}.dawaa`;
+        a.click();
+        URL.revokeObjectURL(url);
+        UI.showToast('تم تصدير النسخة الاحتياطية بنجاح', 'success');
+    } catch (err) {
+        UI.showToast('فشل التصدير: ' + err.message, 'danger');
     }
 };
 
-// --- Window Attachments for Form Binding ---
+App.handleRestore = async function(input) {
+    if (!input.files || !input.files[0]) return;
+    if (!confirm('تحذير: سيتم مسح البيانات الحالية واستبدالها بالنسخة المرفوعة. هل أنت متأكد؟')) return;
 
-window.handleMasterInput = async (val) => {
-    const list = document.getElementById('autocomplete-list');
-    if (!list) return;
-    list.innerHTML = '';
-    
-    if (val.length < 1) return;
+    try {
+        UI.showToast('جاري استعادة البيانات...', 'info');
+        const file = input.files[0];
+        const reader = new FileReader();
+        
+        reader.onload = async (e) => {
+            try {
+                const data = JSON.parse(e.target.result);
+                
+                await DB.clear('categories');
+                await DB.clear('medicineMaster');
+                await DB.clear('inventory');
 
-    const matches = await App.getMasterSuggestions(val);
-    matches.forEach(m => {
-        const div = document.createElement('div');
-        div.innerHTML = `<strong>${m.nameEN}</strong> - ${m.nameAR}`;
-        div.onclick = () => {
-            document.getElementById('search-master').value = `${m.nameEN} / ${m.nameAR}`;
-            document.getElementById('selected-medicine-id').value = m.id;
-            document.getElementById('selected-medicine-type').value = m.type;
-            list.innerHTML = '';
+                for (const cat of data.categories) await DB.put('categories', cat);
+                for (const med of data.medicineMaster) await DB.put('medicineMaster', med);
+                for (const inv of data.inventory) await DB.put('inventory', inv);
+
+                UI.showToast('تمت استعادة البيانات بنجاح!', 'success');
+                setTimeout(() => window.location.reload(), 1500);
+            } catch (err) {
+                UI.showToast('فشل قراءة الملف: ' + err.message, 'danger');
+            }
         };
-        list.appendChild(div);
-    });
+        reader.readAsText(file);
+    } catch (err) {
+        UI.showToast('خطأ في العملية: ' + err.message, 'danger');
+    }
 };
 
-window.openAddMasterItem = () => {
-    UI.showModal(`
-        <div class="modal-header">
-            <h2>إضافة بند جديد للمستودع</h2>
-        </div>
-        <form id="form-master-add" onsubmit="event.preventDefault(); window.submitToMaster();">
-            <div class="form-group">
-                <label>الاسم بالإنجليزي:</label>
-                <input type="text" id="master-en" placeholder="e.g. Panadol Extra" required>
-            </div>
-            <div class="form-group">
-                <label>الاسم بالعربي:</label>
-                <input type="text" id="master-ar" placeholder="مثلاً: بنادول إكسترا" required>
-            </div>
-            <div class="form-group">
-                <label>المادة الفعالة (إختياري):</label>
-                <input type="text" id="master-ing" placeholder="Paracetamol">
-            </div>
-            <div class="form-group">
-                <label>فئة البند:</label>
-                <select id="master-type">
-                    <option value="medicine">دواء طبيعي</option>
-                    <option value="emergency">دواء طوارئ (هام)</option>
-                    <option value="supply">مستلزم طبي</option>
-                </select>
-            </div>
-            <div class="form-actions">
-                <button type="submit" class="btn-primary">حفظ في المستودع</button>
-                <button type="button" class="btn-ghost" onclick="window.openQuickAdd()">رجوع للجرد</button>
-            </div>
-        </form>
-    `);
+App.fullReset = async function() {
+    if (confirm('💣 تحذير نهائي: سيتم حذف كافة البيانات والبدء من الصفر. سيتم حذف صور الأدوية أيضاً. هل أنت متأكد؟')) {
+        try {
+            await DB.deleteDB();
+            UI.showToast('تم تصفير النظام. سيتم إعادة التشغيل...', 'warning');
+            setTimeout(() => window.location.reload(), 2000);
+        } catch (err) {
+            UI.showToast('فشل المسح: ' + err.message, 'danger');
+        }
+    }
 };
 
-window.submitToMaster = async () => {
-    const nameEN = document.getElementById('master-en').value;
-    const nameAR = document.getElementById('master-ar').value;
-    const ingredient = document.getElementById('master-ing').value;
-    const type = document.getElementById('master-type').value;
+App.checkUpdate = async function() {
+    UI.showToast('جاري البحث عن تحديثات...', 'info');
+    if ('serviceWorker' in navigator) {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) {
+            await reg.update();
+            
+            // Check if there's already a worker waiting
+            if (reg.waiting) {
+                this.showUpdateBanner();
+                UI.showToast('تحديث جديد متوفر! اضغط تفعيل.', 'success');
+                return;
+            }
 
-    await App.addMasterItem({
-        id: crypto.randomUUID(),
-        nameEN, nameAR, activeIngredient: ingredient, 
-        type, 
-        lastUpdated: new Date().toISOString()
-    });
-    
-    // Go back to quick add
-    window.openQuickAdd();
+            // Or if one is currently installing, wait for it
+            if (reg.installing) {
+                reg.installing.onstatechange = () => {
+                    if (reg.waiting) {
+                        this.showUpdateBanner();
+                        UI.showToast('تحديث جديد جاهز! اضغط تفعيل.', 'success');
+                    }
+                };
+                return;
+            }
+
+            // No updates detected
+            if (!reg.waiting && !reg.installing) {
+                UI.showToast('أنت تستخدم أحدث نسخة بالفعل', 'success');
+            }
+        }
+    }
 };
 
-window.submitNewStock = async () => {
-    const medicineId = document.getElementById('selected-medicine-id').value;
-    if (!medicineId) {
-        alert('من فضلك اختر دواء من القائمة أو أضف دواء جديداً');
+App.userRole = localStorage.getItem('dawaa-role') || 'staff';
+App.pharmacyCode = localStorage.getItem('dawaa-pharmacy-code') || '';
+
+App.handleAdminUnlock = function() {
+    if (this.userRole === 'admin') {
+        if (confirm('هل تريد الخروج من وضع المدير والعودة لوضع الموظف؟')) {
+            this.userRole = 'staff';
+            localStorage.setItem('dawaa-role', 'staff');
+            UI.showToast('تم العودة لوضع الموظف', 'info');
+            this.updateAdminUI();
+        }
         return;
     }
 
-    const type = document.getElementById('selected-medicine-type').value;
-    const location = document.getElementById('stock-location').value;
-    const quantity = parseInt(document.getElementById('stock-quantity').value);
-    const expiryDate = document.getElementById('stock-expiry').value;
-
-    await App.addInventoryEntry({
-        medicineId, location, quantity, expiryDate, type
-    });
-
-    UI.closeModal();
+    const key = prompt('أدخل كود المدير لتفعيل الصلاحيات (ADMIN77):');
+    if (key === 'ADMIN77') {
+        this.userRole = 'admin';
+        localStorage.setItem('dawaa-role', 'admin');
+        UI.showToast('تم تفعيل وضع المدير بنجاح 🛡️', 'success');
+        this.updateAdminUI();
+    } else if (key !== null) {
+        UI.showToast('كود غير صحيح!', 'danger');
+    }
 };
 
-// Booting the App
-window.App = App;
-window.openQuickAdd = () => App.openQuickAddStock();
-window.switchView = (viewId) => UI.switchView(viewId);
-window.switchInventoryTab = (tab) => App.switchInventoryTab(tab);
-window.handleSearch = (val) => App.handleGlobalSearch(val);
-window.deleteEntry = (id) => App.deleteInventoryEntry(id);
-window.handleFilteredExport = () => App.handleFilteredExport();
+App.updateAdminUI = function() {
+    const isAdmin = this.userRole === 'admin';
+    const statusText = document.getElementById('admin-status-text');
+    const icon = document.getElementById('admin-icon');
+    
+    if (statusText) statusText.textContent = isAdmin ? 'وضع المدير (مفعل)' : 'تفعيل وضع المدير';
+    if (icon) icon.className = isAdmin ? 'bx bxs-shield-check' : 'bx bx-shield-quarter';
+    
+    // Update Master Data View to show publish buttons if admin
+    if (window.UI && UI.currentView === 'master') App.renderMasterData();
+};
+
+App.openSyncHub = function() {
+    const isConnected = !!this.pharmacyCode;
+    UI.showModal(`
+        <div class="modal-header"><h2>مركز المزامنة السحابية (Firebase) ☁️</h2></div>
+        <div class="sync-hub-content">
+            <div class="info-card mb-20 ${isConnected ? 'success' : 'warning'}">
+                <i class='bx ${isConnected ? 'bx-cloud-check' : 'bx-cloud-off'}'></i>
+                <p>
+                    ${isConnected 
+                        ? `متصل بالسحابة عبر الكود: <strong>${this.pharmacyCode}</strong>. يمكنك الآن نشر ومزامنة الأصناف.` 
+                        : 'اربط أجهزتك ببعضها عبر "كود الصيدلية". الأدمن فقط هو من يملك صلاحية النشر.'}
+                </p>
+            </div>
+            <div class="form-group mb-20" style="text-align:center">
+                <label>كود الصيدلية (Pharmacy Code)</label>
+                <input type="text" id="sync-pharmacy-code" value="${this.pharmacyCode}" placeholder="مثال: PH_A1" style="text-align:center; font-size: 20px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;">
+            </div>
+            <div class="sync-actions" style="display:grid; gap:10px">
+                <button class="btn-primary" onclick="window.App.saveSyncConfig()"><i class='bx bx-save'></i> حفظ وربط الكود</button>
+                ${isConnected ? `<button class="btn-secondary" onclick="window.Sync.pull()"><i class='bx bx-refresh'></i> سحب البيانات الآن</button>` : ''}
+                <button class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+            </div>
+        </div>
+    `);
+};
+
+App.saveSyncConfig = function() {
+    const code = document.getElementById('sync-pharmacy-code').value.trim().toUpperCase();
+    if (!code) { UI.showToast('يرجى إدخال كود الصيدلية', 'warning'); return; }
+    
+    this.pharmacyCode = code;
+    localStorage.setItem('dawaa-pharmacy-code', code);
+    this.updateSyncStatusUI();
+    
+    UI.showToast('تم ربط الصيدلية بنجاح! جاري التحديث...', 'success');
+    UI.closeModal();
+    
+    // Immediate Pull after link
+    Sync.pull();
+};
+
+
+App.updateSyncStatusUI = function() {
+    const statusText = document.getElementById('sync-status-text');
+    if (statusText) {
+        statusText.textContent = this.pharmacyCode ? `متصل - (${this.pharmacyCode})` : 'غير متصل - (نسخة محلية)';
+        const card = statusText.closest('.setting-card');
+        if (card) card.classList.toggle('primary-accent', !!this.pharmacyCode);
+    }
+};
+
+// Global Error Monitor
+window.onerror = (msg, url, line, col, error) => {
+    console.error('Dawaa Global Catch:', { msg, url, line, error });
+    if (typeof UI !== 'undefined' && UI.showToast) {
+        UI.showToast(`خطأ تقني: ${msg.split(':')[0]}`, 'danger');
+    }
+    return false;
+};
 
 document.addEventListener('DOMContentLoaded', () => App.init());
 export { App };

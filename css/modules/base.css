@@ -1,0 +1,59 @@
+:root {
+    /* Color Palette - Medical Professional */
+    --primary: #3b82f6; /* More vibrant blue from screenshot */
+    --primary-light: #eff6ff;
+    --secondary: #10b981;
+    --accent: #f59e0b;
+    --danger: #ef4444;
+    --emergency: #8b5cf6;        /* Emergency Purple */
+    
+    --bg-main: #f1f5f9;
+    --bg-light: #f8fafc;
+    --card-bg: #ffffff;
+    --text-main: #1e293b;
+    --text-secondary: #475569;
+    --text-muted: #64748b;
+    --border-color: #e2e8f0;
+
+    /* Glass & Gradients */
+    --glass-bg: rgba(255, 255, 255, 0.85);
+    --glass-border: rgba(255, 255, 255, 0.4);
+    --premium-blue: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    
+    /* Layout Constants */
+    --header-height: 70px;
+    --nav-height: 80px;
+    --radius-xl: 32px;
+    --radius-lg: 24px;
+    --radius-md: 18px;
+    
+    /* Premium Shadows */
+    --shadow-sm: 0 2px 4px rgba(0,0,0,0.02);
+    --shadow-md: 0 8px 24px rgba(149, 157, 165, 0.12);
+    --shadow-premium: 0 12px 40px rgba(0, 0, 0, 0.08);
+    
+    /* Animation */
+    --transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+body {
+    font-family: 'Tajawal', 'Inter', sans-serif;
+    background-color: var(--bg-light);
+    color: var(--text-main);
+    line-height: 1.6;
+    overflow-x: hidden;
+    transition: var(--transition);
+}
+
+.container {
+    padding: 0 20px;
+    max-width: 600px;
+    margin: 0 auto;
+}

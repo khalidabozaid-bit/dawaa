@@ -1,15 +1,18 @@
-// js/db.js
+// js/core/db.js
 /**
- * Dawaa Inventory Database Engine (IndexedDB)
+ * Dawaa DB Engine (IndexedDB)
  * Optimized for rapid medical inventory and bilingual lookup.
+ * v4: Added Categorization Store.
  */
 
-const DB_NAME = 'DawaaInventoryDB';
-const DB_VERSION = 1;
+const DB_NAME = 'DawaaMedicalDB';
+const DB_VERSION = 4; 
+
 const STORES = {
-    MASTER: 'medicineMaster', // Static medicine/supply definitions
-    INVENTORY: 'inventory',   // Actual stock entries per location
-    SETTINGS: 'settings'      // User preferences
+    MASTER: 'medicineMaster', 
+    INVENTORY: 'inventory',   
+    CATEGORIES: 'categories',
+    SETTINGS: 'settings'      
 };
 
 export const DB = {
@@ -23,24 +26,31 @@ export const DB = {
 
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
+                console.log(`Dawaa DB: Upgrading to v${DB_VERSION}...`);
 
-                // 1. Master Store: Medicine & Supplies Registry
+                // Master Store
                 if (!db.objectStoreNames.contains(STORES.MASTER)) {
                     const masterStore = db.createObjectStore(STORES.MASTER, { keyPath: 'id' });
                     masterStore.createIndex('by_name_en', 'nameEN', { unique: false });
                     masterStore.createIndex('by_name_ar', 'nameAR', { unique: false });
-                    masterStore.createIndex('by_ingredient', 'activeIngredient', { unique: false });
+                    masterStore.createIndex('by_category_id', 'categoryId', { unique: false });
                 }
 
-                // 2. Inventory Store: Real-time stock counts
+                // Inventory Store
                 if (!db.objectStoreNames.contains(STORES.INVENTORY)) {
                     const invStore = db.createObjectStore(STORES.INVENTORY, { keyPath: 'id' });
-                    invStore.createIndex('by_medicine', 'medicineId', { unique: false });
+                    invStore.createIndex('by_medicine_id', 'medicineId', { unique: false });
                     invStore.createIndex('by_location', 'location', { unique: false });
-                    invStore.createIndex('by_type', 'type', { unique: false }); // Medicine, Supply, Emergency
+                    invStore.createIndex('by_type', 'type', { unique: false });
+                    invStore.createIndex('by_expiry', 'expiryDate', { unique: false });
                 }
 
-                // 3. Settings Store
+                // Categories Store (v4)
+                if (!db.objectStoreNames.contains(STORES.CATEGORIES)) {
+                    db.createObjectStore(STORES.CATEGORIES, { keyPath: 'id' });
+                }
+
+                // Settings Store
                 if (!db.objectStoreNames.contains(STORES.SETTINGS)) {
                     db.createObjectStore(STORES.SETTINGS);
                 }
@@ -52,13 +62,11 @@ export const DB = {
             };
 
             request.onerror = (event) => {
-                console.error('Dawaa DB Store Error:', event.target.error);
+                console.error('Dawaa DB Error:', event.target.error);
                 reject(event.target.error);
             };
         });
     },
-
-    // --- Generic Operations ---
 
     async add(storeName, data) {
         const db = await this.init();
@@ -84,6 +92,7 @@ export const DB = {
 
     async get(storeName, id) {
         const db = await this.init();
+        if (!id) return null;
         return new Promise((resolve, reject) => {
             const tx = db.transaction([storeName], 'readonly');
             const store = tx.objectStore(storeName);
@@ -99,7 +108,7 @@ export const DB = {
             const tx = db.transaction([storeName], 'readonly');
             const store = tx.objectStore(storeName);
             const request = store.getAll();
-            request.onsuccess = () => resolve(request.result);
+            request.onsuccess = () => resolve(request.result || []);
             request.onerror = (e) => reject(e.target.error);
         });
     },
@@ -115,20 +124,31 @@ export const DB = {
         });
     },
 
-    // --- Specialized Queries ---
-
-    async queryByIndex(storeName, indexName, value) {
+    async clear(storeName) {
         const db = await this.init();
         return new Promise((resolve, reject) => {
-            const tx = db.transaction([storeName], 'readonly');
+            const tx = db.transaction([storeName], 'readwrite');
             const store = tx.objectStore(storeName);
-            const index = store.index(indexName);
-            const request = index.getAll(IDBKeyRange.only(value));
-            request.onsuccess = () => resolve(request.result);
+            const request = store.clear();
+            request.onsuccess = () => resolve();
+            request.onerror = (e) => reject(e.target.error);
+        });
+    },
+
+    async deleteDB() {
+        if (this.db) {
+            this.db.close();
+            this.db = null;
+        }
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.deleteDatabase(DB_NAME);
+            request.onsuccess = () => {
+                console.log('Dawaa DB: Database deleted.');
+                resolve();
+            };
             request.onerror = (e) => reject(e.target.error);
         });
     }
 };
 
-// Expose for debugging if needed
-window.DawaaDB = DB;
+window.DB = DB; // For debugging

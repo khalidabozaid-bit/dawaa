@@ -1,0 +1,21 @@
+/* Dark Mode Overrides */
+body.dark-theme {
+    --bg-light: #0f172a;
+    --card-bg: #1e293b;
+    --text-main: #f1f5f9;
+    --text-muted: #94a3b8;
+    --border-color: #334155;
+    --shadow-sm: 0 4px 6px -1px rgba(0,0,0,0.3);
+}
+
+body.dark-theme .app-header {
+    background: rgba(15, 23, 42, 0.8);
+}
+
+body.dark-theme .bottom-nav {
+    background: rgba(15, 23, 42, 0.9);
+}
+
+body.dark-theme .stat-card.total .stat-icon { background: #1e3a8a; color: #60a5fa; }
+body.dark-theme .stat-card.low-stock .stat-icon { background: #450a0a; color: #f87171; }
+body.dark-theme .stat-card.expiring .stat-icon { background: #451a03; color: #fbbf24; }
