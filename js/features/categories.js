@@ -116,6 +116,13 @@ export const Categories = {
         return med.id;
     },
 
+    getMedicineImage(med, options = {}) {
+        if (med && med.imagePath && med.imagePath.includes('base64')) {
+            return med.imagePath;
+        }
+        return `assets/icons/default-med.png`; // Fallback path
+    },
+
     async deleteMedicine(id) {
         await DB.delete('medicineMaster', id);
         // Also cleanup inventory for this medicine
