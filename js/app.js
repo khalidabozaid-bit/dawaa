@@ -229,21 +229,8 @@ const App = {
         }
     },
 
-    showUpdateBanner() {
-        const banner = document.getElementById('update-banner');
-        if (banner) banner.classList.add('show');
-    },
+    // Service Worker update logic moved to App.checkUpdate (v9.9.7 Architect)
 
-    applyUpdate() {
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistration().then(reg => {
-                if (reg && reg.waiting) {
-                    reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-                }
-            });
-            window.location.reload();
-        }
-    },
 
     // --- View Renderers ---
 
@@ -417,10 +404,12 @@ const App = {
                         </div>
                         <div class="card-actions-float">
                             ${isAdmin && !isGlobal ? `<button class="icon-btn sync-btn" onclick="window.Sync.push('${m.id}')" title="نشر عالمي"><i class='bx bx-cloud-upload'></i></button>` : ''}
-                            <button class="icon-btn" onclick="window.App.openEditMedicine('${m.id}')"><i class='bx bx-edit-alt'></i></button>
+                            <button class="icon-btn" onclick="window.App.openEditMedicine('${m.id}')" title="تعديل"><i class='bx bx-edit-alt'></i></button>
+                            ${isAdmin ? `<button class="icon-btn danger" onclick="window.App.deleteMasterMedicine('${m.id}')" title="حذف نهائي"><i class='bx bx-trash'></i></button>` : ''}
                         </div>
                     </div>
                 `;
+
             }).join('');
         } catch (err) {
             console.error(err);
@@ -1066,26 +1055,31 @@ const App = {
     async openManageCategories() {
         try {
             const cats = await Categories.getAllSorted();
+            const allMeds = await DB.getAll('medicineMaster');
+            
             UI.showModal(`
                 <div class="modal-header">
                     <h2>إدارة الأقسام والتبويب</h2>
-                    <button class="btn-primary sm-btn" onclick="UI.showToast('ميزة إضافة قسم قريباً في v6.4.1', 'info')">+ قسم جديد</button>
+                    <button class="btn-primary sm-btn" onclick="window.App.openAddCategory()">+ قسم جديد</button>
                 </div>
                 <div class="items-list mini">
-                    ${cats.map(c => `
-                        <div class="cat-manage-item">
-                            <div class="cat-info">
-                                <i class='bx ${c.icon}' style="color: ${c.color}; font-size: 24px;"></i>
-                                <div style="display:flex; flex-direction:column">
-                                    <span style="font-weight:800">${c.nameAR}</span>
-                                    <span class="text-muted" style="font-size:10px">ID: ${c.id}</span>
+                    ${cats.map(c => {
+                        const count = allMeds.filter(m => m.categoryId === c.id).length;
+                        return `
+                            <div class="cat-manage-item">
+                                <div class="cat-info" onclick="window.App.openEditCategory('${c.id}')" style="cursor:pointer">
+                                    <i class='bx ${c.icon}' style="color: ${c.color}; font-size: 24px;"></i>
+                                    <div style="display:flex; flex-direction:column">
+                                        <span style="font-weight:800">${c.nameAR}</span>
+                                        <span class="text-muted" style="font-size:10px">${count} صنف عثر عليه</span>
+                                    </div>
+                                </div>
+                                <div class="cat-actions">
+                                    <button class="icon-btn" onclick="window.App.confirmDeleteCategory('${c.id}')" title="حذف القسم"><i class='bx bx-trash' style="color:var(--danger)"></i></button>
                                 </div>
                             </div>
-                            <div class="cat-actions">
-                                <button class="icon-btn" onclick="window.App.confirmDeleteCategory('${c.id}')"><i class='bx bx-trash' style="color:var(--danger)"></i></button>
-                            </div>
-                        </div>
-                    `).join('')}
+                        `;
+                    }).join('')}
                 </div>
                 <button class="btn-ghost mt-20" onclick="window.UI.closeModal()">إغلاق</button>
             `);
@@ -1093,6 +1087,83 @@ const App = {
             UI.showToast('خطأ في تحميل الأقسام', 'danger');
         }
     },
+
+    openAddCategory() {
+        UI.showModal(`
+            <div class="modal-header"><h2>إضافة قسم جديد</h2></div>
+            <form id="form-add-cat" onsubmit="event.preventDefault(); window.App.saveCategory();">
+                <div class="form-group">
+                    <label class="form-label">اسم القسم (بالعربية):</label>
+                    <input type="text" id="cat-name" class="form-input" placeholder="مثلاً: فيتامينات" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">الأيقونة (Boxicons):</label>
+                    <input type="text" id="cat-icon" class="form-input" value="bx-package">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">اللون مميز:</label>
+                    <input type="color" id="cat-color" class="form-input" style="height:45px" value="#64748b">
+                </div>
+                <div class="form-actions mt-20">
+                    <button type="submit" class="btn-primary">حفظ القسم</button>
+                    <button type="button" class="btn-ghost" onclick="window.App.openManageCategories()">رجوع</button>
+                </div>
+            </form>
+        `);
+    },
+
+    async openEditCategory(id) {
+        try {
+            const cat = await Categories.getInfo(id);
+            UI.showModal(`
+                <div class="modal-header"><h2>تعديل قسم: ${cat.nameAR}</h2></div>
+                <form id="form-edit-cat" onsubmit="event.preventDefault(); window.App.saveCategory('${id}');">
+                    <div class="form-group">
+                        <label class="form-label">اسم القسم:</label>
+                        <input type="text" id="cat-name" class="form-input" value="${cat.nameAR}" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">الأيقونة:</label>
+                        <input type="text" id="cat-icon" class="form-input" value="${cat.icon || 'bx-package'}">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">اللون:</label>
+                        <input type="color" id="cat-color" class="form-input" style="height:45px" value="${cat.color || '#64748b'}">
+                    </div>
+                    <div class="form-actions mt-20">
+                        <button type="submit" class="btn-primary">تحديث</button>
+                        <button type="button" class="btn-ghost" onclick="window.App.openManageCategories()">رجوع</button>
+                    </div>
+                </form>
+            `);
+        } catch (err) {
+            UI.showToast('خطأ في تحميل بيانات القسم', 'danger');
+        }
+    },
+
+    async saveCategory(id = null) {
+        try {
+            const name = document.getElementById('cat-name').value.trim();
+            const icon = document.getElementById('cat-icon').value.trim();
+            const color = document.getElementById('cat-color').value;
+            
+            if (!name) return;
+            
+            const cat = {
+                id: id || name.toLowerCase().replace(/\s+/g, '-'),
+                nameAR: name,
+                icon: icon,
+                color: color
+            };
+            
+            await Categories.saveCategory(cat);
+            UI.showToast('تم حفظ القسم بنجاح ✨', 'success');
+            this.openManageCategories();
+        } catch (err) {
+            UI.showToast('فشل حفظ القسم', 'danger');
+        }
+    },
+
 
     async confirmDeleteCategory(catId) {
         try {
@@ -1249,27 +1320,49 @@ App.updateStatus = function(msg) {
     if (el) el.textContent = msg;
 };
 
+App.updateState = 'check'; // 'check' or 'ready'
+App.pendingRegistration = null;
+
 App.checkUpdate = async function() {
+    // Stage 2: Execute Update (Second Click)
+    if (this.updateState === 'ready' && this.pendingRegistration) {
+        const reg = this.pendingRegistration;
+        const worker = reg.waiting || reg.installing || reg.active;
+        if (worker) {
+            UI.showToast('جاري تثبيت التحديث وإعادة التشغيل... ⏳', 'info');
+            worker.postMessage({ type: 'SKIP_WAITING' });
+            setTimeout(() => window.location.reload(), 2000);
+        }
+        return;
+    }
+
+    // Stage 1: Check for Updates (First Click)
     this.updateStatus('جاري البحث عن تحديثات...');
     if ('serviceWorker' in navigator) {
-        const reg = await navigator.serviceWorker.getRegistration();
-        if (reg) {
-            await reg.update();
-            
-            // Check if there's already a worker waiting OR installing
-            const newWorker = reg.waiting || reg.installing;
-            if (newWorker) {
-                this.showUpdateBanner(reg);
-                this.updateStatus('تحديث جديد جاهز! اضغط "تحديث الآن" بالأعلى.');
-                return;
+        try {
+            const reg = await navigator.serviceWorker.getRegistration();
+            if (reg) {
+                await reg.update();
+                const newWorker = reg.waiting || reg.installing;
+                if (newWorker) {
+                    this.updateState = 'ready';
+                    this.pendingRegistration = reg;
+                    // Transformation Protocol (v9.9.7 Architect)
+                    this.updateStatus('تحديث جاهز! اضغط هنا مرة أخرى للتثبيت 🚀');
+                    const btn = document.querySelector('.setting-card .bx-refresh')?.closest('.setting-card');
+                    if (btn) btn.style.background = 'var(--primary-light)'; 
+                    return;
+                }
+                this.updateStatus('أنت تستخدم أحدث نسخة بالفعل ✅');
+                this.updateState = 'check';
+                setTimeout(() => this.updateStatus('البحث عن إصدارات جديدة متوفرة'), 4000);
             }
-
-            // No updates detected (Quiet Clarity Protocol)
-            this.updateStatus('أنت تستخدم أحدث نسخة بالفعل ✅');
-            setTimeout(() => this.updateStatus('البحث عن إصدارات جديدة متوفرة'), 4000);
+        } catch (err) {
+            this.updateStatus('فشل التحقق من التحديث ⚠️');
         }
     }
 };
+
 
 
 
