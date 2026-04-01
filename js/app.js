@@ -546,6 +546,9 @@ const App = {
                             ${cats.map(c => `<option value="${c.id}">${c.nameAR}</option>`).join('')}
                         </select>
                     </div>
+                        </select>
+                    </div>
+
                     <div class="form-group">
                         <label class="form-label">نوع البند:</label>
                         <select id="m-type" class="form-select">
@@ -555,7 +558,14 @@ const App = {
                         </select>
                     </div>
 
+                    <div class="form-group checkbox-group mt-10" style="display: flex; align-items: center; gap: 8px; background: var(--bg-secondary); padding: 10px; border-radius: 8px;">
+                        <input type="checkbox" id="m-sync" checked style="width: 18px; height: 18px;">
+                        <label for="m-sync" style="font-size: 13px; font-weight: 700; cursor: pointer;">نشر في السحابة فوراً (Cloud Push) ☁️</label>
+                    </div>
+
+ 
                     <div class="form-actions mt-20">
+
                         <button type="submit" class="btn-primary">حفظ في المستودع</button>
                         <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">رجوع للجرد</button>
                     </div>
@@ -606,6 +616,9 @@ const App = {
                         </select>
                     </div>
 
+                        </select>
+                    </div>
+
                     <div class="form-group">
                         <label class="form-label">النوع:</label>
                         <select id="e-type" class="form-select">
@@ -615,7 +628,14 @@ const App = {
                         </select>
                     </div>
 
+                    <div class="form-group checkbox-group mt-10" style="display: flex; align-items: center; gap: 8px; background: var(--bg-secondary); padding: 10px; border-radius: 8px;">
+                        <input type="checkbox" id="e-sync" checked style="width: 18px; height: 18px;">
+                        <label for="e-sync" style="font-size: 13px; font-weight: 700; cursor: pointer;">تحديث البيانات في السحابة ☁️</label>
+                    </div>
+
+
                     <div class="form-actions mt-20">
+
                         <button type="submit" class="btn-primary">حفظ التعديلات</button>
                         <button type="button" class="btn-ghost" style="color:var(--danger)" onclick="window.App.deleteMasterMedicine('${id}')">حذف الصنف نهائياً</button>
                         <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
@@ -660,16 +680,18 @@ const App = {
             UI.closeModal();
             this.renderMasterData();
 
-            // Auto-Sync (Mashawiri Style)
-            if (this.userRole === 'admin') {
+            // Auto-Sync Option (Mashawiri Style)
+            const shouldSync = document.getElementById('m-sync')?.checked;
+            if (this.userRole === 'admin' && shouldSync) {
                 Sync.push(medId); // Background push
             }
             
-            // AUTOMATION: Open Stock Entry immediately after adding a new medicine (Mashawiri Efficiency)
+            // AUTOMATION: Open Stock Entry immediately (Mashawiri Efficiency)
             setTimeout(() => {
                 UI.showToast('صنف جديد! لنقم بإضافة المخزون الآن...', 'info');
                 this.openEntryForm(medId);
             }, 800);
+
 
         } catch (err) {
             UI.showToast('فشل حفظ الدواء', 'danger');
@@ -704,11 +726,13 @@ const App = {
             UI.closeModal();
             this.renderMasterData();
 
-            // Auto-Sync (Mashawiri Style)
-            if (this.userRole === 'admin') {
+            // Auto-Sync Option (Mashawiri Style)
+            const shouldSync = document.getElementById('e-sync')?.checked;
+            if (this.userRole === 'admin' && shouldSync) {
                 Sync.push(id); // Background push update
             }
         } catch (err) {
+
             UI.showToast('فشل تحديث البيانات', 'danger');
         }
     },
