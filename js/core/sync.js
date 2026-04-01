@@ -99,8 +99,9 @@ export const Sync = {
             // 4. Save the full master list back to Firestore
             await docRef.set({ 
                 masterData,
-                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
             }, { merge: true });
+
 
             // 5. Update local status to reflect successful sync
             await DB.put('medicineMaster', syncMed);

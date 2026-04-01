@@ -142,7 +142,8 @@ const App = {
             // 3. Set App Context
             this.user = profile;
             this.userRole = profile.role;
-            this.pharmacyCode = 'default_pharmacy'; // Hardcoded for single-pharmacy setup
+            this.pharmacyCode = localStorage.getItem('dawaa-pharmacy-code') || profile.pharmacyCode || 'default_pharmacy';
+
             
             // 4. Update UI
             document.getElementById('display-user-name').textContent = profile.displayName || profile.email;
