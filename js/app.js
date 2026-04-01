@@ -8,12 +8,12 @@ import { Sync } from './core/sync.js';
 import { auth, db, storage } from './core/firebase-config.js';
 
 /**
- * Dawaa App Orchestrator (v9.8.0 - Cloud Storage Edition)
- * Master Data Sync & Admin Control Enabled.
+ * Dawaa App Orchestrator (v9.9.0 - Absolute Essence)
+ * Automatic Cloud Sync Enabled.
  */
 const App = {
     inventoryTab: 'detailed',
-    selectedCategoryId: null, // Track active filter (v9.7.0)
+    selectedCategoryId: null, 
 
     /**
      * Image Upload Helper for Cloud Storage (v9.8.0)
@@ -187,10 +187,9 @@ const App = {
 
             const profile = profileDoc.data();
             
-            // 3. Set App Context
+            // 3. Set App Context (v9.9.0)
             this.user = profile;
             this.userRole = profile.role;
-            this.pharmacyCode = localStorage.getItem('dawaa-pharmacy-code') || profile.pharmacyCode || 'default_pharmacy';
 
             
             // 4. Update UI
@@ -198,9 +197,8 @@ const App = {
             this.hideLogin();
             this.renderDashboard();
             this.updateAdminUI();
-            this.updateSyncStatusUI();
             
-            // 5. Initial Pull
+            // 5. Initial Pull (Automatic)
             Sync.pull();
             
         } catch (err) {
@@ -1340,56 +1338,9 @@ App.updateAdminUI = function() {
     if (window.UI && UI.currentView === 'master') App.renderMasterData();
 };
 
-App.openSyncHub = function() {
-    const isConnected = !!this.pharmacyCode;
-    UI.showModal(`
-        <div class="modal-header"><h2>مركز المزامنة السحابية (Firebase) ☁️</h2></div>
-        <div class="sync-hub-content">
-            <div class="info-card mb-20 ${isConnected ? 'success' : 'warning'}">
-                <i class='bx ${isConnected ? 'bx-cloud-check' : 'bx-cloud-off'}'></i>
-                <p>
-                    ${isConnected 
-                        ? `متصل بالسحابة عبر الكود: <strong>${this.pharmacyCode}</strong>. يمكنك الآن نشر ومزامنة الأصناف.` 
-                        : 'اربط أجهزتك ببعضها عبر "كود الصيدلية". الأدمن فقط هو من يملك صلاحية النشر.'}
-                </p>
-            </div>
-            <div class="form-group mb-20" style="text-align:center">
-                <label>كود الصيدلية (Pharmacy Code)</label>
-                <input type="text" id="sync-pharmacy-code" value="${this.pharmacyCode}" placeholder="مثال: PH_A1" style="text-align:center; font-size: 20px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;">
-            </div>
-            <div class="sync-actions" style="display:grid; gap:10px">
-                <button class="btn-primary" onclick="window.App.saveSyncConfig()"><i class='bx bx-save'></i> حفظ وربط الكود</button>
-                ${isConnected ? `<button class="btn-secondary" onclick="window.Sync.pull()"><i class='bx bx-refresh'></i> سحب البيانات الآن</button>` : ''}
-                <button class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
-            </div>
-        </div>
-    `);
-};
 
-App.saveSyncConfig = function() {
-    const code = document.getElementById('sync-pharmacy-code').value.trim().toUpperCase();
-    if (!code) { UI.showToast('يرجى إدخال كود الصيدلية', 'warning'); return; }
-    
-    this.pharmacyCode = code;
-    localStorage.setItem('dawaa-pharmacy-code', code);
-    this.updateSyncStatusUI();
-    
-    UI.showToast('تم ربط الصيدلية بنجاح! جاري التحديث...', 'success');
-    UI.closeModal();
-    
-    // Immediate Pull after link
-    Sync.pull();
-};
+// Sync UI functions removed in v9.9.0 - Absolute Essence Protocol
 
-
-App.updateSyncStatusUI = function() {
-    const statusText = document.getElementById('sync-status-text');
-    if (statusText) {
-        statusText.textContent = this.pharmacyCode ? `متصل - (${this.pharmacyCode})` : 'غير متصل - (نسخة محلية)';
-        const card = statusText.closest('.setting-card');
-        if (card) card.classList.toggle('primary-accent', !!this.pharmacyCode);
-    }
-};
 
 // Global Error Monitor
 window.onerror = (msg, url, line, col, error) => {
