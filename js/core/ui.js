@@ -29,7 +29,7 @@ export const UI = {
         });
     },
 
-    switchView(viewId) {
+    switchView(viewId, push = true) {
         const viewName = viewId.replace('view-', '');
         this.currentView = viewName;
 
@@ -41,9 +41,15 @@ export const UI = {
             window.scrollTo(0, 0);
         }
 
+        // History Management (Mashawiri Style)
+        if (push) {
+            history.pushState({ viewId }, "", `#${viewName}`);
+        }
+
         // Trigger render
         this.renderCurrentView();
     },
+
 
     renderCurrentView() {
         const App = window.App;

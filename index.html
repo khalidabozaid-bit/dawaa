@@ -140,6 +140,7 @@
         <!-- Inventory List View -->
         <section id="view-inventory" class="view">
             <div class="view-header">
+                <button class="back-btn" onclick="window.UI.switchView('view-dashboard')"><i class='bx bx-chevron-right'></i></button>
                 <h2>تقارير الجرد والإحصائيات</h2>
             </div>
             
@@ -176,7 +177,10 @@
         <!-- Master Data View -->
         <section id="view-master" class="view">
             <div class="view-header">
-                <h2>مستودع الأصناف</h2>
+                <div class="header-left">
+                    <button class="back-btn" onclick="window.UI.switchView('view-dashboard')"><i class='bx bx-chevron-right'></i></button>
+                    <h2>مستودع الأصناف</h2>
+                </div>
                 <div class="header-btns">
                     <button class="btn-secondary sm-btn" onclick="window.App.openManageCategories()">إدارة الأقسام</button>
                     <button class="btn-primary sm-btn" onclick="window.App.openAddMedicine()">إضافة دواء</button>
@@ -191,7 +195,10 @@
 
         <!-- Settings View (Mashawiri Style) -->
         <section id="view-settings" class="view">
-            <div class="view-header"><h2>الإعدادات والنظام</h2></div>
+            <div class="view-header">
+                <button class="back-btn" onclick="window.UI.switchView('view-dashboard')"><i class='bx bx-chevron-right'></i></button>
+                <h2>الإعدادات والنظام</h2>
+            </div>
             <div class="settings-grid">
                 <div class="setting-card primary-accent" onclick="window.switchView('master')">
                     <div class="setting-icon bg-sync"><i class='bx bx-database'></i></div>

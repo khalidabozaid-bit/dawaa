@@ -1,10 +1,11 @@
 {
   "name": "دواء | Dawaa Inventory",
-  "short_name": "Dawaa",
+  "short_name": "دواء",
   "description": "نظام إدارة وجرد الأدوية والمستلزمات الطبية",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#ffffff",
+  "orientation": "portrait",
+  "background_color": "#f8fafc",
   "theme_color": "#3b82f6",
   "icons": [
     {

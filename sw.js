@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'dawaa-cache-v6.5.0';
+const CACHE_NAME = 'dawaa-cache-v9.5.0';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -10,9 +10,12 @@ const ASSETS_TO_CACHE = [
   './css/modules/components.css',
   './css/modules/views.css',
   './css/modules/dark.css',
+  './css/modules/auth.css',
   './js/core/db.js',
   './js/core/ui.js',
   './js/core/utils.js',
+  './js/core/firebase-config.js',
+  './js/core/sync.js',
   './js/features/inventory.js',
   './js/features/categories.js',
   './js/features/export.js',
@@ -22,6 +25,7 @@ const ASSETS_TO_CACHE = [
   'https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css',
   'https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js'
 ];
+
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

@@ -36,7 +36,27 @@ const App = {
                 this.showLogin();
             }
         });
+
+        // Navigation & Hardware Back Button (Mashawiri Style)
+        window.onpopstate = (event) => {
+            const container = document.getElementById('modal-container');
+            if (container && container.classList.contains('show')) {
+                UI.closeModal();
+                history.pushState(event.state, "", window.location.hash); // Keep state to allow second back button
+                return;
+            }
+
+            if (event.state && event.state.viewId) {
+                UI.switchView(event.state.viewId, false); // Switch without pushing new state
+            } else {
+                UI.switchView('view-dashboard', false);
+            }
+        };
+
+        // Initialize first state
+        history.replaceState({ viewId: 'view-dashboard' }, "", "#dashboard");
     },
+
 
     async handleUserSession(user) {
         try {
