@@ -13,15 +13,12 @@ export const Sync = {
     CLOUD_PATH: 'global_master/data',
     
     async pull() {
-        console.log('Sync: Auto-Pulling Cloud Master...');
+        console.log('Sync: Auto-Pulling Cloud Master (Ironclad v9.9.5)...');
         try {
             const docRef = db.doc(this.CLOUD_PATH);
             const doc = await docRef.get();
             
-            if (!doc.exists) {
-                console.log('Sync: No cloud data found yet.');
-                return;
-            }
+            if (!doc.exists) return;
 
             const data = doc.data();
             const globalMeds = data.masterData || [];
@@ -30,12 +27,18 @@ export const Sync = {
 
             let syncCount = 0;
             for (const med of globalMeds) {
+                // Image Protection: Don't overwrite local high-res with empty cloud data
+                const localMed = await DB.get('medicineMaster', med.id);
+                if (localMed && localMed.imagePath?.startsWith('data:image') && (!med.imagePath || med.imagePath === '')) {
+                    med.imagePath = localMed.imagePath; // Keep local base64 until cloud URL arrives
+                }
+
                 med.syncStatus = 'global'; 
                 await DB.put('medicineMaster', med);
                 syncCount++;
             }
             
-            console.log(`Sync: Auto-Pulled ${syncCount} items.`);
+            console.log(`Sync: Auto-Pulled ${syncCount} items (Protected).`);
             if (window.App?.renderMasterData) window.App.renderMasterData();
         } catch (err) {
             console.warn('Sync Pull Failed:', err);
@@ -54,6 +57,12 @@ export const Sync = {
             const med = await DB.get('medicineMaster', medId);
             if (!med) throw new Error('Medicine not found locally');
 
+            // Safety Strip: NEVER push base64 to Firestore (Avoid 1MB limit crash)
+            const syncMed = { ...med, syncStatus: 'global', lastSynced: new Date().toISOString() };
+            if (syncMed.imagePath?.startsWith('data:image')) {
+                syncMed.imagePath = ''; // Only Cloud URLs (https://) allowed in Firestore
+            }
+
             const docRef = db.doc(this.CLOUD_PATH);
             const doc = await docRef.get();
             
@@ -63,27 +72,22 @@ export const Sync = {
             }
 
             const existingIdx = masterData.findIndex(m => m.id === med.id);
-            const syncMed = { 
-                ...med, 
-                syncStatus: 'global', 
-                lastSynced: new Date().toISOString() 
-            };
-
             if (existingIdx > -1) {
                 masterData[existingIdx] = syncMed;
             } else {
                 masterData.push(syncMed);
             }
 
-            // Save back to universal path
             await docRef.set({ 
                 masterData,
                 updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
             }, { merge: true });
 
-            await DB.put('medicineMaster', syncMed);
+            // After push, we don't update local imagePath because it might still be base64 (local truth)
+            med.syncStatus = 'global';
+            await DB.put('medicineMaster', med);
             
-            console.log(`Sync: Pushed "${med.nameEN}" successfully.`);
+            console.log(`Sync: Pushed "${med.nameEN}" (Striped).`);
             if (window.App?.renderMasterData) window.App.renderMasterData();
             
             setTimeout(() => this.pull(), 1000);
@@ -93,6 +97,7 @@ export const Sync = {
             UI.showToast(`فشل النشر السحابي: ${msg}`, 'danger');
         }
     },
+
 
 
     async submit(medId) {

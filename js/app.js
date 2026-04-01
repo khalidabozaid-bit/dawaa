@@ -8,9 +8,10 @@ import { Sync } from './core/sync.js';
 import { auth, db, storage } from './core/firebase-config.js';
 
 /**
- * Dawaa App Orchestrator (v9.9.0 - Absolute Essence)
- * Automatic Cloud Sync Enabled.
+ * Dawaa App Orchestrator (v9.9.5 - Ironclad Sync)
+ * Cloud Storage & Intelligent Push Enabled.
  */
+
 const App = {
     inventoryTab: 'detailed',
     selectedCategoryId: null, 
@@ -795,20 +796,22 @@ const App = {
             UI.closeModal();
             this.renderMasterData();
 
-            // Background Cloud Upload (v9.8.0)
+            // Background Cloud Upload (v9.9.5 - Ironclad)
             if (file && this.userRole === 'admin') {
-                UI.showToast('جاري رفع صورة الدواء للسحابة...', 'info');
+                UI.showToast('جاري رفع صورة الدواء للسحابة... ☁️', 'info');
                 this.uploadImage(file, medId).then(async (url) => {
                     if (url) {
                         const med = await DB.get('medicineMaster', medId);
-                        med.imagePath = url; // Replace base64 with Cloud URL
+                        med.imagePath = url; // Cloud Link
                         await Categories.saveMedicine(med);
-                        Sync.push(medId); // Force sync with new URL
+                        Sync.push(medId); // Push with URL
+                        UI.showToast('تم حفظ الصورة في السحابة بنجاح ✨', 'success');
                     }
                 });
             } else if (this.userRole === 'admin') {
                 Sync.push(medId);
             }
+
         } catch (err) {
             UI.showToast('فشل حفظ الدواء', 'danger');
         }
@@ -844,15 +847,16 @@ const App = {
             UI.closeModal();
             this.renderMasterData();
 
-            // Background Cloud Upload (v9.8.0)
+            // Background Cloud Upload (v9.9.5 - Ironclad Update)
             if (file && this.userRole === 'admin') {
-                UI.showToast('جاري تحديث الصورة في السحابة...', 'info');
+                UI.showToast('جاري تحديث الصورة في السحابة... ☁️', 'info');
                 this.uploadImage(file, id).then(async (url) => {
                     if (url) {
                         const m = await DB.get('medicineMaster', id);
                         m.imagePath = url;
                         await Categories.saveMedicine(m);
                         Sync.push(id);
+                        UI.showToast('تم تحديث الصورة السحابية بنجاح ✨', 'success');
                     }
                 });
             } else if (this.userRole === 'admin') {
@@ -862,6 +866,7 @@ const App = {
             UI.showToast('فشل تحديث البيانات', 'danger');
         }
     },
+
 
 
     async deleteMasterMedicine(id) {
