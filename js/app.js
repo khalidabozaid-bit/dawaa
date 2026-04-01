@@ -526,7 +526,15 @@ const App = {
                             ${cats.map(c => `<option value="${c.id}">${c.nameAR}</option>`).join('')}
                         </select>
                     </div>
-                    
+                    <div class="form-group">
+                        <label class="form-label">نوع البند:</label>
+                        <select id="m-type" class="form-select">
+                            <option value="medicine">دواء عادي</option>
+                            <option value="emergency">دواء طوارئ</option>
+                            <option value="supply">مستلزم طبي</option>
+                        </select>
+                    </div>
+
                     <div class="form-actions mt-20">
                         <button type="submit" class="btn-primary">حفظ في المستودع</button>
                         <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">رجوع للجرد</button>
