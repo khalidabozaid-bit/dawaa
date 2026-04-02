@@ -472,12 +472,11 @@ const App = {
                 </div>
                 <div class="medicine-selection-grid">
                     ${medicines.map(m => {
-                        const hasImage = m.imagePath && m.imagePath.includes('base64');
-                        const imgSrc = hasImage ? m.imagePath : '';
+                        const imgSrc = Categories.getMedicineImage(m);
                         return `
                             <div class="med-card-btn" onclick="window.App.openEntryForm('${m.id}')">
                                 <div class="med-image">
-                                    ${hasImage ? `<img src="${imgSrc}">` : `<div class="default-med-icon"><i class='bx bx-capsule'></i></div>`}
+                                    <img src="${imgSrc}" onerror="this.src='assets/icons/default-med.png'">
                                 </div>
                                 <div class="med-info-overlay">
                                     <h4>${m.nameEN} <span class="med-id-badge">#${m.id}</span></h4>
@@ -487,6 +486,7 @@ const App = {
                         `;
                     }).join('')}
                 </div>
+
                 ${medicines.length === 0 ? '<p class="text-center p-20">لا توجد أدوية في هذا القسم حالياً</p>' : ''}
                 <div class="form-actions mt-20">
                     <button class="btn-ghost" onclick="window.UI.closeModal()">إغلاق</button>
