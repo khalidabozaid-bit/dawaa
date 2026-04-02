@@ -13,9 +13,9 @@ import { auth, db, storage } from './core/firebase-config.js';
  */
 
 const App = {
-    VERSION: '10.5.0', // Supreme Auditor v10.5.0
+    VERSION: '10.6.0', // Strategic Commander v10.6.0 (Sovereign Choice)
     activeAudit: null, // v10.4.0 Collaborative Session State
-    inventoryTab: 'detailed',
+    isJoined: false,   // v10.6.0 Explicit Consent State
     selectedCategoryId: null, 
 
     /**
@@ -200,11 +200,13 @@ const App = {
             this.userRole = profile.role;
 
             
-            // 4. Update UI
             document.getElementById('display-user-name').textContent = profile.displayName || profile.email;
             this.hideLogin();
             this.renderDashboard();
             this.updateAdminUI();
+            
+            // v10.5.1: Final UI Polish
+            if (this.activeAudit) this.renderActiveAuditCard();
             
             // 5. Initial Pull (Automatic)
             Sync.pull();
@@ -664,8 +666,8 @@ const App = {
                     </div>
 
                     <div class="form-group">
-                        <label class="form-label">تاريخ الصلاحية:</label>
-                        <input type="month" id="entry-expiry" class="form-input" required>
+                        <label class="form-label">تاريخ الصلاحية (اختياري):</label>
+                        <input type="month" id="entry-expiry" class="form-input">
                     </div>
 
                     <div class="form-actions mt-20">
@@ -681,35 +683,48 @@ const App = {
 
     async saveEntry(medicineId) {
         try {
-            const locMain = document.getElementById('entry-location-main').value;
-            const qty = parseFloat(document.getElementById('entry-qty').value);
-            const exp = document.getElementById('entry-expiry').value;
+            const locEl = document.getElementById('entry-location-main');
+            const qtyEl = document.getElementById('entry-qty');
+            const expEl = document.getElementById('entry-expiry');
+
+            if (!locEl || !qtyEl || !expEl) throw new Error('Form elements not found');
+
+            const locMain = locEl.value;
+            const qty = parseFloat(qtyEl.value);
+            const exp = expEl.value;
+
+            if (isNaN(qty) || qty < 0) {
+                return UI.showToast('يرجى إدخال كمية صحيحة', 'warning');
+            }
 
             const entryData = {
-                medicineId,
+                medicineId: String(medicineId),
                 location: locMain,
                 quantity: qty,
                 expiryDate: exp,
-                auditId: this.activeAudit ? this.activeAudit.id : null // Tag with session if active
+                auditId: this.activeAudit ? this.activeAudit.id : null
             };
 
+            // Atomic Save
             await Inventory.addEntry(entryData);
-            UI.showToast('تم الحفظ بنجاح ✅', 'success');
+            UI.showToast('تم حفظ الجرد بنجاح ✅', 'success');
             
-            // v10.5.0: Live Broadcast to Team
+            // v10.5.2: Async Broadcast (Don't block UI)
             if (this.activeAudit) {
-                const med = await DB.get('medicineMaster', medicineId);
-                Sync.pushAuditEntry({
-                    auditId: this.activeAudit.id,
-                    medicineName: med.nameEN,
-                    quantity: qty
+                DB.get('medicineMaster', medicineId).then(med => {
+                    Sync.pushAuditEntry({
+                        auditId: this.activeAudit.id,
+                        medicineName: med.nameEN,
+                        quantity: qty
+                    });
                 });
             }
 
-            UI.hideModal();
+            UI.closeModal();
             this.renderInventoryList(await Inventory.getAggregatedStock(), 'inventory-grid', true);
         } catch (err) {
-            UI.showToast('فشل حفظ البيانات', 'danger');
+            console.error('Save Entry Failed:', err);
+            UI.showToast('فشل حفظ البيانات ❌', 'danger');
         }
     },
 
@@ -954,8 +969,7 @@ const App = {
 
 
     /**
-     * Collaborative Audit Lifecycle (v10.5.0 Supreme Auditor)
-     * Handles Start, End, and Live Sync for Team Stocktakes.
+     * Collaborative Audit Lifecycle (v10.5.1)
      */
     updateAuditSession(session) {
         this.activeAudit = session;
@@ -967,46 +981,94 @@ const App = {
                 <div class="audit-info">
                     <i class='bx bxs-megaphone bx-tada'></i>
                     <span>جاري الجرد الجماعي: <strong>${session.name}</strong></span>
+                    <span class="host-name">بواسطة: ${session.host || 'غير معروف'}</span>
                 </div>
                 <div class="audit-actions">
-                    ${this.userRole === 'admin' ? `<button class="btn-danger sm-btn" onclick="window.App.closeAudit()">إنهاء الجرد</button>` : ''}
+                    ${!this.isJoined && this.userRole !== 'admin' ? `<button class="btn-primary sm-btn" onclick="window.App.joinAudit()">انضم للعمل</button>` : ''}
+                    ${this.userRole === 'admin' ? `<button class="btn-danger sm-btn" style="border:1px solid white" onclick="window.App.closeAudit()">إنهاء الجرد</button>` : ''}
                 </div>
             `;
             banner.classList.add('active');
+            this.renderActiveAuditCard(session); 
             
-            // Listen to live team feed for this session
-            if (!this.feedListener) {
-                this.feedListener = Sync.subscribeToFeed(session.id, (entry) => {
-                    UI.showToast(`${entry.userName} أضاف: ${entry.medicineName} (${entry.quantity})`, 'info');
-                    if (this.selectedCategoryId) Categories.openCategory(this.selectedCategoryId); // Live refresh UI
-                });
+            if (this.isJoined || this.userRole === 'admin') {
+                if (!this.feedListener) {
+                    this.feedListener = Sync.subscribeToFeed(session.id, (entry) => {
+                        UI.showToast(`${entry.userName} أضاف: ${entry.medicineName} (${entry.quantity})`, 'info');
+                        if (this.selectedCategoryId) this.openCategory(this.selectedCategoryId); 
+                    });
+                }
             }
         } else {
+            this.isJoined = false;
             banner.classList.remove('active');
+            this.renderActiveAuditCard(); // Hide Dashboard Card
             if (this.feedListener) {
-                this.feedListener(); // Unsubscribe
+                this.feedListener();
                 this.feedListener = null;
             }
-            if (this.selectedCategoryId) Categories.openCategory(this.selectedCategoryId); // Final refresh
+        }
+    },
+
+    renderActiveAuditCard(session = this.activeAudit) {
+        const container = document.getElementById('active-audit-container');
+        if (!container) return;
+
+        if (session) {
+            const isGuest = !this.isJoined && this.userRole !== 'admin';
+            const participantCount = session.participants ? session.participants.length : 1;
+            
+            container.innerHTML = `
+                <div class="audit-status-card mt-20 ${isGuest ? 'guest-mode' : ''}" 
+                     onclick="${isGuest ? 'window.App.joinAudit()' : 'window.UI.switchView(\'view-smart-inventory\')'}">
+                    <div class="audit-pulse"><div class="pulse-dot"></div></div>
+                    <div class="audit-details">
+                        <h4>جرد جاري: ${session.name}</h4>
+                        <p>${isGuest ? '⚠️ اضغط هنا للانضمام لجلسة الفريق' : `👥 المتواجدون الآن: ${participantCount}`}</p>
+                        ${this.userRole === 'admin' ? `<p class="participants-list">${session.participants ? session.participants.join(', ') : ''}</p>` : ''}
+                    </div>
+                    <i class='bx ${isGuest ? 'bx-plus-circle' : 'bx-chevron-left'}'></i>
+                </div>
+            `;
+        } else {
+            container.innerHTML = '';
+        }
+    },
+
+    async joinAudit() {
+        const userName = this.user.displayName || this.user.email;
+        if (await Sync.joinAudit(userName)) {
+            this.isJoined = true;
+            UI.showToast('تم الانضمام لعملية الجرد بنجاح! 👤🤝👥', 'success');
+            if (this.activeAudit) this.updateAuditSession(this.activeAudit);
         }
     },
 
     async startAudit() {
         if (this.userRole !== 'admin') return UI.showToast('صلاحيات المدير مطلوبة للبدء', 'warning');
         
-        const name = prompt('أدخل اسم عملية الجرد (مثلاً: جرد رمضان 2026):');
+        const modeChoice = confirm('اضغط موافق للجرد الجماعي (مشترك للسحابة)\nاضغط الغاء للجرد الفردي (محلي فقط)');
+        const name = prompt('أدخل اسم عملية الجرد:');
         if (!name) return;
 
         const session = {
             id: 'audit_' + Date.now(),
             name: name,
+            type: modeChoice ? 'team' : 'individual',
             startTime: new Date().toISOString()
         };
 
-        await DB.put('audits', session);
-        Sync.broadcastAuditStatus(session);
-        UI.showToast('بدأت العملية! سيتم تنبيه جميع المستخدمين الآن 🚀', 'success');
-        UI.closeSidebar(); // Tidy up UI
+        if (modeChoice) {
+            await DB.put('audits', session);
+            Sync.broadcastAuditStatus(session);
+            UI.showToast('بدأت العملية الجماعية! 📡🚀', 'success');
+        } else {
+            this.activeAudit = session;
+            this.isJoined = true; // Auto-join individual session
+            UI.showToast('بدأ الجرد الفردي الخاص. يتم الحفظ محلياً فقط. 👤🗄️', 'info');
+            this.updateAuditSession(session);
+        }
+        UI.closeSidebar(); 
     },
 
     async closeAudit() {
@@ -1618,12 +1680,14 @@ App.updateAdminUI = function() {
     const isAdmin = this.userRole === 'admin';
     const statusText = document.getElementById('admin-status-text');
     const icon = document.getElementById('admin-icon');
+    const hubCard = document.getElementById('admin-audit-hub-card');
     
     if (statusText) statusText.textContent = isAdmin ? 'وضع المدير (مفعل)' : 'صلاحيات الموظف (مفعلة)';
     if (icon) icon.className = isAdmin ? 'bx bxs-shield-check' : 'bx bx-user';
+    if (hubCard) hubCard.style.display = isAdmin ? 'flex' : 'none';
     
     // Update Master Data View to show publish buttons if admin
-    if (window.UI && UI.currentView === 'master') App.renderMasterData();
+    if (window.UI && UI.currentView === 'master') this.renderMasterData();
 };
 
 

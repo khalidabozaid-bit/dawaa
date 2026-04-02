@@ -17,6 +17,7 @@ export const Inventory = {
             location: data.location || 'غير محدد',
             quantity: parseFloat(data.quantity) || 0,
             expiryDate: data.expiryDate || null,
+            auditId: data.auditId || null, // v10.5.0 Audit Tagging
             type: data.type || 'medicine',
             timestamp: new Date().toISOString()
         };

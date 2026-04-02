@@ -70,7 +70,7 @@
             </div>
             <div class="app-logo">
                 <i class='bx bxs-capsule'></i>
-                <h1>دواء <span style="font-size: 10px; opacity: 0.5">v10.5.0</span></h1>
+                <h1>دواء <span style="font-size: 10px; opacity: 0.5">v10.6.0</span></h1>
             </div>
             <div id="audit-banner" class="global-audit-banner"></div>
 
@@ -120,6 +120,9 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Active Audit Highlight (v10.5.1) -->
+            <div id="active-audit-container"></div>
 
             <!-- Global Search remains for quick access -->
             <div class="search-section mt-20">
@@ -219,6 +222,13 @@
                         <p>إدارة أصناف الأدوية، الإضافة والتعديل</p>
                     </div>
                 </div>
+                <div id="admin-audit-hub-card" class="setting-card primary-accent" onclick="window.App.startAudit()" style="display:none">
+                    <div class="setting-icon bg-sync"><i class='bx bx-clipboard'></i></div>
+                    <div class="setting-info">
+                        <h3>إدارة عمليات الجرد (Hub)</h3>
+                        <p>بدء جرد فردي أو جماعي مشترك</p>
+                    </div>
+                </div>
 
                 <div class="setting-card" onclick="window.App.handleAdminUnlock()">
                     <div class="setting-icon bg-admin"><i class='bx bx-shield-quarter' id="admin-icon"></i></div>
@@ -269,7 +279,7 @@
                 </div>
             </div>
             <div class="version-footer">
-                <p>دواء للمستودعات الذكية - v10.5.0</p>
+                <p>دواء للمستودعات الذكية - v10.6.0</p>
 
 
 

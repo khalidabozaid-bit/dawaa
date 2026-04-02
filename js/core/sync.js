@@ -114,10 +114,31 @@ export const Sync = {
             await db.collection('audits').doc('current').set({
                 ...session,
                 active: !!session,
+                participants: session ? [window.App.user.displayName || window.App.user.email] : [],
+                host: session ? (window.App.user.displayName || window.App.user.email) : null,
                 updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
             });
         } catch (err) {
             console.warn('Sync: Failed to broadcast audit status', err);
+        }
+    },
+
+    async joinAudit(userName) {
+        try {
+            const docRef = db.collection('audits').doc('current');
+            const doc = await docRef.get();
+            if (doc.exists && doc.data().active) {
+                const participants = doc.data().participants || [];
+                if (!participants.includes(userName)) {
+                    participants.push(userName);
+                    await docRef.update({ participants });
+                }
+                return true;
+            }
+            return false;
+        } catch (err) {
+            console.error('Join Error:', err);
+            return false;
         }
     },
 
