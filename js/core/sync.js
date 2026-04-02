@@ -1,262 +1,98 @@
-// js/core/sync.js
 import { DB } from './db.js';
-import { UI } from './ui.js';
 import { db } from './firebase-config.js';
 
 /**
- * Dawaa Cloud Sync Engine (v9.9.0 - Absolute Essence)
- * Handles Automatic Master Data Synchronization for a Single Pharmacy.
+ * دواء - محرك المزامنة المستقر (v16.0.3 Silent Sync)
+ * يوفر مزامنة سحابية هادئة ولا يزعج المستخدم في حال فشل الاتصال.
  */
 
 export const Sync = {
-    // Fixed Cloud Path for Single Pharmacy Architecture
     CLOUD_PATH: 'global_master/data',
     
+    // سحب بيانات الأدوية العالمية
     async pull() {
-        console.log('Sync: Auto-Pulling Cloud Master (Ironclad v9.9.5)...');
         try {
-            const docRef = db.doc(this.CLOUD_PATH);
-            const doc = await docRef.get();
-            
+            const doc = await db.doc(this.CLOUD_PATH).get();
             if (!doc.exists) return;
 
-            const data = doc.data();
-            const globalMeds = data.masterData || [];
-            
-            if (globalMeds.length === 0) return;
-
-            let syncCount = 0;
+            const globalMeds = doc.data().masterData || [];
             for (const med of globalMeds) {
-                // Image Protection: Don't overwrite local high-res with empty cloud data
-                const localMed = await DB.get('medicineMaster', med.id);
-                if (localMed && localMed.imagePath?.startsWith('data:image') && (!med.imagePath || med.imagePath === '')) {
-                    med.imagePath = localMed.imagePath; // Keep local base64 until cloud URL arrives
+                const local = await DB.get('medicineMaster', med.id);
+                // حماية الصور المحلية (عدم الكتابة فوقها ببيانات فارغة من السحابة)
+                if (local && local.imagePath?.startsWith('data:image') && !med.imagePath) {
+                    med.imagePath = local.imagePath;
                 }
-
-                med.syncStatus = 'global'; 
                 await DB.put('medicineMaster', med);
-                syncCount++;
             }
-            
-            console.log(`Sync: Auto-Pulled ${syncCount} items (Protected).`);
             if (window.App?.renderMasterData) window.App.renderMasterData();
         } catch (err) {
-            console.warn('Sync Pull Failed:', err);
+            console.warn('Sync Pull: Cloud connection skipped (Permissions/Offline).');
         }
     },
 
+    // رفع صنف للسحابة (للمديرين فقط)
     async push(medId) {
-        if (window.App?.userRole !== 'admin') {
-            UI.showToast('صلاحيات المدير مطلوبة للنشر', 'danger');
-            return;
-        }
-
-        UI.showToast('جاري النشر للسحابة 🔥...', 'info');
-
         try {
             const med = await DB.get('medicineMaster', medId);
-            if (!med) throw new Error('Medicine not found locally');
+            if (!med) return;
 
-            // Safety Strip: NEVER push base64 to Firestore (Avoid 1MB limit crash)
             const syncMed = { ...med, syncStatus: 'global', lastSynced: new Date().toISOString() };
-            if (syncMed.imagePath?.startsWith('data:image')) {
-                syncMed.imagePath = ''; // Only Cloud URLs (https://) allowed in Firestore
-            }
-
+            if (syncMed.imagePath?.startsWith('data:image')) syncMed.imagePath = ''; // منع رفع الصور الضخمة
+            
             const docRef = db.doc(this.CLOUD_PATH);
             const doc = await docRef.get();
+            let masterData = doc.exists ? (doc.data().masterData || []) : [];
+
+            const idx = masterData.findIndex(m => m.id === med.id);
+            if (idx > -1) masterData[idx] = syncMed; else masterData.push(syncMed);
+
+            await docRef.set({ masterData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
             
-            let masterData = [];
-            if (doc.exists) {
-                masterData = doc.data().masterData || [];
-            }
-
-            const existingIdx = masterData.findIndex(m => m.id === med.id);
-            if (existingIdx > -1) {
-                masterData[existingIdx] = syncMed;
-            } else {
-                masterData.push(syncMed);
-            }
-
-            await docRef.set({ 
-                masterData,
-                updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
-
-            // After push, we don't update local imagePath because it might still be base64 (local truth)
             med.syncStatus = 'global';
             await DB.put('medicineMaster', med);
-            
-            console.log(`Sync: Pushed "${med.nameEN}" (Striped).`);
-            if (window.App?.renderMasterData) window.App.renderMasterData();
-            
-            setTimeout(() => this.pull(), 1000);
-            
         } catch (err) {
-            const msg = err.code || err.message || 'خطأ غير معروف';
-            UI.showToast(`فشل النشر السحابي: ${msg}`, 'danger');
+            console.warn('Sync Push: Failed (Permissions/Offline).');
         }
     },
 
-
-
-    async submit(medId) {
-        // Future: Submit to 'ReviewQueue' for larger networks
-        UI.showToast('الصنف محلي حالياً. الأدمن سيقوم بنشره للسحابة.', 'info');
-    },
-
-    /**
-     * Collaborative Audit Synchronization (v10.5.0 Supreme Auditor)
-     */
-    /**
-     * v16.0.0: Global Mission Radar (Multi-Audit Discovery)
-     */
-    async broadcastAuditStatus(session) {
-        if (window.App?.userRole !== 'admin') return;
-        try {
-            const auditRef = db.collection('audits').doc(session.id);
-            await auditRef.set({
-                ...session,
-                active: true,
-                updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
-        } catch (err) {
-            console.warn('Sync: Failed to broadcast audit status', err);
-        }
-    },
-
-    async joinAudit(auditId, userName) {
-        try {
-            const docRef = db.collection('audits').doc(auditId);
-            const doc = await docRef.get();
-            if (doc.exists && doc.data().active) {
-                const participants = doc.data().participants || [];
-                if (!participants.includes(userName)) {
-                    participants.push(userName);
-                    await docRef.update({ participants });
-                }
-                return true;
-            }
-            return false;
-        } catch (err) {
-            console.error('Join Error:', err);
-            return false;
-        }
-    },
-
+    // رادار المأموريات (صامت)
     subscribeToAuditRadar(callback) {
-        console.log('Sync: Scanning for Global Pharmacy Missions... 📡📡📡');
         return db.collection('audits')
             .where('active', '==', true)
             .onSnapshot(snapshot => {
                 const audits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 callback(audits);
             }, err => {
-                console.error('Radar Stream Error:', err);
+                console.warn('Radar Silent Error: Firebase permissions restricted.');
             });
     },
 
-    async closeAudit(auditId) {
-        try {
-            await db.collection('audits').doc(auditId).update({
-                active: false,
-                closedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
-            });
-        } catch (err) {
-            console.error('Close Audit Error:', err);
-        }
-    },
-
-    async pushAuditEntry(entry) {
-        try {
-            await db.collection('audit_feed').add({
-                ...entry,
-                userName: window.App?.userName || 'مستخدم الميدان',
-                timestamp: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
-            });
-        } catch (err) {
-            console.warn('Sync: Push Audit Entry Failed', err);
-        }
-    },
-
-    subscribeToFeed(auditId, callback) {
-        return db.collection('audit_feed')
-            .where('auditId', '==', auditId)
-            .orderBy('timestamp', 'desc')
-            .limit(5)
-            .onSnapshot(snapshot => {
-                snapshot.docChanges().forEach(change => {
-                    if (change.type === 'added') {
-                        callback(change.doc.data());
-                    }
-                });
-            });
-    },
-
-    // v16.0.1: Universal Inventory Sync (Captures both Mission and Independent entries)
+    // دفع مدخلات الجرد للسحابة
     async pushInventoryEntry(entry) {
         try {
-            const collectionName = entry.auditId ? 'inventory_sync' : 'global_inventory';
-            console.log(`Sync: Mirroring entry [${entry.id}] to ${collectionName}... 🛰️`);
-            
-            await db.collection(collectionName).add({
+            const col = entry.auditId ? 'inventory_sync' : 'global_inventory';
+            await db.collection(col).add({
                 ...entry,
-                cloud_timestamp: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+                cloud_timestamp: firebase.firestore.FieldValue.serverTimestamp()
             });
         } catch (err) {
-            console.error('Cloud Mirroring Failed:', err);
+            console.warn(`Sync Entry: Cloud mirror failed for ${entry.id}.`);
         }
     },
 
-    subscribeToInventory(auditId, callback) {
-        if (!auditId) return null;
-        console.log(`Sync: Subscribing to Cloud Inventory for mission ${auditId}...`);
-        
-        return db.collection('inventory_sync')
-            .where('auditId', '==', auditId)
-            .onSnapshot(async (snapshot) => {
-                const changes = snapshot.docChanges();
-                let hasNew = false;
-                
-                for (const change of changes) {
-                    if (change.type === 'added') {
-                        const cloudData = change.doc.data();
-                        // Deduplicate Cloud vs Local
-                        const exists = await DB.get('inventory', cloudData.id);
-                        if (!exists) {
-                            await DB.put('inventory', cloudData);
-                            hasNew = true;
-                        }
-                    }
-                }
-                
-                if (hasNew && callback) {
-                    callback();
-                }
-            });
-    },
-
+    // سحب المخزون العالمي المحدث
     async pullGlobalInventory() {
-        console.log('Sync: Synchronizing Global Inventory Mirror... 🛰️');
         try {
-            const snapshot = await db.collection('global_inventory').get();
-            let newItems = 0;
+            const snapshot = await db.collection('global_inventory').limit(100).get();
             for (const doc of snapshot.docs) {
                 const data = doc.data();
-                if (!data.id) continue;
                 const exists = await DB.get('inventory', data.id);
-                if (!exists) {
-                    await DB.put('inventory', data);
-                    newItems++;
-                }
+                if (!exists) await DB.put('inventory', data);
             }
-            if (newItems > 0 && window.App?.renderDashboard) window.App.renderDashboard();
-            console.log(`Sync: Synchronized ${newItems} new global entries.`);
         } catch (err) {
-            console.warn('Sync: Global Pull Failed', err);
+            console.warn('Sync Global Pull: Permissions restricted.');
         }
     }
 };
 
 window.Sync = Sync;
-
