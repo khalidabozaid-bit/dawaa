@@ -13,7 +13,7 @@ import { auth, db, storage } from './core/firebase-config.js';
  */
 
 const App = {
-    VERSION: '10.0.3', // Sentinel v10.0.3: The Absolute Guard
+    VERSION: '10.1.0', // Visual Fortress v10.1.0
     inventoryTab: 'detailed',
     selectedCategoryId: null, 
 
