@@ -100,7 +100,9 @@ const App = {
             await this.renderDashboard();
             this.updateAdminUI();
             this.updateHubNotifications(); // v16.0.1
-            Sync.pull();
+            
+            await Sync.pull(); // Pull Master Data
+            await Sync.pullGlobalInventory(); // Pull Inventory Mirror
         } catch (err) { console.error("Session Error:", err); }
     },
 

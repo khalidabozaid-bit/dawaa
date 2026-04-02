@@ -29,10 +29,8 @@ export const Inventory = {
 
         await DB.add('inventory', entry);
         
-        // v14.0.0: Unified Cloud Synchronization
-        if (entry.auditId) {
-            import('../core/sync.js').then(({ Sync }) => Sync.pushInventoryEntry(entry));
-        }
+        // v16.0.1: Universal Cloud Mirroring (Mission + Independent)
+        import('../core/sync.js').then(({ Sync }) => Sync.pushInventoryEntry(entry));
 
         this.notify(); // v13.0.0: Broadcast local change
         return true;

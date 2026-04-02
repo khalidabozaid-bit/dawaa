@@ -193,17 +193,18 @@ export const Sync = {
             });
     },
 
-    // v14.0.0: Inventory Transaction Sync (The Heart of Global Auditing)
+    // v16.0.1: Universal Inventory Sync (Captures both Mission and Independent entries)
     async pushInventoryEntry(entry) {
-        if (!entry.auditId) return;
         try {
-            console.log('Sync: Pushing inventory entry to cloud...');
-            await db.collection('inventory_sync').add({
+            const collectionName = entry.auditId ? 'inventory_sync' : 'global_inventory';
+            console.log(`Sync: Mirroring entry [${entry.id}] to ${collectionName}... 🛰️`);
+            
+            await db.collection(collectionName).add({
                 ...entry,
                 cloud_timestamp: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
             });
         } catch (err) {
-            console.error('Cloud Entry Push Failed:', err);
+            console.error('Cloud Mirroring Failed:', err);
         }
     },
 
@@ -233,6 +234,27 @@ export const Sync = {
                     callback();
                 }
             });
+    },
+
+    async pullGlobalInventory() {
+        console.log('Sync: Synchronizing Global Inventory Mirror... 🛰️');
+        try {
+            const snapshot = await db.collection('global_inventory').get();
+            let newItems = 0;
+            for (const doc of snapshot.docs) {
+                const data = doc.data();
+                if (!data.id) continue;
+                const exists = await DB.get('inventory', data.id);
+                if (!exists) {
+                    await DB.put('inventory', data);
+                    newItems++;
+                }
+            }
+            if (newItems > 0 && window.App?.renderDashboard) window.App.renderDashboard();
+            console.log(`Sync: Synchronized ${newItems} new global entries.`);
+        } catch (err) {
+            console.warn('Sync: Global Pull Failed', err);
+        }
     }
 };
 
