@@ -13,6 +13,7 @@ import { auth, db, storage } from './core/firebase-config.js';
  */
 
 const App = {
+    VERSION: '10.0.2', // Sentinel v10.0.2: Single Source of Truth
     inventoryTab: 'detailed',
     selectedCategoryId: null, 
 
@@ -1369,37 +1370,42 @@ App.checkUpdate = async function() {
     }
 
     // Stage 1: Check for Updates (First Click)
-    this.updateStatus('جاري البحث عن تحديثات...');
+    this.updateStatus('جاري فحص الإصدار بدقة... 🔍');
     if ('serviceWorker' in navigator) {
         try {
+            // v10.0.2 Sentry: Force browser to discard its cached SW and fetch from server
+            const checkUrl = `./sw.js?check=${Date.now()}`;
+            const reg = await navigator.serviceWorker.register(checkUrl);
+            
+            // Re-trigger update logic for the new worker
+            await reg.update();
+            
             // Monitor for Activation Sovereignty (v9.10.1)
             navigator.serviceWorker.addEventListener('controllerchange', () => {
                 UI.showToast('تم تنشيط النسخة الجديدة! جاري إعادة التشغيل... 🛡️', 'success');
                 setTimeout(() => window.location.reload(), 1000);
             });
 
-            const reg = await navigator.serviceWorker.getRegistration();
-            if (reg) {
-                await reg.update();
-                const newWorker = reg.waiting || reg.installing;
-                if (newWorker) {
-                    this.updateState = 'ready';
-                    this.pendingRegistration = reg;
-                    // Transformation Protocol (v9.9.7 Architect)
-                    this.updateStatus('تحديث جاهز! اضغط هنا مرة أخرى للتثبيت 🚀');
-                    const btn = document.querySelector('.setting-card .bx-refresh')?.closest('.setting-card');
-                    if (btn) btn.style.background = 'var(--primary-light)'; 
-                    return;
-                }
-                this.updateStatus('أنت تستخدم أحدث نسخة بالفعل ✅');
-                this.updateState = 'check';
-                setTimeout(() => this.updateStatus('البحث عن إصدارات جديدة متوفرة'), 4000);
+            const newWorker = reg.waiting || reg.installing;
+            if (newWorker) {
+                this.updateState = 'ready';
+                this.pendingRegistration = reg;
+                // Sentinel Protocol (v10.0.2)
+                this.updateStatus('تحديث جديد متاح! اضغط للتثبيت 🚀');
+                const btn = document.querySelector('.setting-card .bx-refresh')?.closest('.setting-card');
+                if (btn) btn.style.background = 'var(--primary-light)'; 
+                return;
             }
+            this.updateStatus(`أنت تستخدم النسخة v${this.VERSION} بنجاح ✅`);
+            this.updateState = 'check';
+            setTimeout(() => this.updateStatus('البحث عن إصدارات جديدة متوفرة'), 4000);
         } catch (err) {
+            console.error('Update Error:', err);
             this.updateStatus('فشل التحقق من التحديث ⚠️');
         }
     }
 };
+
 
 
 
