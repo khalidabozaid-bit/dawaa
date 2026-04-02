@@ -13,7 +13,7 @@ import { auth, db, storage } from './core/firebase-config.js';
  */
 
 const App = {
-    VERSION: '10.1.0', // Visual Fortress v10.1.0
+    VERSION: '10.2.0', // Master Architect v10.2.0
     inventoryTab: 'detailed',
     selectedCategoryId: null, 
 
@@ -492,6 +492,7 @@ const App = {
 
     async openCategory(catId) {
         try {
+            this.selectedCategoryId = catId; // Store context for refresh
             const medicines = await Categories.getMedicinesByCategoryId(catId);
             const info = await Categories.getInfo(catId);
 
@@ -499,20 +500,27 @@ const App = {
                 <div class="modal-header">
                     <h2>${info.nameAR}</h2>
                     <div class="header-btns">
-                        <button class="btn-primary sm-btn" onclick="window.App.openTransferMedicine('${catId}')">➕ إضافة / نقل</button>
+                        <button class="btn-primary sm-btn" onclick="window.App.openAddMedicineWithCat('${catId}')"><i class='bx bx-plus'></i> صنف جديد</button>
+                        <button class="btn-ghost sm-btn" onclick="window.App.openTransferMedicine('${catId}')"><i class='bx bx-transfer'></i> نقل</button>
                     </div>
                 </div>
                 <div class="medicine-selection-grid">
                     ${medicines.map(m => {
                         const imgSrc = Categories.getMedicineImage(m);
                         return `
-                            <div class="med-card-btn" onclick="window.App.openEntryForm('${m.id}')">
-                                <div class="med-image">
-                                    <img src="${imgSrc}" onerror="this.src='assets/icons/default-med.png'">
+                            <div class="med-card-btn">
+                                <div class="med-card-main" onclick="window.App.openEntryForm('${m.id}')">
+                                    <div class="med-image">
+                                        <img src="${imgSrc}" onerror="this.src='assets/icons/default-med.png'">
+                                    </div>
+                                    <div class="med-info-overlay">
+                                        <h4>${m.nameEN} <span class="med-id-badge">#${m.id}</span></h4>
+                                        <span class="med-active-sub">${m.activeIngredient || ''}</span>
+                                    </div>
                                 </div>
-                                <div class="med-info-overlay">
-                                    <h4>${m.nameEN} <span class="med-id-badge">#${m.id}</span></h4>
-                                    <span class="med-active-sub">${m.activeIngredient || ''}</span>
+                                <div class="med-card-actions">
+                                    <button class="action-btn-mini edit" onclick="window.App.openEditMedicine('${m.id}')" title="تعديل البيانات الأساسية"><i class='bx bx-edit-alt'></i></button>
+                                    <button class="action-btn-mini delete" onclick="window.App.deleteMasterMedicine('${m.id}')" title="حذف الصنف نهائياً"><i class='bx bx-trash'></i></button>
                                 </div>
                             </div>
                         `;
@@ -1501,6 +1509,34 @@ App.updateAdminUI = function() {
     if (window.UI && UI.currentView === 'master') App.renderMasterData();
 };
 
+
+App.deleteMasterMedicine = async function(id) {
+    if (!confirm('🚨 تحذير: حذف الصنف سيحذف كافة بيانات الجرد المرتبطة به من المستودع. هل أنت متأكد؟')) return;
+    
+    try {
+        UI.showToast('جاري حذف الصنف... 🗑️', 'info');
+        await DB.delete('medicineMaster', id);
+        
+        // Cleanup related inventory
+        const entries = await DB.getAll('inventory');
+        for (let entry of entries) {
+            if (entry.medicineId === id) await DB.delete('inventory', entry.id);
+        }
+
+        UI.showToast('تم حذف الصنف والجرد بالكامل 🗑️', 'warning');
+        
+        // Refresh category view if open
+        if (this.selectedCategoryId) this.openCategory(this.selectedCategoryId);
+        
+        // Background Sync: Delete from Cloud if admin
+        if (this.userRole === 'admin') {
+            // Implementation for cloud deletion could go here if needed
+            console.log(`Cloud Sync: Delete Master ${id}`);
+        }
+    } catch (err) {
+        UI.showToast('فشل الحذف', 'danger');
+    }
+};
 
 // Sync UI functions removed in v9.9.0 - Absolute Essence Protocol
 
