@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'dawaa-cache-v9.10.0';
+const CACHE_NAME = 'dawaa-cache-v9.10.1';
 
 
 const ASSETS_TO_CACHE = [
@@ -56,8 +56,9 @@ self.addEventListener('activate', (event) => {
       );
     })
   );
-  // self.clients.claim(); // Removed for stability
+  self.clients.claim(); // v9.10.1: Immediate sovereignty
 });
+
 
 self.addEventListener('fetch', (event) => {
   event.respondWith(

@@ -1341,6 +1341,12 @@ App.checkUpdate = async function() {
     this.updateStatus('جاري البحث عن تحديثات...');
     if ('serviceWorker' in navigator) {
         try {
+            // Monitor for Activation Sovereignty (v9.10.1)
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                UI.showToast('تم تنشيط النسخة الجديدة! جاري إعادة التشغيل... 🛡️', 'success');
+                setTimeout(() => window.location.reload(), 1000);
+            });
+
             const reg = await navigator.serviceWorker.getRegistration();
             if (reg) {
                 await reg.update();
@@ -1363,6 +1369,7 @@ App.checkUpdate = async function() {
         }
     }
 };
+
 
 
 
