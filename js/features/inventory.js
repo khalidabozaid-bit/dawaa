@@ -8,6 +8,11 @@ import { Utils } from '../core/utils.js';
  */
 
 export const Inventory = {
+    // v13.0.0: UI Change Observers
+    subscribers: [],
+    subscribe(callback) { this.subscribers.push(callback); },
+    notify() { this.subscribers.forEach(cb => cb()); },
+
     async addEntry(data) {
         if (!data.medicineId || !data.quantity) return false;
         
@@ -23,6 +28,13 @@ export const Inventory = {
         };
 
         await DB.add('inventory', entry);
+        
+        // v14.0.0: Unified Cloud Synchronization
+        if (entry.auditId) {
+            import('../core/sync.js').then(({ Sync }) => Sync.pushInventoryEntry(entry));
+        }
+
+        this.notify(); // v13.0.0: Broadcast local change
         return true;
     },
 
@@ -98,6 +110,28 @@ export const Inventory = {
         });
 
         return Array.from(aggregated.values());
+    },
+
+    /**
+     * Precision Filtering (v11.1.0 Engineered Indexing)
+     */
+    async getEntriesByAudit(auditId) {
+        if (!auditId) return [];
+        const db = await DB.init();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(['inventory'], 'readonly');
+            const store = tx.objectStore('inventory');
+            const index = store.index('by_audit_id');
+            const request = index.getAll(auditId);
+            request.onsuccess = () => resolve(request.result || []);
+            request.onerror = (e) => reject(e.target.error);
+        });
+    },
+
+    async getRecentAuditActivity(auditId, limit = 10) {
+        let entries = await this.getEntriesByAudit(auditId);
+        // Sort by timestamp descending and slice
+        return entries.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, limit);
     },
 
     /**

@@ -48,7 +48,7 @@
                 <button type="submit" class="auth-btn" id="auth-submit-btn">دخول النظام</button>
             </form>
 
-            <div class="auth-toggle" style="display: none;">
+            <div class="auth-toggle admin-hidden">
                 <span id="auth-toggle-text"></span>
                 <button class="auth-toggle-btn" onclick="window.App.toggleAuthMode()"></button>
             </div>
@@ -70,7 +70,7 @@
             </div>
             <div class="app-logo">
                 <i class='bx bxs-capsule'></i>
-                <h1>دواء <span style="font-size: 10px; opacity: 0.5">v11.0.0</span></h1>
+                <h1>دواء <span class="ver-badge">v16.0.0 - Sovereign Radar</span></h1>
             </div>
             <div id="audit-banner" class="global-audit-banner"></div>
 
@@ -83,8 +83,8 @@
 
 
 
-                <button class="icon-btn" onclick="window.App.startAudit()" title="بدء جرد رسمي">
-                    <i class='bx bx-clipboard'></i>
+                <button class="icon-btn" onclick="window.App.openAuditHub()" title="مركز عمليات الجرد (Command Center)">
+                    <i class='bx bx-command'></i>
                 </button>
                 <button class="icon-btn" onclick="window.toggleTheme()" title="تبديل الوضع">
                     <i class='bx bx-moon' id="theme-icon"></i>
@@ -119,6 +119,14 @@
                         <span class="stat-label">تنبيه الصلاحية</span>
                     </div>
                 </div>
+                <!-- v12.0.0: Command Center Tile -->
+                <div class="stat-card primary-accent cmd-center" onclick="window.App.openAuditHub()">
+                    <div class="stat-icon primary-solid"><i class='bx bx-station'></i></div>
+                    <div class="stat-data">
+                        <span class="stat-value large-text">مركز القيادة</span>
+                        <span class="stat-label">غرفة عمليات الجرد</span>
+                    </div>
+                </div>
             </div>
 
             <!-- Active Audit Highlight (v10.5.1) -->
@@ -148,7 +156,9 @@
         <!-- Inventory List View -->
         <section id="view-inventory" class="view">
             <div class="view-header">
-                <button class="back-btn" onclick="window.UI.switchView('view-dashboard')"><i class='bx bx-chevron-right'></i></button>
+                <button class="back-btn" onclick="window.UI.switchView('view-dashboard')" title="العودة للوحة التحكم">
+                    <i class='bx bx-chevron-right'></i>
+                </button>
                 <h2>تقارير الجرد والإحصائيات</h2>
             </div>
 
@@ -191,13 +201,13 @@
         <!-- Master Data View -->
         <section id="view-master" class="view">
             <div class="view-header">
-                <div class="header-left" style="display:flex; align-items:center; gap:10px">
+                <div class="header-left nav-header-left">
                     <button class="back-btn" onclick="window.UI.switchView('view-dashboard')" title="رجوع"><i class='bx bx-chevron-right'></i></button>
                     <h2>مستودع الأصناف</h2>
                 </div>
-                <div class="header-btns" style="display:flex; gap:8px">
+                <div class="header-btns flex-gap-sm">
                     <button class="btn-outline-primary sm-btn-icon" onclick="window.App.openManageCategories()" title="إدارة الأقسام"><i class='bx bx-category-alt'></i></button>
-                    <button class="btn-primary sm-btn" style="width:auto; padding:0 15px; height:40px; font-size:13px" onclick="window.App.openAddMedicine()"><i class='bx bx-plus' style="margin-left:4px"></i>إضافة دواء</button>
+                    <button class="btn-primary sm-btn btn-auto-width" onclick="window.App.openAddMedicine()" title="إضافة صنف دواء جديد"><i class='bx bx-plus icon-margin-ar'></i>إضافة دواء</button>
                 </div>
             </div>
 
@@ -211,7 +221,9 @@
         <!-- Settings View (Mashawiri Style) -->
         <section id="view-settings" class="view">
             <div class="view-header">
-                <button class="back-btn" onclick="window.UI.switchView('view-dashboard')"><i class='bx bx-chevron-right'></i></button>
+                <button class="back-btn" onclick="window.UI.switchView('view-dashboard')" title="العودة للوحة التحكم">
+                    <i class='bx bx-chevron-right'></i>
+                </button>
                 <h2>الإعدادات والنظام</h2>
             </div>
             <div class="settings-grid">
@@ -222,7 +234,7 @@
                         <p>إدارة أصناف الأدوية، الإضافة والتعديل</p>
                     </div>
                 </div>
-                <div id="admin-audit-hub-card" class="setting-card primary-accent" onclick="window.App.startAudit()" style="display:none">
+                <div id="admin-audit-hub-card" class="setting-card primary-accent admin-hidden" onclick="window.App.startAudit()">
                     <div class="setting-icon bg-sync"><i class='bx bx-clipboard'></i></div>
                     <div class="setting-info">
                         <h3>إدارة عمليات الجرد (Hub)</h3>
@@ -262,7 +274,7 @@
                 </div>
 
                 <!-- Emergency Force Update (v10.0.1 Sovereign Protocol) -->
-                <div class="setting-card force-reset" onclick="window.App.forceUpdateSystem()" style="background: rgba(239, 68, 68, 0.05); border: 1px solid var(--danger-light)">
+                <div class="setting-card force-reset emergency-purge" onclick="window.App.forceUpdateSystem()">
                     <div class="setting-icon bg-danger-light"><i class='bx bx-bomb text-danger'></i></div>
                     <div class="setting-info">
                         <h3 class="text-danger">تحديث إجباري (للطوارئ)</h3>
@@ -279,24 +291,41 @@
                 </div>
             </div>
             <div class="version-footer">
-                <p>دواء للمستودعات الذكية - v11.0.0</p>
+                <p>دواء للمستودعات الذكية - v16.0.0</p>
 
 
 
 
-                <p style="font-size: 9px; opacity: 0.6">تم تحديث نظام الأكواد العالمي (1001)</p>
+                <p class="text-tiny-muted">تم تحديث نظام الأكواد العالمي (1001)</p>
                 <p>Mashawiri Protocol Standards</p>
             </div>
         </section>
         <!-- Audit Hub View (v10.6.5 Command Center) -->
         <section id="view-audit-hub" class="view">
             <div class="view-header">
-                <button class="back-btn" onclick="window.UI.switchView('view-settings')"><i class='bx bx-chevron-right'></i></button>
+                <button class="back-btn" onclick="window.UI.switchView('view-settings')" title="العودة للإعدادات">
+                    <i class='bx bx-chevron-right'></i>
+                </button>
                 <h2>مركز إدارة الجرد (Audit Hub)</h2>
             </div>
 
             <div id="hub-session-content" class="mt-20">
                 <!-- Dynamic Content (Start Mode / Active Stats / Participants) -->
+            </div>
+
+            <!-- v16.0.1: Centralized Tactical Notifications Dropdown -->
+            <div class="notifications-center mt-30">
+                <button class="notif-toggle-btn" onclick="window.App.toggleHubNotifications()">
+                    <div class="notif-badge-wrap">
+                        <i class='bx bx-bell'></i>
+                        <span id="hub-notif-count" class="badge-dot admin-hidden"></span>
+                    </div>
+                    <span>إشعارات وتنبيهات النظام</span>
+                    <i class='bx bx-chevron-down' id="notif-chevron"></i>
+                </button>
+                <div id="hub-notif-list" class="notif-list-container admin-hidden">
+                    <!-- Dynamic Alerts (Expiring/Low Stock) Rendered Here -->
+                </div>
             </div>
         </section>
     </main>
@@ -313,7 +342,7 @@
                 <span>الجرد الذكي</span>
             </button>
             <div class="nav-action-btn">
-                <button id="btn-quick-add" onclick="window.App.openQuickAdd()">
+                <button id="btn-quick-add" onclick="window.App.openQuickAdd()" title="إضافة سريعة للصيدلية/المخزن">
                     <i class='bx bx-plus'></i>
                 </button>
             </div>
@@ -321,7 +350,7 @@
                 <i class='bx bxs-file-doc'></i>
                 <span>التقارير</span>
             </button>
-            <button class="nav-item" data-target="settings">
+            <button class="nav-item" data-target="settings" title="الإعدادات والنظام">
                 <i class='bx bxs-cog'></i>
                 <span>الإعدادات</span>
             </button>

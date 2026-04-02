@@ -92,6 +92,16 @@ export const UI = {
         if (elements.expiring) elements.expiring.textContent = stats.expiringCount || 0;
     },
 
+    renderEmptyState(message = 'لا توجد بيانات متاحة حالياً', icon = 'bx-package') {
+        return `
+            <div class="empty-state-v15 text-center mt-40">
+                <div class="empty-icon-orb"><i class='bx ${icon}'></i></div>
+                <h3 class="mt-15">${message}</h3>
+                <p class="text-muted mt-5">استمر في إثراء بيانات صيدليتك! 🚀</p>
+            </div>
+        `;
+    },
+
     renderReportsMenu() {
         const container = document.getElementById('reports-container');
         if (!container) return;

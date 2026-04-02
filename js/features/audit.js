@@ -24,28 +24,47 @@ export const Audit = {
             type: mode,
             host: user.displayName || user.email,
             participants: [user.displayName || user.email],
-            startTime: new Date().toISOString()
+            startTime: new Date().toISOString(),
+            active: true
         };
 
         if (mode === 'team') {
             await DB.put('audits', session);
-            Sync.broadcastAuditStatus(session);
+            await Sync.broadcastAuditStatus(session);
         }
         
         return session;
     },
 
-    async join(userName) {
-        if (await Sync.joinAudit(userName)) {
+    async join(auditId, userName) {
+        if (await Sync.joinAudit(auditId, userName)) {
             this.isJoined = true;
             return true;
         }
         return false;
     },
 
-    async end() {
-        if (!confirm('هل أنت متأكد من إنهاء عملية الجرد الحالية؟')) return false;
-        Sync.broadcastAuditStatus(null);
+    async end(auditId) {
+        if (!confirm('هل أنت متأكد من إنهاء عملية الجرد الحالية؟ سيتم أرشفة البيانات سحابياً.')) return false;
+        await Sync.closeAudit(auditId);
         return true;
+    },
+
+    /**
+     * Operational Analytics (v12.0.0 Command Hub)
+     */
+    async getSessionStats(auditId) {
+        if (!auditId) return { totalItems: 0, totalUnits: 0, uniqueMedicines: 0 };
+        
+        const entries = await window.Inventory.getEntriesByAudit(auditId);
+        const uniqueMeds = new Set(entries.map(e => e.medicineId));
+        
+        const totalUnits = entries.reduce((sum, e) => sum + (parseFloat(e.quantity) || 0), 0);
+        
+        return {
+            totalEntries: entries.length,
+            totalUnits: totalUnits,
+            uniqueCount: uniqueMeds.size
+        };
     }
 };

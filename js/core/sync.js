@@ -108,24 +108,26 @@ export const Sync = {
     /**
      * Collaborative Audit Synchronization (v10.5.0 Supreme Auditor)
      */
+    /**
+     * v16.0.0: Global Mission Radar (Multi-Audit Discovery)
+     */
     async broadcastAuditStatus(session) {
         if (window.App?.userRole !== 'admin') return;
         try {
-            await db.collection('audits').doc('current').set({
+            const auditRef = db.collection('audits').doc(session.id);
+            await auditRef.set({
                 ...session,
-                active: !!session,
-                participants: session ? [window.App.user.displayName || window.App.user.email] : [],
-                host: session ? (window.App.user.displayName || window.App.user.email) : null,
+                active: true,
                 updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
-            });
+            }, { merge: true });
         } catch (err) {
             console.warn('Sync: Failed to broadcast audit status', err);
         }
     },
 
-    async joinAudit(userName) {
+    async joinAudit(auditId, userName) {
         try {
-            const docRef = db.collection('audits').doc('current');
+            const docRef = db.collection('audits').doc(auditId);
             const doc = await docRef.get();
             if (doc.exists && doc.data().active) {
                 const participants = doc.data().participants || [];
@@ -142,18 +144,27 @@ export const Sync = {
         }
     },
 
-    subscribeToAudit(callback) {
-        console.log('Sync: Listening for Live Collaborative Audits... 📡');
-        return db.collection('audits').doc('current').onSnapshot(doc => {
-            if (doc.exists) {
-                const data = doc.data();
-                callback(data.active ? data : null);
-            } else {
-                callback(null);
-            }
-        }, err => {
-            console.error('Audit Stream Error:', err);
-        });
+    subscribeToAuditRadar(callback) {
+        console.log('Sync: Scanning for Global Pharmacy Missions... 📡📡📡');
+        return db.collection('audits')
+            .where('active', '==', true)
+            .onSnapshot(snapshot => {
+                const audits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                callback(audits);
+            }, err => {
+                console.error('Radar Stream Error:', err);
+            });
+    },
+
+    async closeAudit(auditId) {
+        try {
+            await db.collection('audits').doc(auditId).update({
+                active: false,
+                closedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+            });
+        } catch (err) {
+            console.error('Close Audit Error:', err);
+        }
     },
 
     async pushAuditEntry(entry) {
@@ -179,6 +190,48 @@ export const Sync = {
                         callback(change.doc.data());
                     }
                 });
+            });
+    },
+
+    // v14.0.0: Inventory Transaction Sync (The Heart of Global Auditing)
+    async pushInventoryEntry(entry) {
+        if (!entry.auditId) return;
+        try {
+            console.log('Sync: Pushing inventory entry to cloud...');
+            await db.collection('inventory_sync').add({
+                ...entry,
+                cloud_timestamp: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+            });
+        } catch (err) {
+            console.error('Cloud Entry Push Failed:', err);
+        }
+    },
+
+    subscribeToInventory(auditId, callback) {
+        if (!auditId) return null;
+        console.log(`Sync: Subscribing to Cloud Inventory for mission ${auditId}...`);
+        
+        return db.collection('inventory_sync')
+            .where('auditId', '==', auditId)
+            .onSnapshot(async (snapshot) => {
+                const changes = snapshot.docChanges();
+                let hasNew = false;
+                
+                for (const change of changes) {
+                    if (change.type === 'added') {
+                        const cloudData = change.doc.data();
+                        // Deduplicate Cloud vs Local
+                        const exists = await DB.get('inventory', cloudData.id);
+                        if (!exists) {
+                            await DB.put('inventory', cloudData);
+                            hasNew = true;
+                        }
+                    }
+                }
+                
+                if (hasNew && callback) {
+                    callback();
+                }
             });
     }
 };
