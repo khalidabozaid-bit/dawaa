@@ -70,7 +70,7 @@
             </div>
             <div class="app-logo">
                 <i class='bx bxs-capsule'></i>
-                <h1>دواء <span style="font-size: 10px; opacity: 0.5">v9.10.1</span></h1>
+                <h1>دواء <span style="font-size: 10px; opacity: 0.5">v10.0.1</span></h1>
             </div>
 
 
@@ -246,8 +246,17 @@
                         <h3>تحديث النظام</h3>
                         <p id="update-status-text">البحث عن إصدارات جديدة متوفرة</p>
                     </div>
-
                 </div>
+
+                <!-- Emergency Force Update (v10.0.1 Sovereign Protocol) -->
+                <div class="setting-card force-reset" onclick="window.App.forceUpdateSystem()" style="background: rgba(239, 68, 68, 0.05); border: 1px solid var(--danger-light)">
+                    <div class="setting-icon bg-danger-light"><i class='bx bx-bomb text-danger'></i></div>
+                    <div class="setting-info">
+                        <h3 class="text-danger">تحديث إجباري (للطوارئ)</h3>
+                        <p>استخدمه فقط إذا كان التطبيق عالقاً في نسخة قديمة</p>
+                    </div>
+                </div>
+
                 <div class="setting-card" onclick="window.toggleTheme()">
                     <div class="setting-icon"><i class='bx bx-moon' id="settings-theme-icon"></i></div>
                     <div class="setting-info">
@@ -257,7 +266,7 @@
                 </div>
             </div>
             <div class="version-footer">
-                <p>دواء للمستودعات الذكية - v9.10.1</p>
+                <p>دواء للمستودعات الذكية - v10.0.1</p>
 
 
 

@@ -8,8 +8,8 @@ import { Sync } from './core/sync.js';
 import { auth, db, storage } from './core/firebase-config.js';
 
 /**
- * Dawaa App Orchestrator (v9.9.6 - Unified Visualizer)
- * Cloud Storage & Intelligent Push Enabled.
+ * Dawaa App Orchestrator (v10.0.1 - Sovereign Reset)
+ * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
@@ -222,10 +222,41 @@ const App = {
     registerServiceWorker() {
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js').then(reg => {
-                    console.log('SW: Registered.');
+                // v10.0.1: Cache-Busting Registration to bypass HTTP stickiness
+                navigator.serviceWorker.register('./sw.js?v=10.0.1').then(reg => {
+                    console.log('SW: Sovereign Registered.');
                 }).catch(err => console.error('SW: Registration Error.', err));
             });
+        }
+    },
+
+    /**
+     * Heavy Purge (v10.0.1 Sovereign Protocol)
+     * Forces immediate cache clearance and Service Worker unregistration.
+     */
+    async forceUpdateSystem() {
+        if (!confirm('🚨 تحذير: سيتم مسح الذاكرة المؤقتة وإعادة تحميل النظام تماماً. لن يتم حذف بياناتك المخزنة، فقط ملفات التطبيق. هل أنت متأكد؟')) return;
+        
+        try {
+            UI.showToast('جاري تطهير النظام... 🧹', 'info');
+            
+            // 1. Unregister all SWs
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            for (let reg of registrations) {
+                await reg.unregister();
+            }
+
+            // 2. Clear all Caches
+            const cacheKeys = await caches.keys();
+            for (let key of cacheKeys) {
+                await caches.delete(key);
+            }
+
+            UI.showToast('تم التطهير! جاري إعادة التشغيل... 🚀', 'success');
+            setTimeout(() => window.location.href = window.location.origin + window.location.pathname + '?v=' + Date.now(), 1500);
+        } catch (err) {
+            console.error('Hard Reset Error:', err);
+            UI.showToast('فشل التطهير الإجباري', 'danger');
         }
     },
 
