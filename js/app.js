@@ -9,14 +9,14 @@ import { Sync } from './core/sync.js';
 import { auth, db } from './core/firebase-config.js';
 
 /**
- * دواء - نظام إدارة جرد الأدوية (v16.0.3 Stable)
- * نسخة الاستقرار الشاملة والعودة للمسار الاحترافي.
+ * دواء - نظام إدارة جرد الأدوية (v17.0.0 Stable Cloud)
+ * نسخة الاستقرار السحابي والمزامنة اللحظية الشاملة.
  */
 
 const App = {
-    VERSION: '16.0.3',
+    VERSION: '17.0.0',
     activeAudit: null,
-    inventoryUnsubscribe: null,
+    syncListener: null,
     selectedCategoryId: null,
     radarAudits: [],
 
@@ -48,8 +48,12 @@ const App = {
         UI.init();
         
         auth.onAuthStateChanged(async (user) => {
-            if (user) await this.handleUserSession(user);
-            else this.showLogin();
+            if (user) {
+                await this.handleUserSession(user);
+            } else {
+                if (this.syncListener) { this.syncListener(); this.syncListener = null; }
+                this.showLogin();
+            }
         });
 
         this.initServiceWorker();
@@ -70,9 +74,23 @@ const App = {
             await this.renderDashboard();
             this.updateHubNotifications();
             
-            // المزامنة تتم في الخلفية ولا توقف دخولك للتطبيق
-            Sync.pull().catch(err => console.warn("Cloud pull disabled or failed."));
-            Sync.pullGlobalInventory().catch(err => console.warn("Global pull disabled or failed."));
+            // v17.0.0: نظام المزامنة السحابي اللحظي
+            this.setSyncStatus('syncing');
+            
+            // 1. جلب بيانات الأدوية العالمية
+            await Sync.pullMasterData().catch(() => {});
+            
+            // 2. مزامنة المخزون الخاص بالمستخدم
+            await Sync.pullUserInventory().catch(() => {});
+            
+            // 3. تفعيل الاستماع اللحظي للتغييرات
+            if (this.syncListener) this.syncListener();
+            this.syncListener = Sync.initListeners(() => {
+                this.renderDashboard();
+                this.setSyncStatus('online');
+            });
+
+            this.setSyncStatus('online');
         } catch (err) { 
             console.error("Session Error:", err);
             this.hideLogin(); // الدخول الإجباري حتى في حال الخطأ
@@ -93,8 +111,18 @@ const App = {
         document.getElementById('expired-count').textContent = expiring;
     },
 
-    showLogin() { UI.switchView('view-login'); },
+    showLogin() { UI.switchView('view-login'); this.setSyncStatus('offline'); },
     hideLogin() { UI.switchView('view-dashboard'); },
+
+    setSyncStatus(status) {
+        const el = document.getElementById('cloud-sync-indicator');
+        if (!el) return;
+        el.className = `sync-indicator ${status}`;
+        const icon = el.querySelector('i');
+        if (status === 'online') icon.className = 'bx bx-cloud-check';
+        else if (status === 'syncing') icon.className = 'bx bx-sync bx-spin';
+        else icon.className = 'bx bx-cloud-off';
+    },
 
     async handleAuthSubmit() {
         const name = document.getElementById('auth-name').value;

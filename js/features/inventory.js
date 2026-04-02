@@ -29,7 +29,7 @@ export const Inventory = {
 
         await DB.add('inventory', entry);
         
-        // v16.0.1: Universal Cloud Mirroring (Mission + Independent)
+        // v17.0.0: Enhanced Cloud Mirroring (Real-time)
         import('../core/sync.js').then(({ Sync }) => Sync.pushInventoryEntry(entry));
 
         this.notify(); // v13.0.0: Broadcast local change
@@ -68,6 +68,11 @@ export const Inventory = {
 
     async deleteEntry(id) {
         await DB.delete('inventory', id);
+        
+        // v17.0.0: Cloud Deletion Hook
+        import('../core/sync.js').then(({ Sync }) => Sync.deleteInventoryEntry(id));
+        
+        this.notify();
         return true;
     },
 
