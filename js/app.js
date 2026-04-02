@@ -13,7 +13,7 @@ import { auth, db, storage } from './core/firebase-config.js';
  */
 
 const App = {
-    VERSION: '16.0.0',
+    VERSION: '16.0.1',
     activeAudit: null, 
     inventoryUnsubscribe: null,
     isJoined: false,   
@@ -565,6 +565,41 @@ const App = {
         this.selectedCategoryId = catId;
         UI.switchView('view-inventory');
         this.renderInventory();
+    },
+
+    async forceUpdateSystem() {
+        if (!confirm('🚨 سيتم مسح الذاكرة المؤقتة وإعادة تحميل أحدث نسخة من النظام. هل أنت متأكد؟')) return;
+        
+        UI.showToast('جاري البدء في التحديث القسري... 🛰️', 'info');
+        
+        try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            for (let reg of registrations) { await reg.unregister(); }
+
+            const cacheNames = await caches.keys();
+            await Promise.all(cacheNames.map(name => caches.delete(name)));
+
+            UI.showToast('تم مسح الذاكرة بنجاح. جاري إعادة التحميل... 🛡️', 'success');
+            setTimeout(() => { window.location.reload(true); }, 1500);
+        } catch (err) {
+            UI.showToast('فشل التحديث القسري', 'danger');
+        }
+    },
+
+    async checkUpdate() {
+        const text = document.getElementById('update-status-text');
+        if (text) text.textContent = 'جاري البحث عن تحديثات... 🛰️';
+        
+        if (!('serviceWorker' in navigator)) return;
+        
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) {
+            await reg.update();
+            if (!reg.waiting && !reg.installing) {
+                UI.showToast('أنت تستخدم أحدث نسخة بالفعل ✅', 'success');
+                if (text) text.textContent = 'أنت تستخدم أحدث نسخة بالفعل ✅';
+            }
+        }
     }
 };
 

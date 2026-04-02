@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'dawaa-cache-v10.1.0';
+const CACHE_NAME = 'dawaa-cache-v16.0.1';
 const IMAGE_CACHE_NAME = 'dawaa-images-v1'; // Dedicated store for medicine visual assets
 const MAX_IMAGES = 100; // Limit to avoid device storage bloat
 
@@ -37,7 +37,7 @@ self.addEventListener('install', (event) => {
       return cache.addAll(ASSETS_TO_CACHE);
     })
   );
-  // Removed self.skipWaiting() - Mashawiri Stability Protocol
+  self.skipWaiting(); // v16.0.1: Immediate jump to latest version
 });
 
 self.addEventListener('message', (event) => {
@@ -47,14 +47,15 @@ self.addEventListener('message', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  self.clients.claim(); // v9.10.1: Immediate sovereignty
+  self.clients.claim();
   
-  // Purge older caches (v10.1.0: Preserve IMAGE_CACHE_NAME)
+  // Purge ALL older caches except current and images
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
           if (cacheName !== CACHE_NAME && cacheName !== IMAGE_CACHE_NAME) {
+            console.log('SW: Purging legacy cache:', cacheName);
             return caches.delete(cacheName);
           }
         })
