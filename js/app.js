@@ -13,7 +13,7 @@ import { auth, db, storage } from './core/firebase-config.js';
  */
 
 const App = {
-    VERSION: '10.0.2', // Sentinel v10.0.2: Single Source of Truth
+    VERSION: '10.0.3', // Sentinel v10.0.3: The Absolute Guard
     inventoryTab: 'detailed',
     selectedCategoryId: null, 
 
@@ -1356,6 +1356,18 @@ App.updateStatus = function(msg) {
 App.updateState = 'check'; // 'check' or 'ready'
 App.pendingRegistration = null;
 
+App.getRemoteVersion = async function() {
+    try {
+        // Fetch sw.js directly with cache-busting to read server-side version
+        const response = await fetch(`./sw.js?v=${Date.now()}`, { cache: 'no-store' });
+        const text = await response.text();
+        const match = text.match(/CACHE_NAME = 'dawaa-cache-v([\d.]+)'/);
+        return match ? match[1] : null;
+    } catch (err) {
+        return null;
+    }
+};
+
 App.checkUpdate = async function() {
     // Stage 2: Execute Update (Second Click)
     if (this.updateState === 'ready' && this.pendingRegistration) {
@@ -1364,7 +1376,7 @@ App.checkUpdate = async function() {
         if (worker) {
             UI.showToast('جاري تثبيت التحديث وإعادة التشغيل... ⏳', 'info');
             worker.postMessage({ type: 'SKIP_WAITING' });
-            setTimeout(() => window.location.reload(), 2000);
+            // controllerchange listener from Stage 1 will handle the reload
         }
         return;
     }
@@ -1373,38 +1385,46 @@ App.checkUpdate = async function() {
     this.updateStatus('جاري فحص الإصدار بدقة... 🔍');
     if ('serviceWorker' in navigator) {
         try {
-            // v10.0.2 Sentry: Force browser to discard its cached SW and fetch from server
-            const checkUrl = `./sw.js?check=${Date.now()}`;
-            const reg = await navigator.serviceWorker.register(checkUrl);
-            
-            // Re-trigger update logic for the new worker
-            await reg.update();
-            
-            // Monitor for Activation Sovereignty (v9.10.1)
-            navigator.serviceWorker.addEventListener('controllerchange', () => {
-                UI.showToast('تم تنشيط النسخة الجديدة! جاري إعادة التشغيل... 🛡️', 'success');
-                setTimeout(() => window.location.reload(), 1000);
-            });
+            // 1. Intelligent Check: Is there a newer version on the server?
+            const remoteVer = await this.getRemoteVersion();
+            console.log(`Update Check: Local=${this.VERSION}, Remote=${remoteVer}`);
 
-            const newWorker = reg.waiting || reg.installing;
-            if (newWorker) {
-                this.updateState = 'ready';
-                this.pendingRegistration = reg;
-                // Sentinel Protocol (v10.0.2)
-                this.updateStatus('تحديث جديد متاح! اضغط للتثبيت 🚀');
-                const btn = document.querySelector('.setting-card .bx-refresh')?.closest('.setting-card');
-                if (btn) btn.style.background = 'var(--primary-light)'; 
-                return;
+            if (remoteVer && remoteVer !== this.VERSION) {
+                // 2. New Version Confirmed: Trigger SW System
+                const reg = await navigator.serviceWorker.register(`./sw.js?v=${remoteVer}`);
+                await reg.update();
+
+                // Monitor for Activation Sovereignty (v9.10.1)
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    window.location.reload();
+                });
+
+                const newWorker = reg.waiting || reg.installing;
+                if (newWorker) {
+                    this.updateStatus(`تحديث متاح (v${remoteVer})! اضغط للتثبيت 🚀`);
+                    this.updateState = 'ready';
+                    this.pendingRegistration = reg;
+                    const btn = document.querySelector('.setting-card .bx-refresh')?.closest('.setting-card');
+                    if (btn) btn.style.background = 'var(--primary-light)'; 
+                    return;
+                }
             }
+
+            // 3. Up to date or no version found
             this.updateStatus(`أنت تستخدم النسخة v${this.VERSION} بنجاح ✅`);
             this.updateState = 'check';
+            const btn = document.querySelector('.setting-card .bx-refresh')?.closest('.setting-card');
+            if (btn) btn.style.background = ''; // Reset if it was blue
             setTimeout(() => this.updateStatus('البحث عن إصدارات جديدة متوفرة'), 4000);
+
         } catch (err) {
-            console.error('Update Error:', err);
+            console.error('Update Sentry Error:', err);
             this.updateStatus('فشل التحقق من التحديث ⚠️');
         }
     }
 };
+
+
 
 
 
