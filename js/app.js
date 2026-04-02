@@ -9,14 +9,14 @@ import { Sync } from './core/sync.js';
 import { auth, db } from './core/firebase-config.js';
 
 /**
- * دواء - نظام إدارة جرد الأدوية (v17.0.0 Stable Cloud)
- * نسخة الاستقرار السحابي والمزامنة اللحظية الشاملة.
+ * دواء - نظام إدارة جرد الأدوية (v16.0.4 Stable)
+ * نسخة الاستقرار المطلق والاعتماد المحلي الذكي.
  */
 
 const App = {
-    VERSION: '17.0.0',
+    VERSION: '16.0.4',
     activeAudit: null,
-    syncListener: null,
+    inventoryUnsubscribe: null,
     selectedCategoryId: null,
     radarAudits: [],
 
@@ -28,7 +28,7 @@ const App = {
 
         await DB.init();
         
-        // ربط رادار المأموريات (بشكل صامت وغير مؤثر في حال الخطأ)
+        // رادار المأموريات (صامت)
         Sync.subscribeToAuditRadar((audits) => {
             this.radarAudits = audits;
             if (this.activeAudit) {
@@ -48,12 +48,8 @@ const App = {
         UI.init();
         
         auth.onAuthStateChanged(async (user) => {
-            if (user) {
-                await this.handleUserSession(user);
-            } else {
-                if (this.syncListener) { this.syncListener(); this.syncListener = null; }
-                this.showLogin();
-            }
+            if (user) await this.handleUserSession(user);
+            else this.showLogin();
         });
 
         this.initServiceWorker();
@@ -64,9 +60,26 @@ const App = {
         navigator.serviceWorker.register('./sw.js');
     },
 
+    setSyncStatus(status) {
+        const indicator = document.getElementById('cloud-sync-indicator');
+        if (!indicator) return;
+        if (status === 'online') {
+            indicator.innerHTML = "<i class='bx bx-cloud'></i>";
+            indicator.className = "sync-indicator online";
+            indicator.title = "متصل بالسحابة ✅";
+        } else if (status === 'syncing') {
+            indicator.innerHTML = "<i class='bx bx-sync bx-spin'></i>";
+            indicator.className = "sync-indicator syncing";
+            indicator.title = "جاري الحفظ... 📡";
+        } else {
+            indicator.innerHTML = "<i class='bx bx-cloud-off'></i>";
+            indicator.className = "sync-indicator offline";
+            indicator.title = "يعمل محلياً (Shield Mode) 🛡️";
+        }
+    },
+
     async handleUserSession(user) {
         try {
-            // محاكاة بيانات الملف الشخصي (لتجنب توقف الدخول في حال فشل أذونات Firebase)
             this.userName = user.displayName || user.email.split('@')[0];
             document.getElementById('display-user-name').textContent = this.userName;
             
@@ -74,26 +87,14 @@ const App = {
             await this.renderDashboard();
             this.updateHubNotifications();
             
-            // v17.0.0: نظام المزامنة السحابي اللحظي
             this.setSyncStatus('syncing');
-            
-            // 1. جلب بيانات الأدوية العالمية
-            await Sync.pullMasterData().catch(() => {});
-            
-            // 2. مزامنة المخزون الخاص بالمستخدم
-            await Sync.pullUserInventory().catch(() => {});
-            
-            // 3. تفعيل الاستماع اللحظي للتغييرات
-            if (this.syncListener) this.syncListener();
-            this.syncListener = Sync.initListeners(() => {
-                this.renderDashboard();
-                this.setSyncStatus('online');
-            });
-
-            this.setSyncStatus('online');
+            // مزامنة صامتة لا تعطل الدخول
+            Sync.pull().then(() => this.setSyncStatus('online'))
+                   .catch(() => this.setSyncStatus('offline'));
+            Sync.pullGlobalInventory().catch(() => {});
         } catch (err) { 
             console.error("Session Error:", err);
-            this.hideLogin(); // الدخول الإجباري حتى في حال الخطأ
+            this.hideLogin(); 
         }
     },
 
@@ -106,23 +107,17 @@ const App = {
         const lowStock = items.filter(i => i.quantity <= 5).length;
         const expiring = items.filter(i => i.expiryDate && new Date(i.expiryDate) < sixMonthsOut).length;
 
-        document.getElementById('total-meds').textContent = total;
-        document.getElementById('low-stock-count').textContent = lowStock;
-        document.getElementById('expired-count').textContent = expiring;
+        const totalEl = document.getElementById('total-meds');
+        const lowEl = document.getElementById('low-stock-count');
+        const expEl = document.getElementById('expired-count');
+
+        if (totalEl) totalEl.textContent = total;
+        if (lowEl) lowEl.textContent = lowStock;
+        if (expEl) expEl.textContent = expiring;
     },
 
-    showLogin() { UI.switchView('view-login'); this.setSyncStatus('offline'); },
+    showLogin() { UI.switchView('view-login'); },
     hideLogin() { UI.switchView('view-dashboard'); },
-
-    setSyncStatus(status) {
-        const el = document.getElementById('cloud-sync-indicator');
-        if (!el) return;
-        el.className = `sync-indicator ${status}`;
-        const icon = el.querySelector('i');
-        if (status === 'online') icon.className = 'bx bx-cloud-check';
-        else if (status === 'syncing') icon.className = 'bx bx-sync bx-spin';
-        else icon.className = 'bx bx-cloud-off';
-    },
 
     async handleAuthSubmit() {
         const name = document.getElementById('auth-name').value;
@@ -130,10 +125,6 @@ const App = {
         if (!name || !id) return;
 
         UI.showToast('جاري الدخول للنظام... 🛰️', 'info');
-        // في هذه النسخة، نسمح بالدخول المباشر للحفاظ على السرعة والاستقرار
-        localStorage.setItem('dawaa_user', JSON.stringify({ name, id }));
-        
-        // محاكاة دخول Firebase (Anonymous) لفتح القنوات السحابية
         try {
             await auth.signInAnonymously();
             this.userName = name;
@@ -167,7 +158,6 @@ const App = {
         if (totalNotifs > 0) {
             badge.style.display = 'flex';
             badge.textContent = totalNotifs;
-            
             list.innerHTML = [
                 ...lowStock.map(i => {
                     const m = masterMap.get(i.medicineId);
@@ -204,7 +194,6 @@ const App = {
     async handleLogout() {
         if (!confirm('هل تريد تسجيل الخروج؟')) return;
         await auth.signOut();
-        localStorage.removeItem('dawaa_user');
         window.location.reload();
     },
 
@@ -214,22 +203,8 @@ const App = {
                 <h3>إضافة حركة سريعة 📦</h3>
                 <div class="form-group">
                     <label>ابحث عن الصنف</label>
-                    <input type="text" id="qa-search" class="form-input" placeholder="اسم الدواء أو الباركود..." oninput="window.App.searchForQuickAdd(this.value)">
-                    <div id="qa-results" class="qa-results"></div>
-                </div>
-                <div id="qa-form-fields" class="hidden">
-                    <div class="form-group">
-                        <label>الكمية</label>
-                        <input type="number" id="qa-qty" class="form-input" value="1">
-                    </div>
-                    <div class="form-group">
-                        <label>المكان</label>
-                        <select id="qa-loc" class="form-input">
-                            <option value="صيدلية">صيدلية</option>
-                            <option value="مخزن">مخزن</option>
-                        </select>
-                    </div>
-                    <button class="btn-primary w-full mt-20" onclick="window.App.saveQuickAdd()">حفظ البيانات ✅</button>
+                    <input type="text" id="qa-search" class="form-input" placeholder="اسم الدواء أو الباركود..." oninput="window.App.handleGlobalSearch(this.value)">
+                    <div id="quick-search-results" class="results-list"></div>
                 </div>
             </div>
         `);
@@ -238,19 +213,16 @@ const App = {
     async handleGlobalSearch(q) {
         const results = document.getElementById('quick-search-results');
         if (!q || q.length < 2) { results.innerHTML = ''; return; }
-        
         const meds = await DB.getAll('medicineMaster');
         const filtered = meds.filter(m => 
             m.nameEN.toLowerCase().includes(q.toLowerCase()) || 
             (m.nameAR && m.nameAR.includes(q)) ||
             m.id.includes(q)
         ).slice(0, 5);
-
         results.innerHTML = filtered.map(m => `
             <div class="search-item" onclick="window.App.openMedicineDetails('${m.id}')">
                 <i class='bx bx-capsule'></i>
                 <span>${m.nameAR || m.nameEN}</span>
-                <i class='bx bx-chevron-left'></i>
             </div>
         `).join('');
     }
