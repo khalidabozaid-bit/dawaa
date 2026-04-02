@@ -6,7 +6,7 @@
  */
 
 const DB_NAME = 'DawaaMedicalDB';
-const DB_VERSION = 5; // v10.5.0: Collaborative Auditor Update
+const DB_VERSION = 6; // v11.0.0: High-Performance Audit Indexing
 
 const STORES = {
     MASTER: 'medicineMaster', 
@@ -38,15 +38,20 @@ export const DB = {
                 }
 
                 // Inventory Store
+                let invStore;
                 if (!db.objectStoreNames.contains(STORES.INVENTORY)) {
-                    const invStore = db.createObjectStore(STORES.INVENTORY, { keyPath: 'id' });
-                    invStore.createIndex('by_medicine_id', 'medicineId', { unique: false });
-                    invStore.createIndex('by_location', 'location', { unique: false });
-                    invStore.createIndex('by_type', 'type', { unique: false });
-                    invStore.createIndex('by_expiry', 'expiryDate', { unique: false });
+                    invStore = db.createObjectStore(STORES.INVENTORY, { keyPath: 'id' });
+                } else {
+                    invStore = event.target.transaction.objectStore(STORES.INVENTORY);
                 }
+                
+                if (!invStore.indexNames.contains('by_medicine_id')) invStore.createIndex('by_medicine_id', 'medicineId', { unique: false });
+                if (!invStore.indexNames.contains('by_location')) invStore.createIndex('by_location', 'location', { unique: false });
+                if (!invStore.indexNames.contains('by_type')) invStore.createIndex('by_type', 'type', { unique: false });
+                if (!invStore.indexNames.contains('by_expiry')) invStore.createIndex('by_expiry', 'expiryDate', { unique: false });
+                if (!invStore.indexNames.contains('by_audit_id')) invStore.createIndex('by_audit_id', 'auditId', { unique: false });
 
-                // Categories Store (v4)
+                // Categories Store
                 if (!db.objectStoreNames.contains(STORES.CATEGORIES)) {
                     db.createObjectStore(STORES.CATEGORIES, { keyPath: 'id' });
                 }

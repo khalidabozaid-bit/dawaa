@@ -2,6 +2,7 @@ import { DB } from './core/db.js';
 import { UI } from './core/ui.js';
 import { Inventory } from './features/inventory.js';
 import { Categories } from './features/categories.js';
+import { Audit } from './features/audit.js';
 import { Exporter } from './features/export.js';
 import { Utils } from './core/utils.js';
 import { Sync } from './core/sync.js';
@@ -13,9 +14,9 @@ import { auth, db, storage } from './core/firebase-config.js';
  */
 
 const App = {
-    VERSION: '10.6.0', // Strategic Commander v10.6.0 (Sovereign Choice)
-    activeAudit: null, // v10.4.0 Collaborative Session State
-    isJoined: false,   // v10.6.0 Explicit Consent State
+    VERSION: '11.0.0', // Architectural Sovereign v11.0.0 (Master Refinement)
+    activeAudit: null, 
+    isJoined: false,   
     selectedCategoryId: null, 
 
     /**
@@ -977,6 +978,7 @@ const App = {
         if (!banner) return;
 
         if (session) {
+            this.activeAudit = session;
             banner.innerHTML = `
                 <div class="audit-info">
                     <i class='bx bxs-megaphone bx-tada'></i>
@@ -990,6 +992,7 @@ const App = {
             `;
             banner.classList.add('active');
             this.renderActiveAuditCard(session); 
+            if (UI.currentView === 'view-audit-hub') this.renderAuditHub();
             
             if (this.isJoined || this.userRole === 'admin') {
                 if (!this.feedListener) {
@@ -1000,6 +1003,7 @@ const App = {
                 }
             }
         } else {
+            this.activeAudit = null;
             this.isJoined = false;
             banner.classList.remove('active');
             this.renderActiveAuditCard(); // Hide Dashboard Card
@@ -1020,14 +1024,13 @@ const App = {
             
             container.innerHTML = `
                 <div class="audit-status-card mt-20 ${isGuest ? 'guest-mode' : ''}" 
-                     onclick="${isGuest ? 'window.App.joinAudit()' : 'window.UI.switchView(\'view-smart-inventory\')'}">
+                     onclick="window.App.openAuditHub()">
                     <div class="audit-pulse"><div class="pulse-dot"></div></div>
                     <div class="audit-details">
                         <h4>جرد جاري: ${session.name}</h4>
                         <p>${isGuest ? '⚠️ اضغط هنا للانضمام لجلسة الفريق' : `👥 المتواجدون الآن: ${participantCount}`}</p>
-                        ${this.userRole === 'admin' ? `<p class="participants-list">${session.participants ? session.participants.join(', ') : ''}</p>` : ''}
                     </div>
-                    <i class='bx ${isGuest ? 'bx-plus-circle' : 'bx-chevron-left'}'></i>
+                    <i class='bx bx-chevron-left'></i>
                 </div>
             `;
         } else {
@@ -1037,45 +1040,118 @@ const App = {
 
     async joinAudit() {
         const userName = this.user.displayName || this.user.email;
-        if (await Sync.joinAudit(userName)) {
+        if (await Audit.join(userName)) {
             this.isJoined = true;
             UI.showToast('تم الانضمام لعملية الجرد بنجاح! 👤🤝👥', 'success');
             if (this.activeAudit) this.updateAuditSession(this.activeAudit);
         }
     },
 
-    async startAudit() {
-        if (this.userRole !== 'admin') return UI.showToast('صلاحيات المدير مطلوبة للبدء', 'warning');
+    openAuditHub() {
+        UI.switchView('view-audit-hub');
+        this.renderAuditHub();
+    },
+
+    renderAuditHub() {
+        const container = document.getElementById('hub-session-content');
+        if (!container) return;
+
+        const session = this.activeAudit;
         
-        const modeChoice = confirm('اضغط موافق للجرد الجماعي (مشترك للسحابة)\nاضغط الغاء للجرد الفردي (محلي فقط)');
-        const name = prompt('أدخل اسم عملية الجرد:');
-        if (!name) return;
+        if (!session) {
+            container.innerHTML = `
+                <div class="hub-welcome text-center">
+                    <img src="https://img.icons8.com/isometric/100/conference-call.png" style="width:80px; margin-bottom:20px" />
+                    <h3>جاهز لبدء جولة جرد جديدة؟</h3>
+                    <p class="text-muted">اختر نوع العملية المطلوبة للبدء</p>
+                    
+                    <div class="hub-actions mt-20">
+                        <div class="setting-card primary-accent" onclick="window.App.startAudit('team')">
+                            <div class="setting-icon bg-sync"><i class='bx bx-group'></i></div>
+                            <div class="setting-info">
+                                <h3>جرد جماعي مشترك (Team)</h3>
+                                <p>يظهر لجميع الفريق ويتم مزامنته للسحابة فوراً</p>
+                            </div>
+                        </div>
 
-        const session = {
-            id: 'audit_' + Date.now(),
-            name: name,
-            type: modeChoice ? 'team' : 'individual',
-            startTime: new Date().toISOString()
-        };
-
-        if (modeChoice) {
-            await DB.put('audits', session);
-            Sync.broadcastAuditStatus(session);
-            UI.showToast('بدأت العملية الجماعية! 📡🚀', 'success');
+                        <div class="setting-card mt-15" onclick="window.App.startAudit('individual')">
+                            <div class="setting-icon bg-info"><i class='bx bx-user'></i></div>
+                            <div class="setting-info">
+                                <h3>جرد فردي خاص (Private)</h3>
+                                <p>جرد محلي على جهازك فقط، لا يظهر للآخرين</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
         } else {
-            this.activeAudit = session;
-            this.isJoined = true; // Auto-join individual session
-            UI.showToast('بدأ الجرد الفردي الخاص. يتم الحفظ محلياً فقط. 👤🗄️', 'info');
-            this.updateAuditSession(session);
+            const isHost = this.userRole === 'admin';
+            const participants = session.participants || [];
+
+            container.innerHTML = `
+                <div class="hub-active-session">
+                    <div class="session-card-header ${session.type === 'team' ? 'bg-team' : 'bg-private'}">
+                        <i class='bx ${session.type === 'team' ? 'bx-group' : 'bx-user'}'></i>
+                        <div class="header-text">
+                            <h3>${session.name}</h3>
+                            <span class="badge">${session.type === 'team' ? 'جرد جماعي' : 'جرد فردي'}</span>
+                        </div>
+                    </div>
+
+                    <div class="session-stats-bar mt-15">
+                        <div class="stat-mini">
+                            <span class="label">تاريخ البدء</span>
+                            <span class="value">${new Date(session.startTime).toLocaleTimeString('ar-EG')}</span>
+                        </div>
+                        <div class="stat-mini">
+                            <span class="label">الحالة</span>
+                            <span class="value text-success">نشط الآن 📡</span>
+                        </div>
+                    </div>
+
+                    ${session.type === 'team' ? `
+                        <div class="participants-section mt-20">
+                            <h3><i class='bx bx-user-voice'></i> المشتركون الآن (${participants.length}):</h3>
+                            <div class="participants-chips">
+                                ${participants.map(p => `<span class="p-chip"><i class='bx bxs-circle'></i> ${p}</span>`).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    <div class="hub-footer-actions mt-25">
+                        <button class="btn-primary w-100 mb-15" style="height:50px" onclick="window.UI.switchView('view-smart-inventory')">
+                            <i class='bx bx-play-circle'></i> دخول الجرد الذكي
+                        </button>
+                        ${isHost ? `
+                            <button class="btn-danger-outline w-100" onclick="window.App.closeAudit()">
+                                <i class='bx bx-stop-circle'></i> إنهاء هذه العملية وتصدير النتائج
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
         }
-        UI.closeSidebar(); 
+    },
+
+    async startAudit(mode) {
+        const session = await Audit.start(mode, this.user);
+        if (session) {
+            if (mode === 'team') {
+                UI.showToast('بدأت العملية الجماعية! انضم الفريق الآن 📡🚀', 'success');
+            } else {
+                this.activeAudit = session;
+                this.isJoined = true;
+                UI.showToast('بدأ جردك الفردي الخاص. 👤🗄️', 'info');
+                this.updateAuditSession(session);
+            }
+            this.renderAuditHub();
+        }
     },
 
     async closeAudit() {
-        if (!confirm('هل أنت متأكد من إنهاء عملية الجرد الحالية؟ سيتوقف العمل الجماعي عليها.')) return;
-        
-        Sync.broadcastAuditStatus(null);
-        UI.showToast('تم إغلاق عملية الجرد بنجاح ✅', 'success');
+        if (await Audit.end()) {
+            UI.showToast('تم إغلاق عملية الجرد بنجاح ✅', 'success');
+        }
     },
 
     async deleteMasterMedicine(id) {
@@ -1684,7 +1760,12 @@ App.updateAdminUI = function() {
     
     if (statusText) statusText.textContent = isAdmin ? 'وضع المدير (مفعل)' : 'صلاحيات الموظف (مفعلة)';
     if (icon) icon.className = isAdmin ? 'bx bxs-shield-check' : 'bx bx-user';
-    if (hubCard) hubCard.style.display = isAdmin ? 'flex' : 'none';
+    if (hubCard) {
+        hubCard.style.display = 'flex'; // Staff can also join/see hub
+        hubCard.onclick = () => window.App.openAuditHub();
+        hubCard.querySelector('h3').textContent = 'مركز إدارة الجرد (Audit Hub)';
+        hubCard.querySelector('p').textContent = 'إدارة الجلسات الحالية، الانضمام، أو البدء';
+    }
     
     // Update Master Data View to show publish buttons if admin
     if (window.UI && UI.currentView === 'master') this.renderMasterData();

@@ -622,6 +622,74 @@
     border-right: 1px solid rgba(255,255,255,0.3);
 }
 
+/* v10.6.5 Audit Hub Styles */
+#view-audit-hub { background: var(--bg-color); }
+
+.session-card-header {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 20px;
+    border-radius: 16px;
+    color: white;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+.bg-team { background: linear-gradient(135deg, var(--primary), #4f46e5); }
+.bg-private { background: linear-gradient(135deg, #10b981, #059669); }
+
+.session-card-header i { font-size: 32px; }
+.header-text h3 { font-size: 18px; margin-bottom: 4px; }
+.badge { font-size: 10px; background: rgba(255,255,255,0.2); padding: 4px 8px; border-radius: 20px; }
+
+.session-stats-bar {
+    display: flex;
+    gap: 10px;
+}
+
+.stat-mini {
+    flex: 1;
+    background: var(--card-bg);
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+}
+
+.stat-mini .label { font-size: 10px; color: var(--text-muted); margin-bottom: 4px; }
+.stat-mini .value { font-size: 14px; font-weight: bold; }
+
+.participants-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.p-chip {
+    background: var(--primary-light);
+    color: var(--primary);
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid rgba(67, 56, 202, 0.1);
+}
+
+.p-chip i { font-size: 8px; color: #10b981; }
+
+.btn-danger-outline {
+    background: transparent;
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    padding: 12px;
+    border-radius: 12px;
+    font-weight: 600;
+}
+
 @keyframes pulseAudit {
     0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
     70% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
