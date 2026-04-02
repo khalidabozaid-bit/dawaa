@@ -103,6 +103,62 @@ export const Sync = {
     async submit(medId) {
         // Future: Submit to 'ReviewQueue' for larger networks
         UI.showToast('الصنف محلي حالياً. الأدمن سيقوم بنشره للسحابة.', 'info');
+    },
+
+    /**
+     * Collaborative Audit Synchronization (v10.5.0 Supreme Auditor)
+     */
+    async broadcastAuditStatus(session) {
+        if (window.App?.userRole !== 'admin') return;
+        try {
+            await db.collection('audits').doc('current').set({
+                ...session,
+                active: !!session,
+                updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+            });
+        } catch (err) {
+            console.warn('Sync: Failed to broadcast audit status', err);
+        }
+    },
+
+    subscribeToAudit(callback) {
+        console.log('Sync: Listening for Live Collaborative Audits... 📡');
+        return db.collection('audits').doc('current').onSnapshot(doc => {
+            if (doc.exists) {
+                const data = doc.data();
+                callback(data.active ? data : null);
+            } else {
+                callback(null);
+            }
+        }, err => {
+            console.error('Audit Stream Error:', err);
+        });
+    },
+
+    async pushAuditEntry(entry) {
+        try {
+            await db.collection('audit_feed').add({
+                ...entry,
+                userName: window.App?.userName || 'مستخدم الميدان',
+                timestamp: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+            });
+        } catch (err) {
+            console.warn('Sync: Push Audit Entry Failed', err);
+        }
+    },
+
+    subscribeToFeed(auditId, callback) {
+        return db.collection('audit_feed')
+            .where('auditId', '==', auditId)
+            .orderBy('timestamp', 'desc')
+            .limit(5)
+            .onSnapshot(snapshot => {
+                snapshot.docChanges().forEach(change => {
+                    if (change.type === 'added') {
+                        callback(change.doc.data());
+                    }
+                });
+            });
     }
 };
 

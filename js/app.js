@@ -13,7 +13,8 @@ import { auth, db, storage } from './core/firebase-config.js';
  */
 
 const App = {
-    VERSION: '10.2.0', // Master Architect v10.2.0
+    VERSION: '10.5.0', // Supreme Auditor v10.5.0
+    activeAudit: null, // v10.4.0 Collaborative Session State
     inventoryTab: 'detailed',
     selectedCategoryId: null, 
 
@@ -36,12 +37,17 @@ const App = {
 
 
     async init() {
-        console.log('Dawaa App: Booting with Auth (v9.0.0)...');
+        console.log(`Dawaa v${this.VERSION}: Initializing Supreme Engine...`);
         window.App = App;
         window.UI = UI;
 
         // Initialize Services
         await DB.init();
+        
+        // v10.5.0: Listen for Remote Collaborative Audits
+        Sync.subscribeToAudit((session) => {
+            this.updateAuditSession(session);
+        });
         await Categories.seedInitialData();
         UI.init();
         this.registerServiceWorker();
@@ -622,24 +628,38 @@ const App = {
     async openEntryForm(medicineId) {
         try {
             const med = await DB.get('medicineMaster', medicineId);
+            const entries = await DB.getAll('inventory');
+            const mEntries = entries.filter(e => e.medicineId === medicineId);
+            
+            // Calculate Current Balances (v10.3.0 Guardian Logic)
+            const phQty = mEntries.filter(e => e.location === 'صيدلية').reduce((sum, e) => sum + e.quantity, 0);
+            const whQty = mEntries.filter(e => e.location === 'مخزن').reduce((sum, e) => sum + e.quantity, 0);
+
             UI.showModal(`
                 <div class="sheet-handle"></div>
                 <div class="modal-header"><h2>إضافة جرد جديد ( Stock Entry )</h2></div>
+                <div class="balance-notification">
+                    <span>🏥 صيدلية: <strong>${phQty}</strong></span>
+                    <span>📦 مخزن: <strong>${whQty}</strong></span>
+                </div>
                 <form id="form-inventory" onsubmit="event.preventDefault(); window.App.saveEntry('${medicineId}');">
                     <div class="form-group">
-                        <label class="form-label">ابحث عن الدواء/المستلزم:</label>
+                        <label class="form-label">الصنف المختبر:</label>
                         <input type="text" class="form-input" value="${med.nameEN}" readonly>
-                        <button type="button" class="text-btn" style="text-align:right" onclick="window.App.openAddMedicine()">+ غير مسجل؟ أضفه الآن</button>
+                        <button type="button" class="text-btn" style="text-align:right" onclick="window.App.openEditMedicine('${medicineId}')">⚙️ تعديل بيانات الصنف الرئيسي</button>
                     </div>
                     
                     <div class="form-row">
                         <div class="form-group">
-                            <label class="form-label">المكان:</label>
-                            <input type="text" id="entry-location" class="form-input" placeholder="مثلاً: الثلاجة، الرف A" required>
+                            <label class="form-label">المكان الرئيسي (إجباري):</label>
+                            <select id="entry-location-main" class="form-select" required>
+                                <option value="صيدلية">🏥 صيدلية</option>
+                                <option value="مخزن">📦 مخزن</option>
+                            </select>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">الكمية:</label>
-                            <input type="number" id="entry-qty" class="form-input" value="0" required>
+                            <label class="form-label">الكمية الجديدة:</label>
+                            <input type="number" id="entry-qty" class="form-input" placeholder="0" required>
                         </div>
                     </div>
 
@@ -649,13 +669,47 @@ const App = {
                     </div>
 
                     <div class="form-actions mt-20">
-                        <button type="submit" class="btn-primary">حفظ الجرد</button>
+                        <button type="submit" class="btn-primary">حفظ في الجرد الحالي</button>
                         <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
                     </div>
                 </form>
             `);
         } catch (err) {
             UI.showToast('خطأ في تحميل النموذج', 'danger');
+        }
+    },
+
+    async saveEntry(medicineId) {
+        try {
+            const locMain = document.getElementById('entry-location-main').value;
+            const qty = parseFloat(document.getElementById('entry-qty').value);
+            const exp = document.getElementById('entry-expiry').value;
+
+            const entryData = {
+                medicineId,
+                location: locMain,
+                quantity: qty,
+                expiryDate: exp,
+                auditId: this.activeAudit ? this.activeAudit.id : null // Tag with session if active
+            };
+
+            await Inventory.addEntry(entryData);
+            UI.showToast('تم الحفظ بنجاح ✅', 'success');
+            
+            // v10.5.0: Live Broadcast to Team
+            if (this.activeAudit) {
+                const med = await DB.get('medicineMaster', medicineId);
+                Sync.pushAuditEntry({
+                    auditId: this.activeAudit.id,
+                    medicineName: med.nameEN,
+                    quantity: qty
+                });
+            }
+
+            UI.hideModal();
+            this.renderInventoryList(await Inventory.getAggregatedStock(), 'inventory-grid', true);
+        } catch (err) {
+            UI.showToast('فشل حفظ البيانات', 'danger');
         }
     },
 
@@ -898,6 +952,69 @@ const App = {
     },
 
 
+
+    /**
+     * Collaborative Audit Lifecycle (v10.5.0 Supreme Auditor)
+     * Handles Start, End, and Live Sync for Team Stocktakes.
+     */
+    updateAuditSession(session) {
+        this.activeAudit = session;
+        const banner = document.getElementById('audit-banner');
+        if (!banner) return;
+
+        if (session) {
+            banner.innerHTML = `
+                <div class="audit-info">
+                    <i class='bx bxs-megaphone bx-tada'></i>
+                    <span>جاري الجرد الجماعي: <strong>${session.name}</strong></span>
+                </div>
+                <div class="audit-actions">
+                    ${this.userRole === 'admin' ? `<button class="btn-danger sm-btn" onclick="window.App.closeAudit()">إنهاء الجرد</button>` : ''}
+                </div>
+            `;
+            banner.classList.add('active');
+            
+            // Listen to live team feed for this session
+            if (!this.feedListener) {
+                this.feedListener = Sync.subscribeToFeed(session.id, (entry) => {
+                    UI.showToast(`${entry.userName} أضاف: ${entry.medicineName} (${entry.quantity})`, 'info');
+                    if (this.selectedCategoryId) Categories.openCategory(this.selectedCategoryId); // Live refresh UI
+                });
+            }
+        } else {
+            banner.classList.remove('active');
+            if (this.feedListener) {
+                this.feedListener(); // Unsubscribe
+                this.feedListener = null;
+            }
+            if (this.selectedCategoryId) Categories.openCategory(this.selectedCategoryId); // Final refresh
+        }
+    },
+
+    async startAudit() {
+        if (this.userRole !== 'admin') return UI.showToast('صلاحيات المدير مطلوبة للبدء', 'warning');
+        
+        const name = prompt('أدخل اسم عملية الجرد (مثلاً: جرد رمضان 2026):');
+        if (!name) return;
+
+        const session = {
+            id: 'audit_' + Date.now(),
+            name: name,
+            startTime: new Date().toISOString()
+        };
+
+        await DB.put('audits', session);
+        Sync.broadcastAuditStatus(session);
+        UI.showToast('بدأت العملية! سيتم تنبيه جميع المستخدمين الآن 🚀', 'success');
+        UI.closeSidebar(); // Tidy up UI
+    },
+
+    async closeAudit() {
+        if (!confirm('هل أنت متأكد من إنهاء عملية الجرد الحالية؟ سيتوقف العمل الجماعي عليها.')) return;
+        
+        Sync.broadcastAuditStatus(null);
+        UI.showToast('تم إغلاق عملية الجرد بنجاح ✅', 'success');
+    },
 
     async deleteMasterMedicine(id) {
         if (confirm('هل أنت متأكد؟ سيتم حذف الصنف من المستودع نهائياً.')) {

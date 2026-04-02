@@ -6,13 +6,14 @@
  */
 
 const DB_NAME = 'DawaaMedicalDB';
-const DB_VERSION = 4; 
+const DB_VERSION = 5; // v10.5.0: Collaborative Auditor Update
 
 const STORES = {
     MASTER: 'medicineMaster', 
     INVENTORY: 'inventory',   
     CATEGORIES: 'categories',
-    SETTINGS: 'settings'      
+    SETTINGS: 'settings',
+    AUDITS: 'audits' // v10.5.0: Formal Inventory Sessions      
 };
 
 export const DB = {
@@ -53,6 +54,11 @@ export const DB = {
                 // Settings Store
                 if (!db.objectStoreNames.contains(STORES.SETTINGS)) {
                     db.createObjectStore(STORES.SETTINGS);
+                }
+
+                // Audits Store (v5 - Supreme Auditor)
+                if (!db.objectStoreNames.contains(STORES.AUDITS)) {
+                    db.createObjectStore(STORES.AUDITS, { keyPath: 'id' });
                 }
             };
 

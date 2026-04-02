@@ -496,3 +496,62 @@
 
 .category-chip i { font-size: 16px; }
 
+
+/* v10.5.0: The Supreme Auditor Visual Package */
+.global-audit-banner {
+    display: none;
+    background: linear-gradient(135deg, var(--danger), #dc2626);
+    color: white;
+    padding: 12px 20px;
+    position: fixed;
+    top: 70px; /* Below Header */
+    left: 20px;
+    right: 20px;
+    border-radius: 12px;
+    z-index: 1000;
+    box-shadow: 0 10px 25px rgba(220, 38, 38, 0.3);
+    align-items: center;
+    justify-content: space-between;
+    animation: slideDownAudit 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.global-audit-banner.active {
+    display: flex;
+}
+
+.audit-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+}
+
+.balance-notification {
+    background: rgba(67, 56, 202, 0.05);
+    border: 1px solid rgba(67, 56, 202, 0.1);
+    border-radius: 12px;
+    padding: 15px;
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: space-around;
+    gap: 10px;
+    text-align: center;
+}
+
+.balance-notification span {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.balance-notification strong {
+    color: var(--primary);
+    font-size: 15px;
+    display: block;
+    margin-top: 4px;
+}
+
+@keyframes slideDownAudit {
+    from { transform: translateY(-50px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
