@@ -82,9 +82,9 @@ export const UI = {
 
     updateDashboardStats(stats) {
         const elements = {
-            total: document.getElementById('stat-total-items'),
-            low: document.getElementById('stat-low-stock'),
-            expiring: document.getElementById('stat-expiring-items')
+            total: document.getElementById('total-meds'),
+            low: document.getElementById('low-stock-count'),
+            expiring: document.getElementById('expired-count')
         };
 
         if (elements.total) elements.total.textContent = stats.totalItems || 0;
