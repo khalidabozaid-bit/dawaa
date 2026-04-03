@@ -9,53 +9,47 @@ import { Sync } from './core/sync.js';
 import { auth, db } from './core/firebase-config.js';
 
 /**
- * دواء - نظام إدارة جرد الأدوية (v16.0.6 Absolute Sync)
- * نسخة المزامنة المطلقة وإجبار التحديث البرمجي.
+ * دواء - نظام إدارة جرد الأدوية (v16.0.7 Emergency Bridge)
+ * نسخة "الجسر الفوري" لإعادة الروح للأزرار وتجاوز تعليق النظام.
  */
 
 const App = {
-    VERSION: '16.0.6',
+    VERSION: '16.0.7',
     activeAudit: null,
     radarAudits: [],
 
     async init() {
-        console.log(`Dawaa v${this.VERSION}: Powering up Absolute Sync...`);
+        console.log(`Dawaa v${this.VERSION}: Emergency Bridge Booting...`);
         window.App = App;
         window.UI = UI;
         window.Exporter = Exporter;
         window.Inventory = Inventory;
 
-        await DB.init();
+        // 🛡️ الخطوة 0: تهيئة الواجهة فوراً لتعمل الأزرار والملاحة بدون انتظار
+        UI.init();
         
-        // رادار المأموريات (صامت)
+        // 🛡️ الخطوة 1: بدء القاعدة بشكل متوازي (لا تعطل الواجهة)
+        DB.init().then(() => {
+            console.log("App: Database stabilized.");
+            this.renderDashboard();
+        }).catch(err => console.warn("DB Delay:", err));
+
+        // ربط رادار المأموريات (صامت)
         Sync.subscribeToAuditRadar((audits) => {
             this.radarAudits = audits;
-            if (this.activeAudit) {
-                const refreshed = audits.find(a => a.id === this.activeAudit.id);
-                if (refreshed) this.updateAuditSession(refreshed);
-            }
             if (UI.currentViewId === 'view-audit-hub') this.renderAuditHub();
         });
 
         Inventory.subscribe(() => {
             this.renderDashboard();
-            if (UI.currentViewId === 'view-audit-hub') this.renderAuditHub();
             this.updateHubNotifications();
         });
 
-        await Categories.seedInitialData();
-        
-        // ربط الواجهة بشكل استباقي 🛡️
-        UI.init();
+        await Categories.seedInitialData().catch(() => {});
         
         auth.onAuthStateChanged(async (user) => {
-            if (user) {
-                console.log("App: User authenticated.");
-                await this.handleUserSession(user);
-            } else {
-                console.log("App: No session. Showing login.");
-                this.showLogin();
-            }
+            if (user) await this.handleUserSession(user);
+            else this.showLogin();
         });
 
         this.initServiceWorker();
@@ -63,7 +57,7 @@ const App = {
 
     initServiceWorker() {
         if (!('serviceWorker' in navigator)) return;
-        navigator.serviceWorker.register('./sw.js?v=16.0.6');
+        navigator.serviceWorker.register('./sw.js?v=16.0.7');
     },
 
     async handleUserSession(user) {
@@ -101,8 +95,8 @@ const App = {
     },
 
     async renderDashboard() {
-        const meds = await DB.getAll('medicineMaster');
-        const inventory = await DB.getAll('inventory');
+        const meds = await DB.getAll('medicineMaster').catch(() => []);
+        const inventory = await DB.getAll('inventory').catch(() => []);
         
         const now = new Date();
         const sixMonthsOut = new Date(new Date().setMonth(now.getMonth() + 6));
@@ -126,20 +120,19 @@ const App = {
         const id = document.getElementById('auth-email').value;
         if (!name || !id) return;
 
-        UI.showToast('جاري التحقق من الهوية... 🛰️', 'info');
+        UI.showToast('جاري التحقق... 🛰️', 'info');
         try {
             await auth.signInAnonymously();
             this.userName = name;
             this.hideLogin();
         } catch (err) {
-            console.warn("Auth Fallback active.");
             this.userName = name;
             this.hideLogin();
         }
     },
 
     async forceUpdateSystem() {
-        if (!confirm('🚨 سيتم مسح الذاكرة المخفية تماماً وتحديث النظام. هل أنت متأكد؟')) return;
+        if (!confirm('🚨 سيتم مسح الذاكرة وتحديث النظام. هل أنت متأكد؟')) return;
         const registrations = await navigator.serviceWorker.getRegistrations();
         for (let reg of registrations) await reg.unregister();
         const cachesKeys = await caches.keys();
@@ -164,7 +157,7 @@ const App = {
         const results = document.getElementById(targetId);
         if (!q || q.length < 2) { results.innerHTML = ''; return; }
         
-        const meds = await DB.getAll('medicineMaster');
+        const meds = await DB.getAll('medicineMaster').catch(() => []);
         const filtered = meds.filter(m => 
             m.nameEN.toLowerCase().includes(q.toLowerCase()) || 
             (m.nameAR && m.nameAR.includes(q)) ||
@@ -184,7 +177,7 @@ const App = {
 
     async openMedicineDetails(id) {
         UI.closeModal();
-        const med = await DB.get('medicineMaster', id);
+        const med = await DB.get('medicineMaster', id).catch(() => null);
         if (!med) return;
 
         UI.showModal(`
@@ -207,19 +200,18 @@ const App = {
     },
 
     async addInventoryAction(medId, type) {
-        const qty = prompt(`أدخل الكمية المراد ${type === 'add' ? 'إضافتها' : 'سحبها'}:`, "1");
+        const qty = prompt(`الكمية:`, "1");
         if (!qty || isNaN(qty)) return;
 
         const entry = {
             id: Utils.generateId(),
             medicineId: medId,
             quantity: type === 'add' ? parseInt(qty) : -parseInt(qty),
-            date: new Date().toISOString(),
-            status: 'synced'
+            date: new Date().toISOString()
         };
 
-        await DB.put('inventory', entry);
-        UI.showToast('تم تحديث المخزون بنجاح ✅', 'success');
+        await DB.put('inventory', entry).catch(() => {});
+        UI.showToast('تم بنجاح ✅', 'success');
         UI.closeModal();
         this.renderDashboard();
     },

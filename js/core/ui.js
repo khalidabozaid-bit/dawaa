@@ -2,32 +2,34 @@
 import { Utils } from './utils.js';
 
 /**
- * Dawaa UI Controller (v16.0.6 Absolute Sync)
+ * Dawaa UI Controller (v16.0.7 Emergency Bridge)
  * Handles view switching, modals, and dynamic rendering.
  */
 
 export const UI = {
-    currentView: 'dashboard',
+    currentViewId: 'view-dashboard',
 
     init() {
-        console.log('Dawaa UI: Booting...');
+        console.log('Dawaa UI: Booting Emergency Bridge...');
         window.UI = UI; 
         
-        // Robust Listener Binding 🛡️
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.setupEventListeners());
-        } else {
-            this.setupEventListeners();
-        }
+        // 🛡️ الربط الفوري والمباشر للأحداث
+        this.setupEventListeners();
     },
 
     setupEventListeners() {
-        console.log('Dawaa UI: Binding Events...');
+        console.log('Dawaa UI: Binding Logic to DOM...');
         
         // Bottom Nav Switching
         const navItems = document.querySelectorAll('.nav-item');
+        if (navItems.length === 0) {
+            console.warn('UI: No nav-items found yet. Re-trying in 500ms...');
+            setTimeout(() => this.setupEventListeners(), 500);
+            return;
+        }
+
         navItems.forEach(btn => {
-            // Remove old listeners if any (Mashawiri Style Protection)
+            // Cloning to clear legacy listeners
             const newBtn = btn.cloneNode(true);
             btn.parentNode.replaceChild(newBtn, btn);
             
@@ -35,13 +37,11 @@ export const UI = {
                 const target = newBtn.dataset.target;
                 this.switchView(`view-${target}`);
                 
-                // Update active state
                 document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
                 newBtn.classList.add('active');
             });
         });
         
-        // Global Modal Close
         const modalOverlay = document.getElementById('modal-container');
         if (modalOverlay) {
             modalOverlay.onclick = (e) => {
@@ -51,11 +51,11 @@ export const UI = {
     },
 
     switchView(viewId, push = true) {
+        if (!viewId) return;
+        this.currentViewId = viewId;
         const viewName = viewId.replace('view-', '');
-        this.currentView = viewName;
-        console.log(`UI: Switching to ${viewName}`);
+        console.log(`UI: Shifting to ${viewName}`);
 
-        // Visual switch
         document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
         const targetView = document.getElementById(viewId);
         if (targetView) {
@@ -63,7 +63,6 @@ export const UI = {
             window.scrollTo(0, 0);
         }
 
-        // History Management
         if (push) {
             history.pushState({ viewId }, "", `#${viewName}`);
         }
@@ -75,24 +74,7 @@ export const UI = {
         const App = window.App;
         if (!App) return;
 
-        switch(this.currentView) {
-            case 'dashboard':
-                App.renderDashboard();
-                break;
-            case 'inventory':
-            case 'reports':
-                // Shared view or specific logic
-                break;
-            case 'settings':
-                this.updateSettingsIcons();
-                break;
-        }
-    },
-
-    updateSettingsIcons() {
-        const isDark = document.body.classList.contains('dark-mode');
-        const icon = document.getElementById('settings-theme-icon');
-        if (icon) icon.className = isDark ? 'bx bx-sun' : 'bx bx-moon';
+        if (this.currentViewId === 'view-dashboard') App.renderDashboard();
     },
 
     updateDashboardStats(stats) {
@@ -113,13 +95,9 @@ export const UI = {
 
         container.innerHTML = `
             <div class="bottom-sheet">
-                <div class="sheet-header">
-                    <div class="sheet-handle"></div>
-                    <button class="close-btn" onclick="window.UI.closeModal()"><i class='bx bx-x'></i></button>
-                </div>
-                <div class="sheet-content">
-                    ${contentHtml}
-                </div>
+                <div class="sheet-header"><div class="sheet-handle"></div></div>
+                <div class="sheet-content">${contentHtml}</div>
+                <button class="modal-close-v16" onclick="window.UI.closeModal()"><i class='bx bx-x'></i></button>
             </div>
         `;
         
@@ -144,10 +122,7 @@ export const UI = {
     showToast(message, type = 'info') {
         const toast = document.createElement('div');
         toast.className = `toast toast-${type} show`;
-        toast.innerHTML = `
-            <i class='bx ${type === 'success' ? 'bx-check-circle' : 'bx-info-circle'}'></i>
-            <span>${message}</span>
-        `;
+        toast.innerHTML = `<span>${message}</span>`;
         document.body.appendChild(toast);
         setTimeout(() => {
             toast.classList.remove('show');
@@ -161,11 +136,8 @@ window.UI = UI;
 window.toggleTheme = () => {
     const isDark = document.body.classList.toggle('dark-mode');
     localStorage.setItem('dawaa-theme', isDark ? 'dark' : 'light');
-    const icon = document.getElementById('theme-icon');
-    if (icon) icon.className = isDark ? 'bx bx-sun' : 'bx bx-moon';
 };
 
-// Initial Theme Check
 if (localStorage.getItem('dawaa-theme') === 'dark') {
     document.body.classList.add('dark-mode');
 }
