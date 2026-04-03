@@ -2,7 +2,7 @@
 import { Utils } from './utils.js';
 
 /**
- * Dawaa UI Controller
+ * Dawaa UI Controller (v16.0.6 Absolute Sync)
  * Handles view switching, modals, and dynamic rendering.
  */
 
@@ -10,28 +10,50 @@ export const UI = {
     currentView: 'dashboard',
 
     init() {
-        window.UI = UI; // Early binding
-        this.setupEventListeners();
-        console.log('Dawaa UI: Ready.');
+        console.log('Dawaa UI: Booting...');
+        window.UI = UI; 
+        
+        // Robust Listener Binding 🛡️
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => this.setupEventListeners());
+        } else {
+            this.setupEventListeners();
+        }
     },
 
     setupEventListeners() {
+        console.log('Dawaa UI: Binding Events...');
+        
         // Bottom Nav Switching
-        document.querySelectorAll('.nav-item').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const target = btn.dataset.target;
+        const navItems = document.querySelectorAll('.nav-item');
+        navItems.forEach(btn => {
+            // Remove old listeners if any (Mashawiri Style Protection)
+            const newBtn = btn.cloneNode(true);
+            btn.parentNode.replaceChild(newBtn, btn);
+            
+            newBtn.addEventListener('click', () => {
+                const target = newBtn.dataset.target;
                 this.switchView(`view-${target}`);
                 
                 // Update active state
                 document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
+                newBtn.classList.add('active');
             });
         });
+        
+        // Global Modal Close
+        const modalOverlay = document.getElementById('modal-container');
+        if (modalOverlay) {
+            modalOverlay.onclick = (e) => {
+                if (e.target === modalOverlay) this.closeModal();
+            };
+        }
     },
 
     switchView(viewId, push = true) {
         const viewName = viewId.replace('view-', '');
         this.currentView = viewName;
+        console.log(`UI: Switching to ${viewName}`);
 
         // Visual switch
         document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -41,15 +63,13 @@ export const UI = {
             window.scrollTo(0, 0);
         }
 
-        // History Management (Mashawiri Style)
+        // History Management
         if (push) {
             history.pushState({ viewId }, "", `#${viewName}`);
         }
 
-        // Trigger render
         this.renderCurrentView();
     },
-
 
     renderCurrentView() {
         const App = window.App;
@@ -60,13 +80,8 @@ export const UI = {
                 App.renderDashboard();
                 break;
             case 'inventory':
-                App.renderInventory();
-                break;
-            case 'smart-inventory':
-                App.renderSmartInventory();
-                break;
-            case 'master':
-                App.renderMasterData();
+            case 'reports':
+                // Shared view or specific logic
                 break;
             case 'settings':
                 this.updateSettingsIcons();
@@ -92,65 +107,10 @@ export const UI = {
         if (elements.expiring) elements.expiring.textContent = stats.expiringCount || 0;
     },
 
-    renderEmptyState(message = 'لا توجد بيانات متاحة حالياً', icon = 'bx-package') {
-        return `
-            <div class="empty-state-v15 text-center mt-40">
-                <div class="empty-icon-orb"><i class='bx ${icon}'></i></div>
-                <h3 class="mt-15">${message}</h3>
-                <p class="text-muted mt-5">استمر في إثراء بيانات صيدليتك! 🚀</p>
-            </div>
-        `;
-    },
-
-    renderReportsMenu() {
-        const container = document.getElementById('reports-container');
+    showModal(contentHtml) {
+        const container = document.getElementById('modal-container');
         if (!container) return;
 
-        container.innerHTML = `
-            <div class="view-header">
-                <h2>📈 التقارير والتصدير</h2>
-            </div>
-            <div class="reports-grid">
-                <div class="report-card" onclick="window.App.export('full')">
-                    <div class="report-icon primary"><i class='bx bxs-file-export'></i></div>
-                    <div class="report-info">
-                        <h3>جرد كلي (Excel)</h3>
-                        <p>تصدير كافة الأصناف المتاحة في جميع المواقع</p>
-                    </div>
-                </div>
-                <div class="report-card" onclick="window.App.export('expiring')">
-                    <div class="report-icon warning"><i class='bx bx-time-five'></i></div>
-                    <div class="report-info">
-                        <h3>تنبيه الصلاحية</h3>
-                        <p>الأصناف التي تنتهي صلاحيتها قريباً</p>
-                    </div>
-                </div>
-                <div class="report-card" onclick="window.App.export('low-stock')">
-                    <div class="report-icon danger"><i class='bx bx-trending-down'></i></div>
-                    <div class="report-info">
-                        <h3>النواقص</h3>
-                        <p>الأصناف التي وصلت للحد الأدنى</p>
-                    </div>
-                </div>
-            </div>
-        `;
-    },
-
-    // --- Modal & Sheet System ---
-
-    showModal(contentHtml) {
-        console.log('UI: Opening Modal...');
-        const container = document.getElementById('modal-container');
-        if (!container) {
-            console.error('UI: modal-container element not found in DOM!');
-            return;
-        }
-
-        // Clean previous content
-        container.innerHTML = '';
-        container.classList.remove('show');
-
-        // Inject new content
         container.innerHTML = `
             <div class="bottom-sheet">
                 <div class="sheet-header">
@@ -163,26 +123,18 @@ export const UI = {
             </div>
         `;
         
-        // Use a tiny delay to ensure CSS transition works
         requestAnimationFrame(() => {
             container.classList.add('show');
             const sheet = container.querySelector('.bottom-sheet');
             if (sheet) sheet.classList.add('show');
         });
-
-        container.onclick = (e) => {
-            if (e.target === container) this.closeModal();
-        };
     },
 
     closeModal() {
-        console.log('UI: Closing Modal...');
         const container = document.getElementById('modal-container');
         if (!container) return;
-
         const sheet = container.querySelector('.bottom-sheet');
         if (sheet) sheet.classList.remove('show');
-        
         setTimeout(() => {
             container.classList.remove('show');
             container.innerHTML = '';
@@ -191,44 +143,21 @@ export const UI = {
 
     showToast(message, type = 'info') {
         const toast = document.createElement('div');
-        toast.className = `toast toast-${type}`;
-        
-        const isError = type === 'danger';
+        toast.className = `toast toast-${type} show`;
         toast.innerHTML = `
             <i class='bx ${type === 'success' ? 'bx-check-circle' : 'bx-info-circle'}'></i>
             <span>${message}</span>
-            ${isError ? `<button class="toast-copy-btn" onclick="UI.copyErrorReport('${message}')"><i class='bx bx-copy'></i></button>` : ''}
         `;
         document.body.appendChild(toast);
-        
-        setTimeout(() => toast.classList.add('show'), 10);
-        
-        if (!isError) {
-            setTimeout(() => {
-                toast.classList.remove('show');
-                setTimeout(() => toast.remove(), 300);
-            }, 3000);
-        } else {
-            // Keep error toasts longer or until closed (optional)
-            setTimeout(() => {
-                toast.classList.remove('show');
-                setTimeout(() => toast.remove(), 6000);
-            }, 6000);
-        }
-    },
-
-    copyErrorReport(msg) {
-        const report = `DAWAA ERROR REPORT\nMsg: ${msg}\nUA: ${navigator.userAgent}\nTime: ${new Date().toISOString()}`;
-        navigator.clipboard.writeText(report).then(() => {
-            this.showToast('تم نسخ تقرير الخطأ', 'success');
-        });
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
     }
 };
 
-// Global Bindings
 window.UI = UI;
 
-// Global Theme Toggle
 window.toggleTheme = () => {
     const isDark = document.body.classList.toggle('dark-mode');
     localStorage.setItem('dawaa-theme', isDark ? 'dark' : 'light');
@@ -236,9 +165,7 @@ window.toggleTheme = () => {
     if (icon) icon.className = isDark ? 'bx bx-sun' : 'bx bx-moon';
 };
 
-// Init theme from preference
+// Initial Theme Check
 if (localStorage.getItem('dawaa-theme') === 'dark') {
     document.body.classList.add('dark-mode');
-    const icon = document.getElementById('theme-icon');
-    if (icon) icon.className = 'bx bx-sun';
 }

@@ -9,21 +9,21 @@ import { Sync } from './core/sync.js';
 import { auth, db } from './core/firebase-config.js';
 
 /**
- * دواء - نظام إدارة جرد الأدوية (v16.0.5 Stable)
- * نسخة الجودة القصوى والتناغم البرمجي الشامل.
+ * دواء - نظام إدارة جرد الأدوية (v16.0.6 Absolute Sync)
+ * نسخة المزامنة المطلقة وإجبار التحديث البرمجي.
  */
 
 const App = {
-    VERSION: '16.0.5',
+    VERSION: '16.0.6',
     activeAudit: null,
     radarAudits: [],
 
     async init() {
-        console.log(`Dawaa v${this.VERSION}: Total QA Initialization...`);
+        console.log(`Dawaa v${this.VERSION}: Powering up Absolute Sync...`);
         window.App = App;
         window.UI = UI;
         window.Exporter = Exporter;
-        window.Inventory = Inventory; // For global access
+        window.Inventory = Inventory;
 
         await DB.init();
         
@@ -44,11 +44,18 @@ const App = {
         });
 
         await Categories.seedInitialData();
+        
+        // ربط الواجهة بشكل استباقي 🛡️
         UI.init();
         
         auth.onAuthStateChanged(async (user) => {
-            if (user) await this.handleUserSession(user);
-            else this.showLogin();
+            if (user) {
+                console.log("App: User authenticated.");
+                await this.handleUserSession(user);
+            } else {
+                console.log("App: No session. Showing login.");
+                this.showLogin();
+            }
         });
 
         this.initServiceWorker();
@@ -56,34 +63,40 @@ const App = {
 
     initServiceWorker() {
         if (!('serviceWorker' in navigator)) return;
-        navigator.serviceWorker.register('./sw.js').then(reg => {
-            reg.onupdatefound = () => {
-                const newWorker = reg.installing;
-                newWorker.onstatechange = () => {
-                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                        UI.showToast('نسخة مستقرة جديدة متاحة! جاري التحديث... 📡', 'success');
-                        setTimeout(() => window.location.reload(), 2000);
-                    }
-                };
-            };
-        });
+        navigator.serviceWorker.register('./sw.js?v=16.0.6');
     },
 
     async handleUserSession(user) {
         try {
             this.userName = user.displayName || user.email.split('@')[0];
-            document.getElementById('display-user-name').textContent = this.userName;
+            const nameEl = document.getElementById('display-user-name');
+            if (nameEl) nameEl.textContent = this.userName;
             
             this.hideLogin();
             await this.renderDashboard();
             this.updateHubNotifications();
             
-            // مزامنة صامتة لا تعطل الدخل
-            Sync.pull().catch(() => {});
-            Sync.pullGlobalInventory().catch(() => {});
+            this.setSyncStatus('syncing');
+            Sync.pull().then(() => this.setSyncStatus('online'))
+                   .catch(() => this.setSyncStatus('offline'));
         } catch (err) { 
             console.error("Session Error:", err);
             this.hideLogin(); 
+        }
+    },
+
+    setSyncStatus(status) {
+        const indicator = document.getElementById('cloud-sync-indicator');
+        if (!indicator) return;
+        if (status === 'online') {
+            indicator.innerHTML = "<i class='bx bx-cloud'></i>";
+            indicator.className = "sync-indicator online";
+        } else if (status === 'syncing') {
+            indicator.innerHTML = "<i class='bx bx-sync bx-spin'></i>";
+            indicator.className = "sync-indicator syncing";
+        } else {
+            indicator.innerHTML = "<i class='bx bx-cloud-off'></i>";
+            indicator.className = "sync-indicator offline";
         }
     },
 
@@ -96,7 +109,7 @@ const App = {
         
         const totalMaster = meds.length;
         const lowStockCount = inventory.filter(i => i.quantity <= 5).length;
-        const expiringCount = inventory.filter(i => i.expiryDate && new Date(i.expiryDate) < sixMonthsOut).length;
+        const expiringCount = inventory.filter(i => (i.expiryDate && new Date(i.expiryDate) < sixMonthsOut)).length;
 
         UI.updateDashboardStats({
             totalItems: totalMaster,
@@ -113,66 +126,20 @@ const App = {
         const id = document.getElementById('auth-email').value;
         if (!name || !id) return;
 
-        UI.showToast('جاري الدخول للنظام... 🛰️', 'info');
+        UI.showToast('جاري التحقق من الهوية... 🛰️', 'info');
         try {
             await auth.signInAnonymously();
             this.userName = name;
             this.hideLogin();
-            this.renderDashboard();
         } catch (err) {
-            console.warn("Firebase Auth Error: Entering Offline Mode.");
+            console.warn("Auth Fallback active.");
             this.userName = name;
             this.hideLogin();
-            this.renderDashboard();
         }
-    },
-
-    async updateHubNotifications() {
-        const list = document.getElementById('hub-notif-list');
-        const badge = document.getElementById('hub-notif-count');
-        if (!list) return;
-
-        const items = await DB.getAll('inventory');
-        const master = await DB.getAll('medicineMaster');
-        const masterMap = new Map(master.map(m => [m.id, m]));
-
-        const now = new Date();
-        const sixMonthsOut = new Date(new Date().setMonth(now.getMonth() + 6));
-        
-        const lowStock = items.filter(i => i.quantity <= 5);
-        const expiring = items.filter(i => i.expiryDate && new Date(i.expiryDate) < sixMonthsOut);
-
-        const totalNotifs = lowStock.length + expiring.length;
-        
-        if (totalNotifs > 0) {
-            badge.style.display = 'flex';
-            badge.textContent = totalNotifs;
-            list.innerHTML = [
-                ...lowStock.map(i => {
-                    const m = masterMap.get(i.medicineId);
-                    return `<div class="hub-item warning">⚠️ رصيد منخفض: ${m ? m.nameAR : 'صنف مجهول'} (${i.quantity})</div>`;
-                }),
-                ...expiring.map(i => {
-                    const m = masterMap.get(i.medicineId);
-                    return `<div class="hub-item danger">⌛ يقترب من الانتهاء: ${m ? m.nameAR : 'صنف مجهول'}</div>`;
-                })
-            ].join('');
-        } else {
-            badge.style.display = 'none';
-            list.innerHTML = '<div class="hub-empty">لا توجد تنبيهات عاجلة ✅</div>';
-        }
-    },
-
-    toggleHubNotifications() {
-        const list = document.getElementById('hub-notif-list');
-        const chevron = document.getElementById('notif-chevron');
-        list.classList.toggle('active');
-        if (chevron) chevron.style.transform = list.classList.contains('active') ? 'rotate(180deg)' : 'rotate(0deg)';
-        if (list.classList.contains('active')) this.updateHubNotifications();
     },
 
     async forceUpdateSystem() {
-        if (!confirm('🚨 سيتم إعادة تحميل أحدث ملفات النظام. هل أنت متأكد؟')) return;
+        if (!confirm('🚨 سيتم مسح الذاكرة المخفية تماماً وتحديث النظام. هل أنت متأكد؟')) return;
         const registrations = await navigator.serviceWorker.getRegistrations();
         for (let reg of registrations) await reg.unregister();
         const cachesKeys = await caches.keys();
@@ -211,7 +178,6 @@ const App = {
                     <span class="name">${m.nameAR || m.nameEN}</span>
                     <span class="id">#${m.id}</span>
                 </div>
-                <i class='bx bx-chevron-left'></i>
             </div>
         `).join('');
     },
@@ -228,12 +194,6 @@ const App = {
                     <h3>${med.nameAR || med.nameEN}</h3>
                     <p class="text-muted">#${med.id}</p>
                 </div>
-                <div class="inventory-status mt-20">
-                    <div class="status-card">
-                        <label>الكمية الحالية</label>
-                        <span class="value" id="med-detail-qty">جاري التحميل...</span>
-                    </div>
-                </div>
                 <div class="action-grid mt-30">
                     <button class="btn-primary" onclick="window.App.addInventoryAction('${med.id}', 'add')">
                         <i class='bx bx-plus'></i> إضافة رصيد
@@ -244,20 +204,15 @@ const App = {
                 </div>
             </div>
         `);
-        
-        // Load current qty
-        const inv = await DB.getAll('inventory');
-        const qty = inv.filter(i => i.medicineId === id).reduce((acc, curr) => acc + curr.quantity, 0);
-        document.getElementById('med-detail-qty').textContent = qty;
     },
 
-    async addInventoryAction(id, type) {
+    async addInventoryAction(medId, type) {
         const qty = prompt(`أدخل الكمية المراد ${type === 'add' ? 'إضافتها' : 'سحبها'}:`, "1");
         if (!qty || isNaN(qty)) return;
 
         const entry = {
             id: Utils.generateId(),
-            medicineId: id,
+            medicineId: medId,
             quantity: type === 'add' ? parseInt(qty) : -parseInt(qty),
             date: new Date().toISOString(),
             status: 'synced'
@@ -269,8 +224,11 @@ const App = {
         this.renderDashboard();
     },
 
-    renderInventory() { UI.switchView('view-inventory'); },
-    renderSmartInventory() { UI.switchView('view-smart-inventory'); }
+    async handleLogout() {
+        if (!confirm('هل تريد تسجيل الخروج؟')) return;
+        await auth.signOut();
+        window.location.reload();
+    }
 };
 
 window.handleSearch = (q) => App.handleGlobalSearch(q);
