@@ -24,29 +24,28 @@ export const Audit = {
             type: mode,
             host: user.displayName || user.email,
             participants: [user.displayName || user.email],
-            startTime: new Date().toISOString(),
-            active: true
+            startTime: new Date().toISOString()
         };
 
         if (mode === 'team') {
             await DB.put('audits', session);
-            await Sync.broadcastAuditStatus(session);
+            Sync.broadcastAuditStatus(session);
         }
         
         return session;
     },
 
-    async join(auditId, userName) {
-        if (await Sync.joinAudit(auditId, userName)) {
+    async join(userName) {
+        if (await Sync.joinAudit(userName)) {
             this.isJoined = true;
             return true;
         }
         return false;
     },
 
-    async end(auditId) {
-        if (!confirm('هل أنت متأكد من إنهاء عملية الجرد الحالية؟ سيتم أرشفة البيانات سحابياً.')) return false;
-        await Sync.closeAudit(auditId);
+    async end() {
+        if (!confirm('هل أنت متأكد من إنهاء عملية الجرد الحالية؟')) return false;
+        Sync.broadcastAuditStatus(null);
         return true;
     },
 

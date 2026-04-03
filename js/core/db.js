@@ -25,54 +25,56 @@ export const DB = {
         return new Promise((resolve, reject) => {
             const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-            // v16.0.7: Emergency Blocked Protection 🛡️
-            request.onblocked = () => {
-                console.warn('Dawaa DB: Update blocked by another tab. Please close other Dawaa tabs.');
-                alert('تنبيه: يوجد تبويبات أخرى مفتوحة للتطبيق، يرجى إغلاقها لتفعيل التحديث الجديد. 🛰️');
-                resolve(); // Resolve anyway to allow UI to boot
-            };
-
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
                 console.log(`Dawaa DB: Upgrading to v${DB_VERSION}...`);
-                
-                db.onversionchange = () => {
-                    db.close();
-                    window.location.reload();
-                };
 
                 // Master Store
                 if (!db.objectStoreNames.contains(STORES.MASTER)) {
                     const masterStore = db.createObjectStore(STORES.MASTER, { keyPath: 'id' });
                     masterStore.createIndex('by_name_en', 'nameEN', { unique: false });
                     masterStore.createIndex('by_name_ar', 'nameAR', { unique: false });
+                    masterStore.createIndex('by_category_id', 'categoryId', { unique: false });
                 }
 
                 // Inventory Store
+                let invStore;
                 if (!db.objectStoreNames.contains(STORES.INVENTORY)) {
-                    const invStore = db.createObjectStore(STORES.INVENTORY, { keyPath: 'id' });
-                    invStore.createIndex('by_medicine_id', 'medicineId', { unique: false });
-                    invStore.createIndex('by_expiry', 'expiryDate', { unique: false });
+                    invStore = db.createObjectStore(STORES.INVENTORY, { keyPath: 'id' });
+                } else {
+                    invStore = event.target.transaction.objectStore(STORES.INVENTORY);
+                }
+                
+                if (!invStore.indexNames.contains('by_medicine_id')) invStore.createIndex('by_medicine_id', 'medicineId', { unique: false });
+                if (!invStore.indexNames.contains('by_location')) invStore.createIndex('by_location', 'location', { unique: false });
+                if (!invStore.indexNames.contains('by_type')) invStore.createIndex('by_type', 'type', { unique: false });
+                if (!invStore.indexNames.contains('by_expiry')) invStore.createIndex('by_expiry', 'expiryDate', { unique: false });
+                if (!invStore.indexNames.contains('by_audit_id')) invStore.createIndex('by_audit_id', 'auditId', { unique: false });
+
+                // Categories Store
+                if (!db.objectStoreNames.contains(STORES.CATEGORIES)) {
+                    db.createObjectStore(STORES.CATEGORIES, { keyPath: 'id' });
                 }
 
-                // Categories & Settings
-                if (!db.objectStoreNames.contains(STORES.CATEGORIES)) db.createObjectStore(STORES.CATEGORIES, { keyPath: 'id' });
-                if (!db.objectStoreNames.contains(STORES.SETTINGS)) db.createObjectStore(STORES.SETTINGS);
-                if (!db.objectStoreNames.contains(STORES.AUDITS)) db.createObjectStore(STORES.AUDITS, { keyPath: 'id' });
+                // Settings Store
+                if (!db.objectStoreNames.contains(STORES.SETTINGS)) {
+                    db.createObjectStore(STORES.SETTINGS);
+                }
+
+                // Audits Store (v5 - Supreme Auditor)
+                if (!db.objectStoreNames.contains(STORES.AUDITS)) {
+                    db.createObjectStore(STORES.AUDITS, { keyPath: 'id' });
+                }
             };
 
             request.onsuccess = (event) => {
                 this.db = event.target.result;
-                this.db.onversionchange = () => {
-                   this.db.close();
-                   window.location.reload();
-                };
                 resolve(this.db);
             };
 
             request.onerror = (event) => {
                 console.error('Dawaa DB Error:', event.target.error);
-                resolve(); // Fail gracefully to allow UI boot
+                reject(event.target.error);
             };
         });
     },

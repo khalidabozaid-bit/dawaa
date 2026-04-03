@@ -3,55 +3,60 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>دواء | نظام إدارة جرد الأدوية</title>
+    <title>دواء | Dawaa Medical Inventory</title>
     
-    <!-- Design System (Modular) -->
+    <!-- PWA & SEO -->
+    <meta name="description" content="نظام جرد وتتبع الأدوية والمستلزمات الطبية">
+    <meta name="theme-color" content="#3b82f6">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
+    
+    <!-- Modular CSS -->
     <link rel="stylesheet" href="css/modules/base.css">
     <link rel="stylesheet" href="css/modules/layout.css">
     <link rel="stylesheet" href="css/modules/components.css">
     <link rel="stylesheet" href="css/modules/views.css">
     <link rel="stylesheet" href="css/modules/dark.css">
     <link rel="stylesheet" href="css/modules/auth.css">
-
-    <!-- Fonts & Icons -->
-    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
-    <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
-    
-    <meta name="theme-color" content="#2563eb">
-    <link rel="manifest" href="manifest.json">
 </head>
-<body class="safe-area-inset">
+<body class="light-mode">
 
-    <!-- Splash Screen -->
-    <section id="view-splash" class="view splash-screen active">
-        <div class="splash-content">
-            <div class="splash-logo"><i class='bx bxs-capsule'></i></div>
-            <h1 class="app-name">دواء</h1>
-            <div class="loading-bar"><div class="progress"></div></div>
-        </div>
-    </section>
-
-    <!-- Auth View -->
-    <section id="view-login" class="view auth-view">
+    <!-- Auth View (Hidden by default, shown by App.init if needed) -->
+    <section id="view-login" class="view-login-container">
         <div class="auth-card">
-            <div class="auth-header">
-                <i class='bx bxs-shield-quarter'></i>
-                <h2>دخول آمن</h2>
-                <p>سجل هويتك للوصول لنظام جرد "دواء"</p>
-            </div>
-            <div class="auth-body">
-                <div class="input-group">
-                    <label>الاسم</label>
-                    <input type="text" id="auth-name" class="auth-input" placeholder="مثال: خالد">
+            <div class="auth-logo"><i class='bx bxs-capsule'></i></div>
+            <h2 id="auth-title">تسجيل الدخول</h2>
+            <p id="auth-subtitle">مرحباً بك في نظام دواء لجرد الأدوية</p>
+            
+            <form id="auth-form" class="auth-form" onsubmit="event.preventDefault(); window.App.handleAuthSubmit();">
+                <div class="auth-group">
+                    <label>الاسم الأول</label>
+                    <input type="text" id="auth-name" class="auth-input" placeholder="مثال: خالد" required>
                 </div>
-                <div class="input-group">
-                    <label>رقم الهوية / الكود</label>
-                    <input type="password" id="auth-email" class="auth-input" placeholder="******">
+                <div class="auth-group">
+                    <label>رقم الباي رول (Employee ID)</label>
+                    <input type="number" id="auth-email" class="auth-input" placeholder="مثال: 1001" required>
                 </div>
-                <button class="btn-auth" onclick="window.App.handleAuthSubmit()">دخول النظام 🛰️</button>
+                <button type="submit" class="auth-btn" id="auth-submit-btn">دخول النظام</button>
+            </form>
+
+            <div class="auth-toggle" style="display: none;">
+                <span id="auth-toggle-text"></span>
+                <button class="auth-toggle-btn" onclick="window.App.toggleAuthMode()"></button>
             </div>
         </div>
     </section>
+
+    <!-- Update Notification silenced (Digital Silence Protocol) -->
+
 
     <!-- App Header -->
     <header class="app-header">
@@ -59,94 +64,253 @@
             <div class="user-profile" onclick="window.App.openProfile()">
                 <div class="avatar"><i class='bx bxs-user-circle'></i></div>
                 <div class="user-info">
-                    <span class="greeting">أهلاً،</span>
+                    <span class="greeting">أهلاً بك،</span>
                     <span class="user-name" id="display-user-name">...</span>
                 </div>
             </div>
             <div class="app-logo">
                 <i class='bx bxs-capsule'></i>
-                <h1>دواء <span class="ver-badge">v16.0.7 Emergency</span></h1>
+                <h1>دواء <span style="font-size: 10px; opacity: 0.5">v13.0.0</span></h1>
             </div>
-            <div class="header-actions">
-                <div id="cloud-sync-indicator" class="sync-indicator offline" title="حالة السحابة">
-                    <i class='bx bx-cloud-off'></i>
-                </div>
-                <button class="icon-btn" onclick="window.App.handleLogout()" title="خروج">
-                    <i class='bx bx-log-out'></i>
+            <div id="audit-banner" class="global-audit-banner"></div>
+
+
+
+
+
+
+
+
+
+
+                <button class="icon-btn" onclick="window.App.openAuditHub()" title="مركز عمليات الجرد (Command Center)">
+                    <i class='bx bx-command'></i>
+                </button>
+                <button class="icon-btn" onclick="window.toggleTheme()" title="تبديل الوضع">
+                    <i class='bx bx-moon' id="theme-icon"></i>
                 </button>
             </div>
         </div>
     </header>
 
-    <!-- Main Content Area -->
+    <!-- Main Content -->
     <main class="app-main container">
-        
-        <!-- Dashboard View -->
-        <section id="view-dashboard" class="view">
-            <div class="dashboard-stats-grid">
-                <div class="stat-card">
-                    <span class="stat-val" id="total-meds">0</span>
-                    <span class="stat-label">إجمالي المواد</span>
-                    <i class='bx bx-list-check icon-bg'></i>
-                </div>
-                <div class="stat-card warning">
-                    <span class="stat-val" id="low-stock-count">0</span>
-                    <span class="stat-label">أرصدة منخفضة</span>
-                    <i class='bx bx-trending-down icon-bg'></i>
-                </div>
-                <div class="stat-card danger">
-                    <span class="stat-val" id="expired-count">0</span>
-                    <span class="stat-label">تنبيه صلاحية</span>
-                    <i class='bx bx-time-five icon-bg'></i>
-                </div>
-            </div>
-
-            <!-- Management Hub (Quick Actions) -->
-            <div class="management-hub mt-20">
-                <div class="hub-header" onclick="window.App.toggleHubNotifications()">
-                    <div class="hub-title">
-                        <i class='bx bxs-zap text-warning'></i>
-                        <h3>مركز إدارة الجرد (v16)</h3>
-                        <span id="hub-notif-count" class="badge">0</span>
+        <!-- Dashboard Overview -->
+        <section id="view-dashboard" class="view active">
+            <div class="stats-grid">
+                <div class="stat-card total" onclick="switchView('view-inventory')">
+                    <div class="stat-icon"><i class='bx bx-package'></i></div>
+                    <div class="stat-data">
+                        <span class="stat-value" id="stat-total-items">0</span>
+                        <span class="stat-label">إجمالي المواد</span>
                     </div>
-                    <i class='bx bx-chevron-down' id="notif-chevron"></i>
                 </div>
-                <div id="hub-notif-list" class="notif-list-container"></div>
+                <div class="stat-card low-stock" onclick="window.App.showLowStock()">
+                    <div class="stat-icon"><i class='bx bx-trending-down'></i></div>
+                    <div class="stat-data">
+                        <span class="stat-value" id="stat-low-stock">0</span>
+                        <span class="stat-label">أرصدة منخفضة</span>
+                    </div>
+                </div>
+                <div class="stat-card expiring" onclick="window.App.showExpiring()">
+                    <div class="stat-icon"><i class='bx bx-time-five'></i></div>
+                    <div class="stat-data">
+                        <span class="stat-value" id="stat-expiring-items">0</span>
+                        <span class="stat-label">تنبيه الصلاحية</span>
+                    </div>
+                </div>
+                <!-- v12.0.0: Command Center Tile -->
+                <div class="stat-card primary-accent" onclick="window.App.openAuditHub()" style="background: rgba(var(--primary-rgb), 0.05); border: 2px dashed var(--primary)">
+                    <div class="stat-icon" style="background: var(--primary); color: white"><i class='bx bx-station'></i></div>
+                    <div class="stat-data">
+                        <span class="stat-value" style="font-size: 16px">مركز القيادة</span>
+                        <span class="stat-label">غرفة عمليات الجرد</span>
+                    </div>
+                </div>
             </div>
 
-            <!-- Global Search -->
-            <div class="global-search-container mt-20">
-                <div class="search-box">
+            <!-- Active Audit Highlight (v10.5.1) -->
+            <div id="active-audit-container"></div>
+
+            <!-- Global Search remains for quick access -->
+            <div class="search-section mt-20">
+                <div class="search-bar">
                     <i class='bx bx-search'></i>
-                    <input type="text" id="main-search" placeholder="ابحث عن دواء بالاسم أو الباركود..." oninput="window.handleSearch(this.value)">
+                    <input type="text" id="global-search" placeholder="بحث سريع عن أي دواء..." oninput="handleSearch(this.value)">
                 </div>
-                <div id="quick-search-results" class="results-list"></div>
             </div>
         </section>
 
-        <!-- Other Views (Smart Inventory, Reports, Settings) -->
+        <!-- Smart Inventory View (The Active Entry Hub) -->
         <section id="view-smart-inventory" class="view">
-            <div class="view-header"><h2>🗂️ تصنيفات الجرد</h2></div>
-            <div id="categories-grid" class="grid-v15"></div>
-        </section>
-
-        <section id="view-inventory" class="view">
-            <div class="view-header"><h2>📊 التقارير والتصدير</h2></div>
-            <div class="reports-grid">
-                <div class="report-card" onclick="window.App.exportFull()">
-                    <i class='bx bxs-file-export'></i>
-                    <h3>جرد كلي (Excel)</h3>
-                </div>
+            <div class="view-header">
+                <h2>الجرد الذكي</h2>
+                <p class="text-muted">اختر القسم لبدء إضافة الكمية</p>
+            </div>
+            
+            <div id="category-grid" class="category-grid mt-20">
+                <!-- Dynamic Categories Rendered Here -->
             </div>
         </section>
 
-        <section id="view-settings" class="view">
-            <div class="view-header"><h2>⚙️ الإعدادات</h2></div>
-            <div class="settings-list">
-                <div class="settings-item" onclick="window.App.forceUpdateSystem()">
-                    <i class='bx bx-refresh text-danger'></i>
-                    <span>تحديث إجباري (للطوارئ)</span>
+        <!-- Inventory List View -->
+        <section id="view-inventory" class="view">
+            <div class="view-header">
+                <button class="back-btn" onclick="window.UI.switchView('view-dashboard')" title="العودة للوحة التحكم">
+                    <i class='bx bx-chevron-right'></i>
+                </button>
+                <h2>تقارير الجرد والإحصائيات</h2>
+            </div>
+
+            <!-- Quick Category Filters (Efficiency Protocol) -->
+            <div id="category-chips" class="category-chips-container mt-15">
+                <!-- Chips rendered here -->
+            </div>
+
+            
+            <div class="reports-grid">
+                <div class="report-card" onclick="window.App.renderInventory('detailed')">
+                    <div class="report-icon primary"><i class='bx bx-list-ul'></i></div>
+                    <div class="report-info">
+                        <h3>تقرير الجرد الكامل</h3>
+                        <p>تصدير كافة بيانات المخزون الحالية</p>
+                    </div>
                 </div>
+                
+                <div class="report-card" onclick="window.App.renderInventory('expiry')">
+                    <div class="report-icon warning"><i class='bx bx-time-five'></i></div>
+                    <div class="report-info">
+                        <h3>تقرير نواقص الصلاحية</h3>
+                        <p>الأدوية التي تنتهي خلال 6 أشهر</p>
+                    </div>
+                </div>
+                
+                <div class="report-card" onclick="window.App.renderInventory('low-stock')">
+                    <div class="report-icon danger"><i class='bx bx-trending-down'></i></div>
+                    <div class="report-info">
+                        <h3>تقرير الأصناف الناقصة</h3>
+                        <p>الأدوية التي رصيدها أقل من 5</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Toggle removed as we now have direct cards for each type -->
+            <div id="inventory-items-list" class="items-list mt-20"></div>
+        </section>
+
+        <!-- Master Data View -->
+        <section id="view-master" class="view">
+            <div class="view-header">
+                <div class="header-left" style="display:flex; align-items:center; gap:10px">
+                    <button class="back-btn" onclick="window.UI.switchView('view-dashboard')" title="رجوع"><i class='bx bx-chevron-right'></i></button>
+                    <h2>مستودع الأصناف</h2>
+                </div>
+                <div class="header-btns" style="display:flex; gap:8px">
+                    <button class="btn-outline-primary sm-btn-icon" onclick="window.App.openManageCategories()" title="إدارة الأقسام"><i class='bx bx-category-alt'></i></button>
+                    <button class="btn-primary sm-btn" style="width:auto; padding:0 15px; height:40px; font-size:13px" onclick="window.App.openAddMedicine()" title="إضافة صنف دواء جديد"><i class='bx bx-plus' style="margin-left:4px"></i>إضافة دواء</button>
+                </div>
+            </div>
+
+            <div class="search-bar mb-20">
+                <i class='bx bx-search'></i>
+                <input type="text" id="master-search" placeholder="ابحث في المستودع..." oninput="window.App.handleMasterSearch(this.value)">
+            </div>
+            <div id="master-items-list" class="items-list"></div>
+        </section>
+
+        <!-- Settings View (Mashawiri Style) -->
+        <section id="view-settings" class="view">
+            <div class="view-header">
+                <button class="back-btn" onclick="window.UI.switchView('view-dashboard')" title="العودة للوحة التحكم">
+                    <i class='bx bx-chevron-right'></i>
+                </button>
+                <h2>الإعدادات والنظام</h2>
+            </div>
+            <div class="settings-grid">
+                <div class="setting-card primary-accent" onclick="window.switchView('master')">
+                    <div class="setting-icon bg-sync"><i class='bx bx-database'></i></div>
+                    <div class="setting-info">
+                        <h3>قاعدة البيانات (Database)</h3>
+                        <p>إدارة أصناف الأدوية، الإضافة والتعديل</p>
+                    </div>
+                </div>
+                <div id="admin-audit-hub-card" class="setting-card primary-accent" onclick="window.App.startAudit()" style="display:none">
+                    <div class="setting-icon bg-sync"><i class='bx bx-clipboard'></i></div>
+                    <div class="setting-info">
+                        <h3>إدارة عمليات الجرد (Hub)</h3>
+                        <p>بدء جرد فردي أو جماعي مشترك</p>
+                    </div>
+                </div>
+
+                <div class="setting-card" onclick="window.App.handleAdminUnlock()">
+                    <div class="setting-icon bg-admin"><i class='bx bx-shield-quarter' id="admin-icon"></i></div>
+                    <div class="setting-info">
+                        <h3 id="admin-status-text">تفعيل وضع المدير</h3>
+                        <p>للمراجعة والاعتماد والنشر العالمي</p>
+                    </div>
+                </div>
+                <!-- Logout -->
+                <div class="setting-card" onclick="window.App.handleLogout()">
+                    <div class="setting-icon bg-danger-light"><i class='bx bx-log-out'></i></div>
+                    <div class="setting-info">
+                        <h3 class="text-danger">تسجيل الخروج</h3>
+                        <p>الخروج من الحساب الحالي</p>
+                    </div>
+                </div>
+                <!-- System Utility -->
+                <div class="setting-card" onclick="window.App.fullReset()">
+                    <div class="setting-icon bg-danger-light"><i class='bx bx-reset'></i></div>
+                    <div class="setting-info">
+                        <h3 class="text-danger">إعادة ضبط المصنع</h3>
+                        <p>حذف كافة البيانات والبدء من جديد</p>
+                    </div>
+                </div>
+                <div class="setting-card" onclick="window.App.checkUpdate()">
+                    <div class="setting-icon bg-info"><i class='bx bx-refresh'></i></div>
+                    <div class="setting-info">
+                        <h3>تحديث النظام</h3>
+                        <p id="update-status-text">البحث عن إصدارات جديدة متوفرة</p>
+                    </div>
+                </div>
+
+                <!-- Emergency Force Update (v10.0.1 Sovereign Protocol) -->
+                <div class="setting-card force-reset" onclick="window.App.forceUpdateSystem()" style="background: rgba(239, 68, 68, 0.05); border: 1px solid var(--danger-light)">
+                    <div class="setting-icon bg-danger-light"><i class='bx bx-bomb text-danger'></i></div>
+                    <div class="setting-info">
+                        <h3 class="text-danger">تحديث إجباري (للطوارئ)</h3>
+                        <p>استخدمه فقط إذا كان التطبيق عالقاً في نسخة قديمة</p>
+                    </div>
+                </div>
+
+                <div class="setting-card" onclick="window.toggleTheme()">
+                    <div class="setting-icon"><i class='bx bx-moon' id="settings-theme-icon"></i></div>
+                    <div class="setting-info">
+                        <h3>مظهر التطبيق</h3>
+                        <p>تبديل بين الوضع الليلي والنهاري</p>
+                    </div>
+                </div>
+            </div>
+            <div class="version-footer">
+                <p>دواء للمستودعات الذكية - v13.0.0</p>
+
+
+
+
+                <p style="font-size: 9px; opacity: 0.6">تم تحديث نظام الأكواد العالمي (1001)</p>
+                <p>Mashawiri Protocol Standards</p>
+            </div>
+        </section>
+        <!-- Audit Hub View (v10.6.5 Command Center) -->
+        <section id="view-audit-hub" class="view">
+            <div class="view-header">
+                <button class="back-btn" onclick="window.UI.switchView('view-settings')" title="العودة للإعدادات">
+                    <i class='bx bx-chevron-right'></i>
+                </button>
+                <h2>مركز إدارة الجرد (Audit Hub)</h2>
+            </div>
+
+            <div id="hub-session-content" class="mt-20">
+                <!-- Dynamic Content (Start Mode / Active Stats / Participants) -->
             </div>
         </section>
     </main>
@@ -160,10 +324,10 @@
             </button>
             <button class="nav-item" data-target="smart-inventory">
                 <i class='bx bxs-category'></i>
-                <span>الجرد</span>
+                <span>الجرد الذكي</span>
             </button>
             <div class="nav-action-btn">
-                <button id="btn-quick-add" onclick="window.App.openQuickAdd()">
+                <button id="btn-quick-add" onclick="window.App.openQuickAdd()" title="إضافة سريعة للصيدلية/المخزن">
                     <i class='bx bx-plus'></i>
                 </button>
             </div>
@@ -171,21 +335,28 @@
                 <i class='bx bxs-file-doc'></i>
                 <span>التقارير</span>
             </button>
-            <button class="nav-item" data-target="settings">
+            <button class="nav-item" data-target="settings" title="الإعدادات والنظام">
                 <i class='bx bxs-cog'></i>
-                <span>إعدادات</span>
+                <span>الإعدادات</span>
             </button>
         </div>
     </nav>
 
+    <!-- Modals Overlay -->
     <div id="modal-container" class="modal-overlay"></div>
 
-    <!-- Firebase SDK (Compat) -->
+    <!-- Firebase SDK (Compat v10) -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-    
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
+
+
+    <!-- App Scripts -->
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/app.js?v=16.0.7"></script>
+    <script type="module" src="js/app.js"></script>
+    
+    <!-- Navigation Logic managed by js/app.js -->
 </body>
 </html>
+
