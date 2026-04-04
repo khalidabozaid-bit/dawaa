@@ -15,7 +15,7 @@ import { auth, db, storage } from './core/firebase-config.js';
  */
 
 const App = {
-    VERSION: '16.2.4', // Universal Sovereign v16.2.4 (Inventory Center & Cloud Sync)
+    VERSION: '16.2.5', // Universal Sovereign v16.2.5 (Established Master Protocol)
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
