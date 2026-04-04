@@ -75,6 +75,11 @@
             <div id="audit-banner" class="global-audit-banner"></div>
 
             <div class="header-actions">
+                <button class="icon-btn notification-btn" onclick="window.App.toggleNotifications()" title="مركز الإشعارات">
+                    <i class='bx bx-bell'></i>
+                    <span id="notif-badge" class="notif-badge" style="display: none;">0</span>
+                </button>
+                <button class="icon-btn" onclick="window.App.openAuditHub()" title="مركز عمليات الجرد (Command Center)">
                     <i class='bx bx-command'></i>
                 </button>
                 <button class="icon-btn" onclick="window.toggleTheme()" title="تبديل الوضع">
@@ -83,6 +88,23 @@
             </div>
         </div>
     </header>
+
+    <!-- Notification Center Panel (Hidden by default) -->
+    <div id="notification-center" class="notification-panel">
+        <div class="notif-header">
+            <h3><i class='bx bx-bell'></i> الإشعارات (Live Feed)</h3>
+            <button class="icon-btn" onclick="window.App.toggleNotifications()"><i class='bx bx-x'></i></button>
+        </div>
+        <div class="notif-body" id="notif-list">
+            <div class="notif-empty">
+                <i class='bx bx-sleepy'></i>
+                <p>لا توجد حركات حديثة في الجرد الحالي</p>
+            </div>
+        </div>
+        <div class="notif-footer">
+            <button class="btn-glass w-100" onclick="window.App.clearNotifications()">مسح الإشعارات 🧹</button>
+        </div>
+    </div>
 
     <!-- Main Content -->
     <main class="app-main container">

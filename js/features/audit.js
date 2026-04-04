@@ -1,6 +1,7 @@
 import { DB } from '../core/db.js';
 import { Sync } from '../core/sync.js';
 import { UI } from '../core/ui.js';
+import { Inventory } from './inventory.js';
 
 /**
  * Audit Management Service (v11.0.0 Architectural Sovereign)
@@ -53,9 +54,9 @@ export const Audit = {
      * Operational Analytics (v12.0.0 Command Hub)
      */
     async getSessionStats(auditId) {
-        if (!auditId) return { totalItems: 0, totalUnits: 0, uniqueMedicines: 0 };
+        if (!auditId) return { totalEntries: 0, totalUnits: 0, uniqueCount: 0 };
         
-        const entries = await window.Inventory.getEntriesByAudit(auditId);
+        const entries = await Inventory.getEntriesByAudit(auditId);
         const uniqueMeds = new Set(entries.map(e => e.medicineId));
         
         const totalUnits = entries.reduce((sum, e) => sum + (parseFloat(e.quantity) || 0), 0);

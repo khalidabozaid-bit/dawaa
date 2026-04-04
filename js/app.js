@@ -19,6 +19,8 @@ const App = {
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
     selectedCategoryId: null, 
+    notifications: [],
+    unreadCount: 0,
 
     /**
      * Image Upload Helper for Cloud Storage (v9.8.0)
@@ -995,29 +997,16 @@ const App = {
         }
 
         this.activeAudit = session;
-        const banner = document.getElementById('audit-banner');
-        if (!banner) return;
 
         if (session) {
-            banner.innerHTML = `
-                <div class="audit-info">
-                    <i class='bx bxs-megaphone bx-tada'></i>
-                    <span>جاري الجرد الجماعي: <strong>${session.name}</strong></span>
-                    <span class="host-name">بواسطة: ${session.host || 'غير معروف'}</span>
-                </div>
-                <div class="audit-actions">
-                    ${!this.isJoined && this.userRole !== 'admin' ? `<button class="btn-primary sm-btn" onclick="window.App.joinAudit()">انضم للعمل</button>` : ''}
-                    ${this.userRole === 'admin' ? `<button class="btn-primary sm-btn" style="border:1px solid white" onclick="window.App.closeAudit()">إنهاء الجرد</button>` : ''}
-                </div>
-            `;
-            banner.classList.add('active');
             this.renderActiveAuditCard(session); 
             if (UI.currentViewId === 'view-audit-hub') this.renderAuditHub();
             
+            // Background listener without Toasts for silent operation
             if (this.isJoined || this.userRole === 'admin') {
                 if (!this.feedListener) {
                     this.feedListener = Sync.subscribeToFeed(session.id, (entry) => {
-                        UI.showToast(`${entry.userName} أضاف: ${entry.medicineName} (${entry.quantity})`, 'info');
+                        this.pushNotification(`${entry.userName} أضاف: ${entry.medicineName} (الكمية: ${entry.quantity})`);
                         if (this.selectedCategoryId) this.openCategory(this.selectedCategoryId); 
                     });
                 }
@@ -1025,13 +1014,71 @@ const App = {
         } else {
             this.activeAudit = null;
             this.isJoined = false;
-            banner.classList.remove('active');
             this.renderActiveAuditCard(); // Hide Dashboard Card
             if (this.feedListener) {
                 this.feedListener();
                 this.feedListener = null;
             }
         }
+    },
+
+    toggleNotifications() {
+        const panel = document.getElementById('notification-center');
+        if (panel) {
+            panel.classList.toggle('show');
+            if (panel.classList.contains('show')) {
+                this.unreadCount = 0;
+                this.updateBadge();
+            }
+        }
+    },
+
+    pushNotification(msg) {
+        this.notifications.unshift({ msg, time: new Date().toISOString() });
+        this.unreadCount++;
+        this.updateBadge();
+        this.renderNotifications();
+    },
+
+    clearNotifications() {
+        this.notifications = [];
+        this.unreadCount = 0;
+        this.updateBadge();
+        this.renderNotifications();
+        this.toggleNotifications();
+    },
+
+    updateBadge() {
+        const badge = document.getElementById('notif-badge');
+        if (badge) {
+            badge.textContent = this.unreadCount;
+            badge.style.display = this.unreadCount > 0 ? 'flex' : 'none';
+            // Trigger bounce animation
+            badge.style.animation = 'none';
+            setTimeout(() => badge.style.animation = 'bounce 0.3s ease', 10);
+        }
+    },
+
+    renderNotifications() {
+        const list = document.getElementById('notif-list');
+        if (!list) return;
+
+        if (this.notifications.length === 0) {
+            list.innerHTML = `
+                <div class="notif-empty">
+                    <i class='bx bx-sleepy'></i>
+                    <p>لا توجد حركات حديثة في الجرد الحالي</p>
+                </div>
+            `;
+            return;
+        }
+
+        list.innerHTML = this.notifications.map(n => `
+            <div class="notif-item">
+                <span>${n.msg}</span>
+                <span class="n-time">${new Date(n.time).toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'})}</span>
+            </div>
+        `).join('');
     },
 
     renderActiveAuditCard(session = this.activeAudit) {
