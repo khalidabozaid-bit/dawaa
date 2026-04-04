@@ -23,6 +23,7 @@ export const Inventory = {
             quantity: parseFloat(data.quantity) || 0,
             expiryDate: data.expiryDate || null,
             auditId: data.auditId || null, // v10.5.0 Audit Tagging
+            userName: data.userName || (window.App && window.App.user ? window.App.user.displayName || window.App.user.email : 'مجهول'), // Team Leaderboard mapping
             type: data.type || 'medicine',
             timestamp: new Date().toISOString()
         };

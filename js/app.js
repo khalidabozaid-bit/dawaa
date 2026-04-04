@@ -6,6 +6,7 @@ import { Audit } from './features/audit.js';
 import { Exporter } from './features/export.js';
 import { Utils } from './core/utils.js';
 import { Sync } from './core/sync.js';
+import { TaskManager } from './features/tasks.js';
 import { auth, db, storage } from './core/firebase-config.js';
 
 /**
@@ -53,15 +54,16 @@ const App = {
             this.updateAuditSession(session);
         });
 
-        // v13.0.0: UI Reactivity - Auto-refresh Hub on data changes
         Inventory.subscribe(() => {
-            const currentView = UI.currentViewId;
-            if (currentView === 'view-audit-hub') {
+            const currentView = UI.currentView;
+            if (currentView === 'audit-hub') {
                 this.renderAuditHub();
+                this.renderStructuredSessions();
             }
         });
         await Categories.seedInitialData();
         UI.init();
+        TaskManager.init();
         this.registerServiceWorker();
 
         // Auth Monitor (The Heart of v9.0.0)
@@ -299,7 +301,8 @@ const App = {
             };
 
             UI.updateDashboardStats(stats);
-            // Categories and Inventory list removed from dashboard for a 'Clean' look (v6.3)
+            // v15.0.0: Render active structured tasks
+            if (window.TaskManager) TaskManager.renderAssignedTaskPrompt();
         } catch (err) {
             console.error(err);
         }
@@ -646,15 +649,17 @@ const App = {
             const mEntries = entries.filter(e => e.medicineId === medicineId);
             
             // Calculate Current Balances (v10.3.0 Guardian Logic)
-            const phQty = mEntries.filter(e => e.location === 'صيدلية').reduce((sum, e) => sum + e.quantity, 0);
-            const whQty = mEntries.filter(e => e.location === 'مخزن').reduce((sum, e) => sum + e.quantity, 0);
+            const getLocQty = (loc) => mEntries.filter(e => e.location === loc).reduce((sum, e) => sum + e.quantity, 0);
 
             UI.showModal(`
                 <div class="sheet-handle"></div>
                 <div class="modal-header"><h2>إضافة جرد جديد ( Stock Entry )</h2></div>
-                <div class="balance-notification">
-                    <span>🏥 صيدلية: <strong>${phQty}</strong></span>
-                    <span>📦 مخزن: <strong>${whQty}</strong></span>
+                <div class="balance-notification" style="display:flex; flex-wrap:wrap; gap:5px; justify-content:center; padding:10px 0;">
+                    ${['صيدلية', 'مخزن', 'ثلاجة', 'دولاب الطوارئ', 'دولاب الاستقبال', 'إسعاف'].map(loc => `
+                        <span style="font-size:11px; padding:3px 8px; background:rgba(0,0,0,0.05); border-radius:10px">
+                            ${loc}: <strong>${getLocQty(loc)}</strong>
+                        </span>
+                    `).join('')}
                 </div>
                 <form id="form-inventory" onsubmit="event.preventDefault(); window.App.saveEntry('${medicineId}');">
                     <div class="form-group">
@@ -665,10 +670,14 @@ const App = {
                     
                     <div class="form-row">
                         <div class="form-group">
-                            <label class="form-label">المكان الرئيسي (إجباري):</label>
+                            <label class="form-label">مكان الجرد (إجباري):</label>
                             <select id="entry-location-main" class="form-select" required>
-                                <option value="صيدلية">🏥 صيدلية</option>
-                                <option value="مخزن">📦 مخزن</option>
+                                <option value="صيدلية">🏥 الصيدلية</option>
+                                <option value="مخزن">📦 المخزن</option>
+                                <option value="ثلاجة">❄️ الثلاجة</option>
+                                <option value="دولاب الطوارئ">🚨 دولاب الطوارئ</option>
+                                <option value="دولاب الاستقبال">🛋️ دولاب الاستقبال</option>
+                                <option value="إسعاف">🚑 سيارة الإسعاف</option>
                             </select>
                         </div>
                         <div class="form-group">
@@ -1235,6 +1244,85 @@ const App = {
                     </div>
                 </div>
             `;
+        }
+    },
+
+    // v15.0.0: Task Hub Tabs
+    switchHubTab(tab) {
+        const liveTab = document.getElementById('hub-session-content');
+        const sessTab = document.getElementById('hub-structured-content');
+        const btns = document.querySelectorAll('.tab-btn');
+        
+        btns.forEach(b => b.classList.remove('active'));
+        
+        if (tab === 'live') {
+            liveTab.style.display = 'block';
+            sessTab.style.display = 'none';
+            btns[0].classList.add('active');
+            this.renderAuditHub();
+        } else {
+            liveTab.style.display = 'none';
+            sessTab.style.display = 'block';
+            btns[1].classList.add('active');
+            this.renderStructuredSessions();
+        }
+    },
+
+    async renderStructuredSessions() {
+        const container = document.getElementById('hub-structured-content');
+        if (!container) return;
+
+        const isAdmin = this.userRole === 'admin';
+        
+        // Fetch sessions from Firestore
+        const snapshot = await db.collection('inventory_sessions').orderBy('created_at', 'desc').limit(5).get();
+        const sessions = snapshot.docs.map(doc => doc.data());
+
+        container.innerHTML = `
+            ${isAdmin ? `
+                <button class="commander-btn p-btn mb-20" onclick="window.App.openCreateInventory()">
+                    <i class='bx bx-git-branch'></i>
+                    <div class="btn-text">
+                        <h3>إنشاء عملية جرد جديدة 📡</h3>
+                        <p>ابدأ فوراً (فردي) أو وزع المهام (جماعي)</p>
+                    </div>
+                </button>
+            ` : ''}
+
+            <div class="section-title"><h3>سجل العمليات الجارية</h3></div>
+            <div class="sessions-list mt-10">
+                ${sessions.map(s => `
+                    <div class="session-stat-card" style="background:var(--card-bg); padding:15px; border-radius:15px; border:1px solid var(--border-color); margin-bottom:10px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <h4 style="font-weight:800">${s.name}</h4>
+                                <p style="font-size:11px; color:var(--text-muted)">بواسطة: ${s.created_by}</p>
+                            </div>
+                            <span class="badge ${s.status === 'completed' ? 'bg-success' : 'bg-primary'}">${s.status === 'completed' ? 'مكتمل' : 'جاري'}</span>
+                        </div>
+                    </div>
+                `).join('')}
+                ${sessions.length === 0 ? '<p class="text-muted text-center p-20">لا توجد جلسات مهيكلة حالياً</p>' : ''}
+            </div>
+        `;
+    },
+
+    // UI Helpers (v16.1.0)
+    openCreateInventory() { TaskManager.openCreateInventory(); },
+    uiCreateIndividual() { TaskManager.uiCreateIndividual(); },
+    submitIndividualInventory() { TaskManager.submitIndividualInventory(); },
+    uiCreateGroup() { TaskManager.openCreateSession(); },
+    switchTaskLocation(loc) { TaskManager.switchLocation(loc); },
+    toggleAllLocations(checked) {
+        document.querySelectorAll('.loc-checkbox').forEach(cb => cb.checked = checked);
+    },
+    runTask(taskId) { TaskManager.runTask(taskId); },
+    saveTaskCount(pid, qty) { TaskManager.saveTaskCount(pid, qty); },
+    handleTaskSearch(val) { TaskManager.renderTaskList(val); },
+    finishTask() {
+        if (confirm('هل أنت متأكد من إنهاء المهمة؟')){
+            UI.switchView('view-dashboard');
+            UI.showToast('تم الحفظ والإغلاق بنجاح! 🎊', 'success');
         }
     },
 

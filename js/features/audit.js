@@ -61,10 +61,28 @@ export const Audit = {
         
         const totalUnits = entries.reduce((sum, e) => sum + (parseFloat(e.quantity) || 0), 0);
         
+        // Leaderboard & Location Matrix
+        let parts = {};
+        let locs = {};
+
+        entries.forEach(e => {
+            let uName = e.userName && e.userName.trim() ? e.userName : 'عضو خفي';
+            parts[uName] = (parts[uName] || 0) + 1; // Count of successful additions
+
+            let lName = e.location || 'غير محدد';
+            locs[lName] = (locs[lName] || 0) + 1;
+        });
+
         return {
             totalEntries: entries.length,
             totalUnits: totalUnits,
-            uniqueCount: uniqueMeds.size
+            uniqueCount: uniqueMeds.size,
+            participantsStatus: Object.entries(parts)
+                                    .map(([name, count]) => ({name, count}))
+                                    .sort((a,b)=> b.count - a.count), // Sort by highest
+            locations: Object.entries(locs)
+                                    .map(([name, count]) => ({name, count}))
+                                    .sort((a,b)=> b.count - a.count)
         };
     }
 };

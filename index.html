@@ -145,6 +145,9 @@
             <!-- Active Audit Highlight (v10.5.1) -->
             <div id="active-audit-container"></div>
 
+            <!-- v15.0.0: Assigned Task Highlight -->
+            <div id="assigned-task-container"></div>
+
             <!-- Global Search remains for quick access -->
             <div class="search-section mt-20">
                 <div class="search-bar">
@@ -315,11 +318,51 @@
                 <button class="back-btn" onclick="window.UI.switchView('view-settings')" title="العودة للإعدادات">
                     <i class='bx bx-chevron-right'></i>
                 </button>
-                <h2>مركز إدارة الجرد (Audit Hub)</h2>
+                <h2>مركز العمليات والجرد (Inventory Center)</h2>
+            </div>
+
+            <!-- v15.0.0: Structured Sessions Toggle -->
+            <div class="hub-tabs mt-15">
+                <button class="tab-btn active" onclick="window.App.switchHubTab('live')">البث المباشر (Audit)</button>
+                <button class="tab-btn" onclick="window.App.switchHubTab('sessions')">جلسات المهام (Tasks)</button>
             </div>
 
             <div id="hub-session-content" class="mt-20">
                 <!-- Dynamic Content (Start Mode / Active Stats / Participants) -->
+            </div>
+            
+            <div id="hub-structured-content" class="mt-20" style="display: none;">
+                <!-- Structured Sessions List & Creator -->
+            </div>
+        </section>
+
+        <!-- v15.0.0: Task Runner View (High-Speed Counting) -->
+        <section id="view-task-runner" class="view">
+            <div class="view-header">
+                <div class="task-info-bar">
+                    <h2 id="tr-location-name">جاري تحميل المهمة...</h2>
+                    <p id="tr-session-name" class="text-muted small">...</p>
+                </div>
+                <button class="btn-primary sm-btn" onclick="window.App.finishTask()">إنهاء المهمة ✅</button>
+            </div>
+
+            <div class="progress-container mt-15">
+                <div class="progress-text">
+                    <span>نسبة الإنجاز</span>
+                    <span id="tr-progress-pct">0%</span>
+                </div>
+                <div class="progress-bar-wrap">
+                    <div id="tr-progress-bar" class="progress-bar" style="width: 0%;"></div>
+                </div>
+            </div>
+
+            <div class="search-bar mt-20">
+                <i class='bx bx-search'></i>
+                <input type="text" id="tr-search" placeholder="بحث سريع في المهمة..." oninput="window.App.handleTaskSearch(this.value)">
+            </div>
+
+            <div id="tr-items-list" class="task-items-list mt-20">
+                <!-- Fast Counting Cards rendered here -->
             </div>
         </section>
     </main>

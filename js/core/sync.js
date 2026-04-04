@@ -222,6 +222,73 @@ export const Sync = {
                     callback();
                 }
             });
+    },
+
+    // v15.0.0: Structured Task-Based Sessions (The Task Engine)
+    async createStructuredSession(name, assignments) {
+        const sessionId = 'session_' + Date.now();
+        const batch = db.batch();
+        
+        // 1. Create Session Header
+        const sessionRef = db.collection('inventory_sessions').doc(sessionId);
+        batch.set(sessionRef, {
+            id: sessionId,
+            name: name,
+            status: 'in_progress',
+            created_by: window.App?.user?.displayName || window.App?.user?.email,
+            created_at: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+        });
+
+        // 2. Create Tasks for each assignment
+        assignments.forEach(task => {
+            const taskId = 'task_' + Math.random().toString(36).substr(2, 9);
+            const taskRef = db.collection('inventory_tasks').doc(taskId);
+            batch.set(taskRef, {
+                id: taskId,
+                session_id: sessionId,
+                user_id: task.user_id, 
+                location_name: task.location || 'متعدد',
+                location_ids: task.location_ids || [task.location], // Array Support
+                type: task.individual ? 'individual' : 'group',
+                status: 'pending',
+                progress: 0,
+                total_items: 0 
+            });
+        });
+
+        await batch.commit();
+        return sessionId;
+    },
+
+    subscribeToUserTasks(userId, callback) {
+        return db.collection('inventory_tasks')
+            .where('user_id', '==', userId)
+            .where('status', 'in', ['pending', 'in_progress'])
+            .onSnapshot(snapshot => {
+                const tasks = snapshot.docs.map(doc => doc.data());
+                callback(tasks);
+            });
+    },
+
+    async pushTaskCount(taskId, productId, quantity, locationId) {
+        const countId = `count_${taskId}_${locationId}_${productId}`;
+        await db.collection('inventory_counts').doc(countId).set({
+            id: countId,
+            task_id: taskId,
+            product_id: productId,
+            location_id: locationId, // Mandatory Context
+            quantity: parseFloat(quantity) || 0,
+            timestamp: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+        });
+    },
+
+    subscribeToSessionProgress(sessionId, callback) {
+        return db.collection('inventory_tasks')
+            .where('session_id', '==', sessionId)
+            .onSnapshot(snapshot => {
+                const tasks = snapshot.docs.map(doc => doc.data());
+                callback(tasks);
+            });
     }
 };
 
