@@ -664,3 +664,39 @@
 
 .loc-label { font-size: 14px; font-weight: 800; min-width: 110px; }
 .user-select { flex: 1; height: 42px; border-radius: 10px; border: 1px solid var(--border-color); padding: 0 10px; font-weight: 700; }
+
+/* Stock Entry Location Badges (v16.1.1) */
+.loc-badge-btn {
+    flex: 1;
+    min-width: 70px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: white;
+    padding: 8px 4px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.loc-badge-btn:hover {
+    transform: translateY(-2px);
+    border-color: var(--primary);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1);
+}
+
+.loc-badge-btn:active { transform: scale(0.95); }
+
+.loc-name {
+    font-size: 10px;
+    font-weight: 800;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+}
+
+.loc-qty {
+    font-size: 15px;
+    font-weight: 900;
+    color: var(--primary);
+}

@@ -654,11 +654,12 @@ const App = {
             UI.showModal(`
                 <div class="sheet-handle"></div>
                 <div class="modal-header"><h2>إضافة جرد جديد ( Stock Entry )</h2></div>
-                <div class="balance-notification" style="display:flex; flex-wrap:wrap; gap:5px; justify-content:center; padding:10px 0;">
+                <div class="balance-notification clickable-locations" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:center; padding:12px 15px; background:var(--bg-soft); border-radius:15px; margin-bottom:15px;">
                     ${['صيدلية', 'مخزن', 'ثلاجة', 'دولاب الطوارئ', 'دولاب الاستقبال', 'إسعاف'].map(loc => `
-                        <span style="font-size:11px; padding:3px 8px; background:rgba(0,0,0,0.05); border-radius:10px">
-                            ${loc}: <strong>${getLocQty(loc)}</strong>
-                        </span>
+                        <div class="loc-badge-btn" onclick="document.getElementById('entry-location-main').value='${loc}'">
+                            <span class="loc-name">${loc}</span>
+                            <strong class="loc-qty">${getLocQty(loc)}</strong>
+                        </div>
                     `).join('')}
                 </div>
                 <form id="form-inventory" onsubmit="event.preventDefault(); window.App.saveEntry('${medicineId}');">
