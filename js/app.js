@@ -562,10 +562,6 @@ const App = {
 
     async openTransferMedicine(targetCatId) {
         try {
-            const allMeds = await DB.getAll('medicineMaster');
-            const medicines = allMeds
-                .filter(m => m.categoryId === catId)
-                .sort((a, b) => (a.nameEN || '').localeCompare(b.nameEN || '')); // Alphabetic Sort (v6.6.2)
             const targetCat = await Categories.getInfo(targetCatId);
             
             UI.showModal(`
@@ -581,7 +577,7 @@ const App = {
                 </div>
                 <div class="form-actions mt-20">
                     <button class="btn-primary" onclick="window.App.openAddMedicineWithCat('${targetCatId}')">إضافة دواء جديد تماماً</button>
-                    <button class="btn-ghost" onclick="window.App.openCategory('${targetCatId}')">رجوع</button>
+                    <button class="btn-ghost" onclick="window.UI.closeModal()">إغلاق</button>
                 </div>
             `);
         } catch (err) {
@@ -624,12 +620,20 @@ const App = {
             if (!med) return;
             
             med.categoryId = targetCatId;
+            med.lastUpdated = new Date().toISOString();
+            med.syncStatus = 'local';
+            
             await DB.put('medicineMaster', med);
             
-            UI.showToast(`تم نقل ${med.nameEN} بنجاح`, 'success');
+            // v16.2.4: Immediate Cloud Sync for Category Transfers
+            if (this.userRole === 'admin') {
+                import('./core/sync.js').then(({ Sync }) => Sync.push(medicineId));
+            }
+            
+            UI.showToast(`تم نقل ${med.nameEN} بنجاح ✅`, 'success');
             this.openCategory(targetCatId); // Refresh category view
         } catch (err) {
-            UI.showToast('فشل عملية النقل', 'danger');
+            UI.showToast('فشل عملية النقل ❌', 'danger');
         }
     },
 
@@ -1009,7 +1013,7 @@ const App = {
         this.activeAudit = session;
 
         if (session) {
-            this.renderActiveAuditCard(session); 
+            this.renderActiveAuditCard(); 
             if (UI.currentViewId === 'view-audit-hub') this.renderAuditHub();
             
             // Background listener without Toasts for silent operation
@@ -1024,104 +1028,15 @@ const App = {
         } else {
             this.activeAudit = null;
             this.isJoined = false;
-            this.renderActiveAuditCard(); // Hide Dashboard Card
             if (this.feedListener) {
-                this.feedListener();
+                if (typeof this.feedListener === 'function') this.feedListener();
                 this.feedListener = null;
             }
         }
     },
 
-    toggleNotifications() {
-        const panel = document.getElementById('notification-center');
-        if (panel) {
-            panel.classList.toggle('show');
-            if (panel.classList.contains('show')) {
-                this.unreadCount = 0;
-                this.updateBadge();
-            }
-        }
-    },
-
-    pushNotification(msg) {
-        this.notifications.unshift({ msg, time: new Date().toISOString() });
-        this.unreadCount++;
-        this.updateBadge();
-        this.renderNotifications();
-    },
-
-    clearNotifications() {
-        this.notifications = [];
-        this.unreadCount = 0;
-        this.updateBadge();
-        this.renderNotifications();
-        this.toggleNotifications();
-    },
-
-    updateBadge() {
-        const badge = document.getElementById('notif-badge');
-        if (badge) {
-            badge.textContent = this.unreadCount;
-            badge.style.display = this.unreadCount > 0 ? 'flex' : 'none';
-            // Trigger bounce animation
-            badge.style.animation = 'none';
-            setTimeout(() => badge.style.animation = 'bounce 0.3s ease', 10);
-        }
-    },
-
-    renderNotifications() {
-        const list = document.getElementById('notif-list');
-        if (!list) return;
-
-        if (this.notifications.length === 0) {
-            list.innerHTML = `
-                <div class="notif-empty">
-                    <i class='bx bx-sleepy'></i>
-                    <p>لا توجد حركات حديثة في الجرد الحالي</p>
-                </div>
-            `;
-            return;
-        }
-
-        list.innerHTML = this.notifications.map(n => `
-            <div class="notif-item">
-                <span>${n.msg}</span>
-                <span class="n-time">${new Date(n.time).toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'})}</span>
-            </div>
-        `).join('');
-    },
-
-    renderActiveAuditCard(session = this.activeAudit) {
-        const container = document.getElementById('active-audit-container');
-        if (!container) return;
-
-        if (session) {
-            const isGuest = !this.isJoined && this.userRole !== 'admin';
-            const participantCount = session.participants ? session.participants.length : 1;
-            
-            container.innerHTML = `
-                <div class="audit-status-card mt-20 ${isGuest ? 'guest-mode' : ''}" 
-                     onclick="window.App.openAuditHub()">
-                    <div class="audit-pulse"><div class="pulse-dot"></div></div>
-                    <div class="audit-details">
-                        <h4>جرد جاري: ${session.name}</h4>
-                        <p>${isGuest ? '⚠️ اضغط هنا للانضمام لجلسة الفريق' : `👥 المتواجدون الآن: ${participantCount}`}</p>
-                    </div>
-                    <i class='bx bx-chevron-left'></i>
-                </div>
-            `;
-        } else {
-            container.innerHTML = '';
-        }
-    },
-
-    async joinAudit() {
-        const userName = this.user.displayName || this.user.email;
-        if (await Audit.join(userName)) {
-            this.isJoined = true;
-            UI.showToast('تم الانضمام لعملية الجرد بنجاح! 👤🤝👥', 'success');
-            if (this.activeAudit) this.updateAuditSession(this.activeAudit);
-        }
+    renderActiveAuditCard() {
+        // v16.2.0: Now handled by TaskManager on Dashboard
     },
 
     openAuditHub() {
@@ -1133,48 +1048,38 @@ const App = {
         const container = document.getElementById('hub-session-content');
         if (!container) return;
 
-        const session = this.activeAudit;
+        // Unified Session Logic (v16.2.0)
+        const activeTask = TaskManager.activeTasks[TaskManager.activeTasks.length - 1]; 
         
-        if (!session) {
+        if (!activeTask) {
             container.innerHTML = `
                 <div class="hub-idle-state text-center mt-30">
-                    <div class="command-orb"><i class='bx bx-shield-quarter'></i></div>
-                    <h2> Strategic Command: <span class="text-muted">Idle</span></h2>
-                    <p class="text-muted mt-5">بانتظار تعليمات بدء عملية جرد جديدة</p>
+                    <div class="command-orb"><i class='bx bx-check-shield'></i></div>
+                    <h2 class="text-muted">مركز الجرد <span class="badge bg-soft">وضع الاستعداد</span></h2>
+                    <p class="text-muted mt-5">بانتظار بدء عملية جرد جديدة من تبويب (الإدارة)</p>
                     
                     <div class="hub-quick-actions mt-30">
-                        <button class="commander-btn p-btn" onclick="window.App.startAudit('team')">
-                            <i class='bx bx-group'></i>
+                        <button class="commander-btn p-btn w-100" onclick="window.App.switchHubTab('sessions')">
+                            <i class='bx bx-git-branch'></i>
                             <div class="btn-text">
-                                <h3>بدء جرد جماعي (Sovereign Team)</h3>
-                                <p>ربط الفريق بالكامل بالسحابة</p>
-                            </div>
-                        </button>
-
-                        <button class="commander-btn mt-15" onclick="window.App.startAudit('individual')">
-                            <i class='bx bx-user-pin'></i>
-                            <div class="btn-text">
-                                <h3>بدء جرد فردي (Private Recon)</h3>
-                                <p>عملية محلية سرية</p>
+                                <h3>فتح إدارة الجلسات 📡</h3>
+                                <p>لإنشاء جرد فردي أو جماعي</p>
                             </div>
                         </button>
                     </div>
                 </div>
             `;
         } else {
-            const isHost = this.userRole === 'admin';
-            const participants = session.participants || [];
-            
-            // v12.0.0: Live Operational Stats
-            const stats = await Audit.getSessionStats(session.id);
-            const activities = await Inventory.getRecentAuditActivity(session.id);
+            // Live Operational Hub for Active Individual/Group Tasks
+            const stats = await Audit.getSessionStats(activeTask.session_id);
+            const activities = await Inventory.getRecentAuditActivity(activeTask.session_id);
 
             container.innerHTML = `
                 <div class="hub-active-commander">
                     <div class="command-status-header">
-                        <div class="status-indicator live">LIVE OPERATION</div>
-                        <h1>Mission: ${session.name}</h1>
-                        <p>بإشراف: ${session.host}</p>
+                        <div class="status-indicator live">عملية جارية (LIVE)</div>
+                        <h1>${activeTask.location_name || 'جرد متعدد'}</h1>
+                        <p class="small text-muted">ID: ${activeTask.id}</p>
                     </div>
 
                     <div class="stats-grid mt-20">
@@ -1187,61 +1092,33 @@ const App = {
                             <span class="value">${stats.uniqueCount}</span>
                         </div>
                         <div class="stat-box accent">
-                            <span class="label">سجل الحركات</span>
+                            <span class="label">الحركات</span>
                             <span class="value">${stats.totalEntries}</span>
                         </div>
                     </div>
 
-                    <div class="operation-panel mt-30">
-                        <div class="participants-section">
-                            <div class="section-title">
-                                <h3>المشتركون في الميدان (${participants.length})</h3>
-                                <div class="pulse-line"></div>
-                            </div>
-                            <div class="participants-grid mt-10">
-                                ${participants.map(p => `
-                                    <div class="p-avatar">
-                                        <div class="avatar-circle">${p.charAt(0)}</div>
-                                        <span>${p}</span>
+                    <div class="live-activity-section mt-25">
+                         <div class="section-title">
+                            <h3>نبض الميدان (Real-time Feed)</h3>
+                            <span class="badge">Live</span>
+                        </div>
+                        <div class="command-log mt-10">
+                            ${activities.length === 0 ? '<div class="log-empty">بانتظار الرصد الأول...</div>' : 
+                                activities.slice(0,5).map(a => `
+                                    <div class="command-log-item">
+                                        <div class="item-desc" style="display:flex; justify-content:space-between; width:100%">
+                                            <span><strong>+ ${a.quantity}</strong> قطعة (${a.medicineName || 'صنف'})</span>
+                                            <span class="time">${new Date(a.timestamp).toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'})}</span>
+                                        </div>
                                     </div>
                                 `).join('')}
-                            </div>
-                        </div>
-
-                        <div class="live-activity-section mt-25">
-                             <div class="section-title">
-                                <h3>سجل المهمة (Mission Log)</h3>
-                                <span class="badge">Real-time Feed</span>
-                            </div>
-                            <div class="command-log mt-10">
-                                ${activities.length === 0 ? '<div class="log-empty">بانتظار أول حركة...</div>' : 
-                                    activities.map(a => `
-                                        <div class="command-log-item">
-                                            <span class="time">${new Date(a.timestamp).toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'})}</span>
-                                            <div class="item-desc">
-                                                <strong>+ ${a.quantity}</strong> قطعة مضافة
-                                            </div>
-                                        </div>
-                                    `).join('')}
-                            </div>
                         </div>
                     </div>
 
                     <div class="commander-controls mt-25">
-                        <button class="btn-primary w-100 highlight-btn" onclick="window.UI.switchView('view-smart-inventory')">
-                            <i class='bx bx-play-circle'></i> دخول الميدان (Execute)
+                        <button class="btn-primary w-100 highlight-btn" onclick="window.App.runTask('${activeTask.id}')">
+                            <i class='bx bx-play-circle'></i> استكمال الجرد (Execute)
                         </button>
-                        
-                        <div class="secondary-controls mt-10">
-                            <button class="btn-glass" onclick="window.App.exportAuditSession('${session.id}')">
-                                <i class='bx bx-download'></i> تنزيل التقرير
-                            </button>
-                            ${isHost ? `
-                                <button class="btn-glass danger" onclick="window.App.closeAudit()">
-                                    <i class='bx bx-check-shield'></i> إنهاء العملية
-                                </button>
-                            ` : ''}
-                        </div>
                     </div>
                 </div>
             `;
@@ -1349,26 +1226,8 @@ const App = {
         UI.showToast('تم التصدير بنجاح! ✅', 'success');
     },
 
-    async startAudit(mode) {
-        const session = await Audit.start(mode, this.user);
-        if (session) {
-            if (mode === 'team') {
-                UI.showToast('بدأت العملية الجماعية! انضم الفريق الآن 📡🚀', 'success');
-            } else {
-                this.activeAudit = session;
-                this.isJoined = true;
-                UI.showToast('بدأ جردك الفردي الخاص. 👤🗄️', 'info');
-                this.updateAuditSession(session);
-            }
-            this.renderAuditHub();
-        }
-    },
+    // v16.2.3: Decommissioned Legacy Audit Engine (Now using Unified Task Logic)
 
-    async closeAudit() {
-        if (await Audit.end()) {
-            UI.showToast('تم إغلاق عملية الجرد بنجاح ✅', 'success');
-        }
-    },
 
     async deleteMasterMedicine(id) {
         if (confirm('هل أنت متأكد؟ سيتم حذف الصنف من المستودع نهائياً.')) {
