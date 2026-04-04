@@ -60,6 +60,11 @@ The following actions **MUST** trigger a Cloud Push:
 - **Root Cause**: `undefined catId` crash and missing `Sync.push`.
 - **Resolution**: Refined `executeTransfer` with direct `Sync.push` call and sanitizing variable scopes.
 
+### Lesson 03: Service Worker Update Loop (v16.2.6)
+- **Context**: Users seeing "Updated" but version remains old (e.g., stuck at v14).
+- **Root Cause**: `sw.js` was included in `ASSETS_TO_CACHE`, causing the browser to cache the installer itself.
+- **Resolution**: **NEVER** include `./sw.js` in the assets list. Always force `sw.js` to bypass cache (via fetch headers or simple removal from cache list).
+
 ---
 
 ## 🎯 5. Tech Debt & Roadmap
