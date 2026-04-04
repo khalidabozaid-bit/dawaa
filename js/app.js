@@ -15,7 +15,7 @@ import { auth, db, storage } from './core/firebase-config.js';
  */
 
 const App = {
-    VERSION: '16.2.5', // Universal Sovereign v16.2.5 (Established Master Protocol)
+    VERSION: '16.2.6', // Universal Sovereign v16.2.6 (Update Persistence Fix)
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
