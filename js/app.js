@@ -1247,25 +1247,7 @@ const App = {
         }
     },
 
-    async saveEntry(medicineId) {
-        try {
-            const data = {
-                medicineId,
-                location: document.getElementById('entry-location').value.trim(),
-                quantity: parseFloat(document.getElementById('entry-qty').value) || 0,
-                expiryDate: document.getElementById('entry-expiry').value,
-                dateAdded: new Date().toISOString()
-            };
-
-            await Inventory.addEntry(data);
-            UI.showToast('تم حفظ الجرد بنجاح', 'success');
-            UI.closeModal();
-            UI.renderCurrentView();
-        } catch (err) {
-            UI.showToast('فشل حفظ الجرد', 'danger');
-        }
-    },
-
+    // Removed legacy duplicate saveEntry block - merged logic upwards
     async deleteEntry(id) {
         if (confirm('حذف هذا السجل؟')) {
             try {
