@@ -12,6 +12,7 @@ Before finalizing any task, ensure the following steps are verified:
     - Update `App.VERSION` in `js/app.js`.
     - Update `CACHE_NAME` in `sw.js` (must match VERSION).
     - Update footer text in `index.html`.
+    - Update Header version span in `index.html` (Line 73).
 - [ ] **Cloud Sync Verification**:
     - Every data mutation (DB.put/add/delete) must be followed by `Sync.push(id)` if it needs to persist in Firestore.
 - [ ] **UI/UX Consistency**:
