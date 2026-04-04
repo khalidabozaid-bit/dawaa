@@ -223,6 +223,8 @@ const App = {
             if (this.activeAudit) this.renderActiveAuditCard();
             
             // 5. Initial Pull (Automatic)
+            // v16.3.0: Data Restructure Safety Init
+            if (Sync.initV2) Sync.initV2();
             Sync.pull();
             
         } catch (err) {
@@ -422,12 +424,12 @@ const App = {
         }
     },
 
-    async renderMasterData() {
+    async renderMasterData(items = null) {
         try {
             const container = document.getElementById('master-items-list');
             if (!container) return;
 
-            const master = await DB.getAll('medicineMaster');
+            const master = items || await DB.getAll('medicineMaster');
             const cats = await Categories.getAllSorted();
             const catMap = new Map(cats.map(c => [c.id, c]));
 
@@ -436,36 +438,42 @@ const App = {
                 return;
             }
 
-            container.innerHTML = master.sort((a, b) => (a.id || '').localeCompare(b.id || '')).map(m => {
+            container.innerHTML = master.sort((a, b) => (a.nameEN || '').localeCompare(b.nameEN || '')).map(m => {
                 const cat = catMap.get(m.categoryId) || { nameAR: m.categoryId, icon: 'bx-package', color: '#64748b' };
                 const imgUrl = Categories.getMedicineImage(m);
-                const isGlobal = m.syncStatus === 'global';
+                
+                const isV2 = m.syncStatus === 'global_v2';
+                const isLegacy = m.syncStatus === 'global' || m.syncStatus === 'global_legacy';
                 const isAdmin = this.userRole === 'admin';
                 
                 return `
-                    <div class="inventory-card ${isGlobal ? 'status-safe' : 'status-warning'}">
-                        <span class="sync-badge ${isGlobal ? 'global' : 'local'}">
-                            <i class='bx ${isGlobal ? 'bx-cloud-check' : 'bx-time-five'}'></i>
+                    <div class="inventory-card ${isV2 ? 'status-safe' : (isLegacy ? 'status-info' : 'status-warning')}">
+                        <span class="sync-badge ${isV2 ? 'v2' : (isLegacy ? 'legacy' : 'local')}" title="${isV2 ? 'V2 Optimized Sync' : (isLegacy ? 'Legacy Sync' : 'Local Only')}">
+                            <i class='bx ${isV2 ? 'bx-cloud-lightning' : (isLegacy ? 'bx-cloud' : 'bx-time-five')}'></i>
+                            ${isV2 ? '<small>V2</small>' : ''}
                         </span>
+                        
                         <div class="card-img" style="overflow:hidden">
                             <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover">
                         </div>
                         <div class="card-info">
-
-                            <h3>${m.nameEN} <span class="ar-name">/ ${m.nameAR || ''}</span></h3>
+                            <h3>
+                                ${m.nameEN} 
+                                <span class="ar-name">/ ${m.nameAR || ''}</span>
+                                ${m.v ? `<span class="ver-badge">v${m.v}</span>` : ''}
+                            </h3>
                             <div class="card-meta">
                                 <span><i class='bx bx-barcode'></i> ${m.id}</span>
                                 <span><i class='bx bx-purchase-tag-alt'></i> ${cat.nameAR}</span>
                             </div>
                         </div>
                         <div class="card-actions-float">
-                            ${isAdmin && !isGlobal ? `<button class="icon-btn sync-btn" onclick="window.Sync.push('${m.id}')" title="نشر عالمي"><i class='bx bx-cloud-upload'></i></button>` : ''}
+                            ${isAdmin && !isV2 ? `<button class="icon-btn sync-btn" onclick="window.Sync.push('${m.id}')" title="ترقية المزامنة لـ V2"><i class='bx bx-cloud-upload'></i></button>` : ''}
                             <button class="icon-btn" onclick="window.App.openEditMedicine('${m.id}')" title="تعديل"><i class='bx bx-edit-alt'></i></button>
                             ${isAdmin ? `<button class="icon-btn danger" onclick="window.App.deleteMasterMedicine('${m.id}')" title="حذف نهائي"><i class='bx bx-trash'></i></button>` : ''}
                         </div>
                     </div>
                 `;
-
             }).join('');
         } catch (err) {
             console.error(err);
@@ -1328,28 +1336,7 @@ const App = {
         if (!query) return this.renderMasterData();
         try {
             const results = await Categories.searchMaster(query);
-            const container = document.getElementById('master-items-list');
-            if (!container) return;
-
-            const cats = await Categories.getAllSorted();
-            const catMap = new Map(cats.map(c => [c.id, c]));
-            
-            container.innerHTML = results.map(m => {
-                const cat = catMap.get(m.categoryId) || { nameAR: m.categoryId, icon: 'bx-package', color: '#ccc' };
-                const imgSrc = Categories.getMedicineImage(m, cat);
-                return `
-                    <div class="inventory-card">
-                        <div class="card-img mini"><img src="${imgSrc}" onerror="this.src='assets/icons/default-med.png'"></div>
-                        <div class="card-info">
-                            <h3>${m.nameEN}</h3>
-                            <p class="card-meta"><span>${m.activeIngredient || ''}</span></p>
-                        </div>
-                        <div class="card-actions-float">
-                            <button class="icon-btn" onclick="window.App.openEditMedicine('${m.id}')"><i class='bx bx-edit-alt'></i></button>
-                        </div>
-                    </div>
-                `;
-            }).join('');
+            this.renderMasterData(results);
         } catch (err) {
             console.error(err);
         }

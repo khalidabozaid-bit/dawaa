@@ -2,22 +2,42 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // بيانات الأدوية العالمية: متاحة للقراءة للجميع، والكتابة للمسؤولين فقط
-    match /medicine_master/{medId} {
+    // Helper: Check if user is an admin
+    function isAdmin() {
+      return request.auth != null && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // [New] Medicines Collection (V2)
+    match /medicines/{medId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null; // مؤقتاً لحين تحديد رتبة المدير
+      allow write: if isAdmin();
+    }
+
+    // [New] Sync Logs (Global Tracking)
+    match /sync_logs/{logId} {
+      allow create: if request.auth != null;
+      allow read: if isAdmin();
+      allow update, delete: if false; // Immutable logs
+    }
+
+    // Legacy Support (Global Master)
+    match /global_master/{docId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
     }
     
-    // بيانات الجرد الخاصة: معزولة لكل مستخدم على حدة
+    // User Profiles & Private Data
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      allow write: if request.auth != null && request.auth.uid == userId;
       
       match /inventory_sync/{itemId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }
     
-    // رادار المأموريات
+    // Audits & Hub Activity
     match /audits/{auditId} {
       allow read: if request.auth != null;
       allow write: if request.auth != null;

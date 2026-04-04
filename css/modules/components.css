@@ -1085,3 +1085,51 @@
     padding: 10px;
     border-top: 1px solid var(--border-color);
 }
+
+/* --- v16.3.0: SyncV2 & Versioning Premium Styles --- */
+.sync-badge.v2 {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+    border: 2px solid white;
+    width: auto;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 20px;
+    gap: 4px;
+    font-weight: 800;
+}
+
+.sync-badge.v2 i { font-size: 16px; animation: cloudPulse 2s infinite ease-in-out; }
+.sync-badge.v2 small { font-size: 10px; letter-spacing: 0.5px; }
+
+.sync-badge.legacy {
+    background: #e2e8f0;
+    color: #64748b;
+    border: 1px solid #cbd5e1;
+}
+
+.ver-badge {
+    background: #1e293b;
+    color: #f8fafc;
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    margin-right: 8px;
+    font-weight: 800;
+    text-transform: uppercase;
+    vertical-align: middle;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.status-info { border-right: 4px solid #3b82f6; }
+
+@keyframes cloudPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(0.9); }
+}
+
+.inventory-card.status-safe {
+    border-right-width: 6px;
+    box-shadow: 0 4px 20px rgba(16, 185, 129, 0.08);
+}

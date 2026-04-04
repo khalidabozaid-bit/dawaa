@@ -1,10 +1,7 @@
-// js/core/sync.js
-import { DB } from './db.js';
-import { UI } from './ui.js';
-import { db } from './firebase-config.js';
+import { SyncV2 } from './sync_v2.js';
 
 /**
- * Dawaa Cloud Sync Engine (v9.9.0 - Absolute Essence)
+ * Dawaa Cloud Sync Engine (v16.3.1 - Restructured)
  * Handles Automatic Master Data Synchronization for a Single Pharmacy.
  */
 
@@ -12,36 +9,82 @@ export const Sync = {
     // Fixed Cloud Path for Single Pharmacy Architecture
     CLOUD_PATH: 'global_master/data',
     
+    // v16.3.1: Delegated V2 Bridge
+    get V2_ACTIVE() { return SyncV2.ACTIVE; },
+    isV2Active() { return SyncV2.ACTIVE; },
+    LOG_COLLECTION: 'sync_logs',
+
+    async initV2() {
+        return SyncV2.init();
+    },
+
+    async log(op, status, message, medId = null, extra = {}) {
+        return SyncV2.log(op, status, message, medId, extra);
+    },
+
+    /**
+     * MedicinesSyncLayer (v16.3.1 - Proxy)
+     */
+    MedicinesSyncLayer: {
+        async pullV2() { return SyncV2.pull(); },
+        async pushV2(med) { return SyncV2.push(med); },
+        async runMigration() { return SyncV2.runMigration(Sync.CLOUD_PATH); }
+    },
+    
     async pull() {
-        console.log('Sync: Auto-Pulling Cloud Master (Ironclad v9.9.5)...');
+        console.log(`Sync: Pulling Master Data (Mode: ${this.isV2Active() ? 'V2' : 'Legacy'})... 🔄`);
+        
         try {
-            const docRef = db.doc(this.CLOUD_PATH);
-            const doc = await docRef.get();
-            
-            if (!doc.exists) return;
+            let globalMeds = null;
+            let currentMode = this.isV2Active() ? 'V2' : 'LEGACY';
 
-            const data = doc.data();
-            const globalMeds = data.masterData || [];
-            
-            if (globalMeds.length === 0) return;
+            // 1. Try V2 Mode via isolated module
+            if (this.isV2Active()) {
+                globalMeds = await SyncV2.pull();
+                // v16.3.1: Only fallback if result is strictly NULL (error), not empty array []
+                if (globalMeds === null) {
+                    await this.log('PULL_FALLBACK', 'WARN', 'V2 technical failure, falling back to Legacy');
+                    currentMode = 'LEGACY';
+                }
+            }
 
+            // 2. Fallback to Legacy logic
+            if (currentMode === 'LEGACY') {
+                const docRef = db.doc(this.CLOUD_PATH);
+                const doc = await docRef.get();
+                if (doc.exists) {
+                    globalMeds = doc.data().masterData || [];
+                }
+            }
+
+            if (!globalMeds || (Array.isArray(globalMeds) && globalMeds.length === 0)) {
+                console.log('Sync: No data to update locally.');
+                return;
+            }
+
+            // 3. Process and Save Locally
             let syncCount = 0;
             for (const med of globalMeds) {
-                // Image Protection: Don't overwrite local high-res with empty cloud data
                 const localMed = await DB.get('medicineMaster', med.id);
+                
                 if (localMed && localMed.imagePath?.startsWith('data:image') && (!med.imagePath || med.imagePath === '')) {
-                    med.imagePath = localMed.imagePath; // Keep local base64 until cloud URL arrives
+                    med.imagePath = localMed.imagePath;
                 }
 
-                med.syncStatus = 'global'; 
+                med.v = med.v || (localMed ? localMed.v : 0);
+                med.syncStatus = currentMode === 'V2' ? 'global_v2' : 'global_legacy';
+                
                 await DB.put('medicineMaster', med);
                 syncCount++;
             }
             
-            console.log(`Sync: Auto-Pulled ${syncCount} items (Protected).`);
+            console.log(`Sync: Pulled ${syncCount} items via ${currentMode}. ✅`);
             if (window.App?.renderMasterData) window.App.renderMasterData();
+            
         } catch (err) {
-            console.warn('Sync Pull Failed:', err);
+            const msg = err.code || err.message || 'خطأ غير معروف';
+            console.error('Sync Pull Failed:', err);
+            await this.log('PULL_ERROR', 'CRITICAL', msg, null, { source: 'pull', retryable: true });
         }
     },
 
@@ -51,54 +94,73 @@ export const Sync = {
             return;
         }
 
-        UI.showToast('جاري النشر للسحابة 🔥...', 'info');
+        UI.showToast('جاري التحديث السحابي الشامل 🔥...', 'info');
 
         try {
             const med = await DB.get('medicineMaster', medId);
             if (!med) throw new Error('Medicine not found locally');
 
-            // Safety Strip: NEVER push base64 to Firestore (Avoid 1MB limit crash)
-            const syncMed = { ...med, syncStatus: 'global', lastSynced: new Date().toISOString() };
-            if (syncMed.imagePath?.startsWith('data:image')) {
-                syncMed.imagePath = ''; // Only Cloud URLs (https://) allowed in Firestore
-            }
-
-            const docRef = db.doc(this.CLOUD_PATH);
-            const doc = await docRef.get();
+            med.v = (med.v || 0) + 1;
+            med.lastSynced = new Date().toISOString();
             
-            let masterData = [];
-            if (doc.exists) {
-                masterData = doc.data().masterData || [];
+            const syncMed = { ...med, syncStatus: 'global' };
+            if (syncMed.imagePath?.startsWith('data:image')) {
+                syncMed.imagePath = ''; 
             }
 
-            const existingIdx = masterData.findIndex(m => m.id === med.id);
-            if (existingIdx > -1) {
-                masterData[existingIdx] = syncMed;
+            const logMeta = { version: med.v, source: 'push' };
+
+            // 1. Legacy Write (Old Structure)
+            let legacySuccess = false;
+            try {
+                const docRef = db.doc(this.CLOUD_PATH);
+                const doc = await docRef.get();
+                let masterData = doc.exists ? (doc.data().masterData || []) : [];
+                
+                const existingIdx = masterData.findIndex(m => m.id === med.id);
+                if (existingIdx > -1) masterData[existingIdx] = syncMed;
+                else masterData.push(syncMed);
+
+                await docRef.set({ 
+                    masterData,
+                    updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+                legacySuccess = true;
+            } catch (lex) {
+                console.warn('Sync: Legacy push failed...', lex);
+            }
+
+            // 2. V2 Write via isolated SyncV2 module
+            let v2Success = false;
+            if (this.isV2Active()) {
+                v2Success = await SyncV2.push(syncMed);
+            }
+
+            // 3. Enriched Logging Matrix (Observability)
+            if (legacySuccess && v2Success) {
+                await this.log('PUSH_DUAL_SUCCESS', 'SUCCESS', `Synced version ${med.v} to both layers`, med.id, logMeta);
+            } else if (legacySuccess && !v2Success) {
+                const status = this.isV2Active() ? 'FAIL' : 'WARN';
+                await this.log('PUSH_PARTIAL_SUCCESS_V2_FAIL', status, 'Legacy OK, V2 failed', med.id, { ...logMeta, retryable: true });
+            } else if (!legacySuccess && v2Success) {
+                await this.log('PUSH_PARTIAL_SUCCESS_LEGACY_FAIL', 'WARN', 'Legacy failed, V2 OK', med.id, { ...logMeta, retryable: true });
             } else {
-                masterData.push(syncMed);
+                await this.log('PUSH_TOTAL_FAIL', 'CRITICAL', 'Both Legacy and V2 writes failed', med.id, { ...logMeta, retryable: true });
+                throw new Error('Cloud push failed completely');
             }
 
-            await docRef.set({ 
-                masterData,
-                updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
-
-            // After push, we don't update local imagePath because it might still be base64 (local truth)
-            med.syncStatus = 'global';
+            med.syncStatus = v2Success ? 'global_v2' : 'global_legacy';
             await DB.put('medicineMaster', med);
             
-            console.log(`Sync: Pushed "${med.nameEN}" (Striped).`);
+            UI.showToast(`تم تأمين "${med.nameEN}" سحابياً ✅`, 'success');
             if (window.App?.renderMasterData) window.App.renderMasterData();
-            
-            setTimeout(() => this.pull(), 1000);
             
         } catch (err) {
             const msg = err.code || err.message || 'خطأ غير معروف';
-            UI.showToast(`فشل النشر السحابي: ${msg}`, 'danger');
+            UI.showToast(`فشل التحديث السحابي: ${msg}`, 'danger');
+            await this.log('PUSH_ERROR', 'CRITICAL', msg, medId, { source: 'push', retryable: true });
         }
     },
-
-
 
     async submit(medId) {
         // Future: Submit to 'ReviewQueue' for larger networks
