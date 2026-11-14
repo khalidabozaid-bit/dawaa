@@ -76,7 +76,7 @@ The following actions **MUST** trigger a Cloud Push:
 ## 🎯 5. Tech Debt & Roadmap
 
 - [ ] **Push Notifications**: Implement Firebase Cloud Messaging (FCM).
-- [ ] **Offline Guard**: Improve UI indicators when Firestore is unreachable.
+- [x] **Offline Guard**: Implemented real-time network status indicator badge & automatic reconnect sync (v17.2.0).
 - [ ] **Conflict Solver**: Implement smarter "Multi-user edit" resolution.
 
 ---

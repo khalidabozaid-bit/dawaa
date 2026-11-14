@@ -39,6 +39,40 @@ const App = {
         }
     },
 
+    /**
+     * Offline Guard & Network Monitor (v17.2.0)
+     */
+    initNetworkMonitor() {
+        const updateNetworkUI = (isOnline) => {
+            const badge = document.getElementById('network-status');
+            if (badge) {
+                badge.className = `network-status-badge ${isOnline ? 'online' : 'offline'}`;
+                badge.innerHTML = `<i class='bx ${isOnline ? 'bx-wifi' : 'bx-wifi-off'}'></i>`;
+                badge.title = isOnline ? 'متصل بالسحابة 🟢' : 'وضع عدم الاتصال (حفظ محلي) 🔴';
+            }
+        };
+
+        window.addEventListener('online', async () => {
+            updateNetworkUI(true);
+            if (window.UI) UI.showToast('تم استعادة الاتصال بالإنترنت 🌐 جاري مزامنة التغييرات المعلقة...', 'success');
+            try {
+                const { SyncV2 } = await import('./core/sync_v2.js?v=17.2.0');
+                if (SyncV2 && typeof SyncV2.pushLocalChanges === 'function') {
+                    await SyncV2.pushLocalChanges();
+                }
+            } catch (err) {
+                console.warn('Auto-sync on reconnect warning:', err);
+            }
+        });
+
+        window.addEventListener('offline', () => {
+            updateNetworkUI(false);
+            if (window.UI) UI.showToast('أنت الآن في وضع عدم الاتصال (Offline) 📡 يتم حفظ كافة البيانات محلياً', 'warning');
+        });
+
+        updateNetworkUI(navigator.onLine);
+    },
+
     async init() {
         console.log(`Dawaa v${this.VERSION}: Initializing Supreme Engine...`);
         try {
@@ -73,6 +107,7 @@ const App = {
             console.log("BOOT: [STEP 6] UI/TaskManager Init");
             UI.init();
             TaskManager.init();
+            this.initNetworkMonitor();
             this.registerServiceWorker();
 
             console.log("BOOT: [STEP 7] Firebase Auth Monitor");
