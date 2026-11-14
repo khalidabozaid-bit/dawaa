@@ -1,4 +1,6 @@
-import { SyncV2 } from './sync_v2.js';
+import { SyncV2 } from './sync_v2.js?v=17.2.2';
+import { DB } from './db.js?v=17.2.2';
+import { db } from './firebase-config.js?v=17.2.2';
 
 /**
  * Dawaa Cloud Sync Engine (v16.3.1 - Restructured)
@@ -206,16 +208,26 @@ export const Sync = {
 
     subscribeToAudit(callback) {
         console.log('Sync: Listening for Live Collaborative Audits... 📡');
-        return db.collection('audits').doc('current').onSnapshot(doc => {
-            if (doc.exists) {
-                const data = doc.data();
-                callback(data.active ? data : null);
-            } else {
-                callback(null);
-            }
-        }, err => {
-            console.error('Audit Stream Error:', err);
-        });
+        const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+        if (!firestore) {
+            console.warn('Sync: Firestore db not ready, skipping live audit stream.');
+            return null;
+        }
+        try {
+            return firestore.collection('audits').doc('current').onSnapshot(doc => {
+                if (doc.exists) {
+                    const data = doc.data();
+                    callback(data.active ? data : null);
+                } else {
+                    callback(null);
+                }
+            }, err => {
+                console.error('Audit Stream Error:', err);
+            });
+        } catch (e) {
+            console.warn('Sync: Could not subscribe to audit:', e.message);
+            return null;
+        }
     },
 
     async pushAuditEntry(entry) {

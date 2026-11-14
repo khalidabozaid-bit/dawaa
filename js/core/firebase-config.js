@@ -24,17 +24,28 @@ export const auth = firebase.auth();
 export const db = firebase.firestore();
 export const storage = firebase.storage();
 
+// Global Window Bindings for Legacy & Fallback Support
+window.auth = auth;
+window.db = db;
+window.storage = storage;
+
 
 // Persistence for Firestore (Offline-First) - Essential for PWA
-db.enablePersistence().catch((err) => {
-    if (err.code == 'failed-precondition') {
-        // Multiple tabs open, persistence can only be enabled in one tab at a time.
-        console.warn('Firestore Persistence failed (multiple tabs)');
-    } else if (err.code == 'unimplemented') {
-        // The current browser does not support all of the features required to enable persistence
-        console.warn('Firestore Persistence not supported by browser');
+try {
+    if (typeof db.enablePersistence === 'function') {
+        db.enablePersistence().catch((err) => {
+            if (err.code === 'failed-precondition') {
+                console.warn('Firestore Persistence failed (multiple tabs open)');
+            } else if (err.code === 'unimplemented') {
+                console.warn('Firestore Persistence not supported by browser');
+            } else {
+                console.warn('Firestore Persistence notice:', err.message);
+            }
+        });
     }
-});
+} catch (e) {
+    console.warn('Firestore enablePersistence call skipped:', e.message);
+}
 
 console.log('Firebase: Initialized & Persistence Enabled ☁️');
 

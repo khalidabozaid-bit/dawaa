@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'dawaa-cache-v17.2.0';
+const CACHE_NAME = 'dawaa-cache-v17.2.2';
 const IMAGE_CACHE_NAME = 'dawaa-images-v1'; // Dedicated store for medicine visual assets
 const MAX_IMAGES = 100; // Limit to avoid device storage bloat
 
@@ -36,7 +36,7 @@ self.addEventListener('install', (event) => {
       return cache.addAll(ASSETS_TO_CACHE);
     })
   );
-  // Removed self.skipWaiting() - Mashawiri Stability Protocol
+  self.skipWaiting(); // Immediate activation v17.2.1
 });
 
 self.addEventListener('message', (event) => {
@@ -108,10 +108,26 @@ self.addEventListener('fetch', (event) => {
       return;
   }
 
+  // Network-First for HTML navigation so updates load immediately when online
+  if (event.request.mode === 'navigate') {
+      event.respondWith(
+          fetch(event.request).catch(() => caches.match('./index.html'))
+      );
+      return;
+  }
+
   event.respondWith(
-    caches.match(event.request).then((response) => {
-      return response || fetch(event.request);
-    })
+    fetch(event.request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200 && event.request.method === 'GET') {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+        return networkResponse;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
 

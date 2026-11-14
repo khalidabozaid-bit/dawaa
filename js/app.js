@@ -1,22 +1,29 @@
-import { DB } from './core/db.js?v=17.2.0';
-import { UI } from './core/ui.js?v=17.2.0';
-import { Inventory } from './features/inventory.js?v=17.2.0';
-import { Categories } from './features/categories.js?v=17.2.0';
-import { Audit } from './features/audit.js?v=17.2.0';
-import { Exporter } from './features/export.js?v=17.2.0';
-import { Utils } from './core/utils.js?v=17.2.0';
-import { Sync } from './core/sync.js?v=17.2.0';
-import { TaskManager } from './features/tasks.js?v=17.2.0';
-import { auth, db, storage } from './core/firebase-config.js?v=17.2.0';
-import { Recovery } from './recovery.js?v=17.2.0';
+import { DB } from './core/db.js?v=17.2.2';
+import { UI } from './core/ui.js?v=17.2.2';
+import { Inventory } from './features/inventory.js?v=17.2.2';
+import { Categories } from './features/categories.js?v=17.2.2';
+import { Audit } from './features/audit.js?v=17.2.2';
+import { Exporter } from './features/export.js?v=17.2.2';
+import { Utils } from './core/utils.js?v=17.2.2';
+import { Sync } from './core/sync.js?v=17.2.2';
+import { TaskManager } from './features/tasks.js?v=17.2.2';
+import { auth, db, storage } from './core/firebase-config.js?v=17.2.2';
+import { Recovery } from './recovery.js?v=17.2.2';
+
+// Immediate Global Bindings to prevent undefined calls during boot
+window.UI = UI;
+window.DB = DB;
+window.db = db;
+window.auth = auth;
+window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v10.0.1 - Sovereign Reset)
+ * Dawaa App Orchestrator (v17.2.0 - Sovereign Reset)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '17.2.0', // Universal Sovereign v17.2.0 (Update Persistence Fix)
+    VERSION: '17.2.2', // Universal Sovereign v17.2.2
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -88,18 +95,30 @@ const App = {
             await DB.init();
             
             console.log("BOOT: [STEP 3] Sync Init");
-            Sync.subscribeToAudit((session) => {
-                this.updateAuditSession(session);
-            });
+            try {
+                if (typeof Sync?.subscribeToAudit === 'function') {
+                    Sync.subscribeToAudit((session) => {
+                        this.updateAuditSession(session);
+                    });
+                }
+            } catch (syncErr) {
+                console.warn("Sync Init Non-blocking Notice:", syncErr);
+            }
 
             console.log("BOOT: [STEP 4] Inventory Init");
-            Inventory.subscribe(() => {
-                const currentView = UI.currentView;
-                if (currentView === 'audit-hub') {
-                    this.renderAuditHub();
-                    this.renderStructuredSessions();
+            try {
+                if (typeof Inventory?.subscribe === 'function') {
+                    Inventory.subscribe(() => {
+                        const currentView = UI.currentView;
+                        if (currentView === 'audit-hub') {
+                            this.renderAuditHub();
+                            this.renderStructuredSessions();
+                        }
+                    });
                 }
-            });
+            } catch (invErr) {
+                console.warn("Inventory Init Non-blocking Notice:", invErr);
+            }
 
             console.log("BOOT: [STEP 5] Data Seeding");
             await Categories.seedInitialData();
@@ -333,7 +352,7 @@ const App = {
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 // v10.0.1: Cache-Busting Registration to bypass HTTP stickiness
-                navigator.serviceWorker.register('./sw.js?v=10.0.1').then(reg => {
+                navigator.serviceWorker.register('./sw.js?v=17.2.2').then(reg => {
                     console.log('SW: Sovereign Registered.');
                 }).catch(err => console.error('SW: Registration Error.', err));
             });
@@ -1651,8 +1670,15 @@ window.switchView = (id) => {
 };
 window.handleSearch = (query) => App.handleGlobalSearch(query);
 window.toggleTheme = () => {
-    UI.toggleTheme();
-    if (typeof UI.updateSettingsIcons === 'function') UI.updateSettingsIcons();
+    if (typeof UI?.toggleTheme === 'function') {
+        UI.toggleTheme();
+    } else {
+        const isDark = document.body.classList.toggle('dark-mode');
+        localStorage.setItem('dawaa-theme', isDark ? 'dark' : 'light');
+        const icon = document.getElementById('theme-icon');
+        if (icon) icon.className = isDark ? 'bx bx-sun' : 'bx bx-moon';
+    }
+    if (typeof UI?.updateSettingsIcons === 'function') UI.updateSettingsIcons();
 };
 
 // --- Settings Logic ---
@@ -1860,6 +1886,7 @@ App.handleAuthSubmit = async function() {
 
 
 App.handleLogout = async function() {
+    window.App = App;
     if (confirm('هل أنت متأكد من تسجيل الخروج؟')) {
         try {
             await auth.signOut();
@@ -2012,6 +2039,8 @@ window.onerror = (msg, url, line, col, error) => {
 };
 
 const _boot = async () => {
+    window.App = App;
+    window.UI = UI;
     await App.init();
     
     const bindSearch = (id, fn, delay = 300) => {

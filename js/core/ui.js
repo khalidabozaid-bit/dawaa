@@ -212,6 +212,14 @@ export const UI = {
         navigator.clipboard.writeText(report).then(() => {
             this.showToast('تم نسخ تقرير الخطأ', 'success');
         });
+    },
+
+    toggleTheme() {
+        const isDark = document.body.classList.toggle('dark-mode');
+        localStorage.setItem('dawaa-theme', isDark ? 'dark' : 'light');
+        const icon = document.getElementById('theme-icon');
+        if (icon) icon.className = isDark ? 'bx bx-sun' : 'bx bx-moon';
+        return isDark;
     }
 };
 
