@@ -113,6 +113,43 @@ export const Inventory = {
         return Array.from(aggregated.values());
     },
 
+    async getCurrentStockProducts() {
+        const products = await DB.getAll('products');
+        if (products.length > 0) {
+            return products.map(product => ({
+                productId: product.id,
+                medicineId: product.legacy_id || product.id,
+                id: product.id,
+                nameEN: product.nameEN || product.name_en || product.unique_key || product.id,
+                nameAR: product.nameAR || product.name_ar || '',
+                categoryId: product.categoryId || (product.category_ids?.[0] || '').replace(/^cat_/, ''),
+                totalQuantity: Number(product.qty || product.quantity || 0),
+                syncStatus: product.syncStatus || 'local',
+                source: 'products'
+            }));
+        }
+
+        const legacy = await this.getAggregatedStock();
+        return legacy.map(item => ({
+            ...item,
+            id: item.medicineId,
+            source: 'inventory'
+        }));
+    },
+
+    async getCurrentStockStats() {
+        const stock = await this.getCurrentStockProducts();
+        const entries = await DB.getAll('inventory');
+        const sixMonthsAway = new Date();
+        sixMonthsAway.setMonth(sixMonthsAway.getMonth() + 6);
+
+        return {
+            totalItems: stock.length,
+            lowStockCount: stock.filter(item => (item.totalQuantity || 0) <= 5).length,
+            expiringCount: entries.filter(entry => entry.expiryDate && new Date(entry.expiryDate) <= sixMonthsAway).length
+        };
+    },
+
     /**
      * Precision Filtering (v11.1.0 Engineered Indexing)
      */

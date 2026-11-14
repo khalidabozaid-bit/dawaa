@@ -127,6 +127,58 @@ export const SyncV2 = {
     },
 
     /**
+     * Pushes local product balance edits that were marked pending by inventory finalization.
+     * This keeps approved local stock counts from silently remaining device-only.
+     */
+    async pushLocalChanges() {
+        try {
+            const products = await DB.getAll('products');
+            const pending = products.filter(product => product.syncStatus === 'pending');
+
+            if (pending.length === 0) return { pushed: 0, failed: 0 };
+
+            let pushed = 0;
+            let failed = 0;
+            const now = (window.firebase || firebase).firestore.FieldValue.serverTimestamp();
+
+            for (const product of pending) {
+                try {
+                    const { syncStatus, ...payload } = product;
+                    await db.collection('products').doc(product.id).set({
+                        ...payload,
+                        syncStatus: 'global_v2',
+                        lastUpdatedAt: now
+                    }, { merge: true });
+
+                    product.syncStatus = 'global_v2';
+                    product.lastSynced = new Date().toISOString();
+                    await DB.put('products', product);
+                    pushed++;
+                } catch (err) {
+                    failed++;
+                    await this.log('PUSH_PENDING_PRODUCT_ERROR', 'FAIL', err.message, product.id, {
+                        source: 'pushLocalChanges',
+                        retryable: true
+                    });
+                }
+            }
+
+            await this.log('PUSH_PENDING_PRODUCTS', failed ? 'PARTIAL' : 'SUCCESS', `Pushed ${pushed}/${pending.length} pending products`, null, {
+                pushed,
+                failed
+            });
+
+            return { pushed, failed };
+        } catch (err) {
+            await this.log('PUSH_LOCAL_CHANGES_ERROR', 'FAIL', err.message, null, {
+                source: 'pushLocalChanges',
+                retryable: true
+            });
+            return { pushed: 0, failed: 1, error: err.message };
+        }
+    },
+
+    /**
      * Migration Tool: Moves legacy data to 'medicines' collection.
      * @param {string} legacyPath - The Firestore path to pull legacy data from.
      */

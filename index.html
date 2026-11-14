@@ -36,7 +36,7 @@
             <h2 id="auth-title">تسجيل الدخول</h2>
             <p id="auth-subtitle">مرحباً بك في نظام دواء لجرد الأدوية</p>
             
-            <form id="auth-form" class="auth-form" onsubmit="event.preventDefault(); window.App.handleAuthSubmit();">
+            <form id="auth-form" class="auth-form">
                 <div class="auth-group">
                     <label>الاسم الأول</label>
                     <input type="text" id="auth-name" class="auth-input" placeholder="مثال: خالد" required>
@@ -70,7 +70,7 @@
             </div>
             <div class="app-logo">
                 <i class='bx bxs-capsule'></i>
-                <h1>دواء <span style="font-size: 10px; opacity: 0.5">v16.2.6</span></h1>
+                <h1>دواء <span style="font-size: 10px; opacity: 0.5">v17.2.0</span></h1>
             </div>
             <div id="audit-banner" class="global-audit-banner"></div>
 
@@ -152,7 +152,7 @@
             <div class="search-section mt-20">
                 <div class="search-bar">
                     <i class='bx bx-search'></i>
-                    <input type="text" id="global-search" placeholder="بحث سريع عن أي دواء..." oninput="handleSearch(this.value)">
+                    <input type="text" id="global-search" placeholder="بحث سريع عن أي دواء...">
                 </div>
             </div>
         </section>
@@ -229,7 +229,7 @@
 
             <div class="search-bar mb-20">
                 <i class='bx bx-search'></i>
-                <input type="text" id="master-search" placeholder="ابحث في المستودع..." oninput="window.App.handleMasterSearch(this.value)">
+                <input type="text" id="master-search" placeholder="ابحث في المستودع...">
             </div>
             <div id="master-items-list" class="items-list"></div>
         </section>
@@ -307,7 +307,7 @@
                 </div>
             </div>
             <div class="version-footer">
-                <p>دواء للمستودعات الذكية - v16.2.6</p>
+                <p>دواء للمستودعات الذكية - v17.2.0</p>
                 <p style="font-size: 9px; opacity: 0.6">تم إصلاح ثبات التحديثات (Update Stability Fixed)</p>
                 <p>Mashawiri Protocol Standards</p>
             </div>
@@ -358,7 +358,7 @@
 
             <div class="search-bar mt-20">
                 <i class='bx bx-search'></i>
-                <input type="text" id="tr-search" placeholder="بحث سريع في المهمة..." oninput="window.App.handleTaskSearch(this.value)">
+                <input type="text" id="tr-search" placeholder="بحث سريع في المهمة...">
             </div>
 
             <div id="tr-items-list" class="task-items-list mt-20">
@@ -406,7 +406,7 @@
 
     <!-- App Scripts -->
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/app.js"></script>
+    <script type="module" src="js/app.js?v=17.2.0"></script>
     
     <!-- Navigation Logic managed by js/app.js -->
 </body>

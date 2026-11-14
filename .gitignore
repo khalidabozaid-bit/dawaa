@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+dawaa.code-workspace
+
+# Scratch and backup files
+test.mjs
+sw-v*.js
+js/app-v*.js
+js/app-v*.mjs
+scripts/
+*.cjs
+run.bat
+.eslintrc.json
+

@@ -14,6 +14,18 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Product source used by the V2 inventory/counting flows.
+    match /products/{productId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
+
+    // Remote feature flags consumed by SyncV2.
+    match /config/{configId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
+
     // [New] Sync Logs (Global Tracking)
     match /sync_logs/{logId} {
       allow create: if request.auth != null;
@@ -41,6 +53,41 @@ service cloud.firestore {
     match /audits/{auditId} {
       allow read: if request.auth != null;
       allow write: if request.auth != null;
+    }
+
+    // Collaborative audit activity feed.
+    match /audit_feed/{feedId} {
+      allow read, create: if request.auth != null;
+      allow update, delete: if false;
+    }
+
+    // Collaborative inventory entry sync.
+    match /inventory_sync/{entryId} {
+      allow read, create: if request.auth != null;
+      allow update, delete: if isAdmin();
+    }
+
+    // Structured inventory sessions and task assignment.
+    match /inventory_sessions/{sessionId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if isAdmin();
+    }
+
+    match /inventory_tasks/{taskId} {
+      allow read: if request.auth != null && (
+        resource.data.user_id == request.auth.token.email ||
+        resource.data.user_id == request.auth.token.name ||
+        isAdmin()
+      );
+      allow create, update: if request.auth != null;
+      allow delete: if isAdmin();
+    }
+
+    match /inventory_counts/{countId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null;
+      allow delete: if isAdmin();
     }
   }
 }

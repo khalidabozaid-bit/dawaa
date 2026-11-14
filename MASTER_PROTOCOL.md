@@ -1,4 +1,4 @@
-# 🛡️ Dawaa Master Protocol (SYSTEM_PROTOCOL v16.2.5) 🛡️
+# 🛡️ Dawaa Master Protocol (SYSTEM_PROTOCOL v17.2.0) 🛡️
 
 This document is the **Source of Truth** for the Dawaa PWA architecture. It serves as a mandatory pre-flight checklist and operational manual for any AI assistant or developer working on the codebase.
 
@@ -66,6 +66,11 @@ The following actions **MUST** trigger a Cloud Push:
 - **Root Cause**: `sw.js` was included in `ASSETS_TO_CACHE`, causing the browser to cache the installer itself.
 - **Resolution**: **NEVER** include `./sw.js` in the assets list. Always force `sw.js` to bypass cache (via fetch headers or simple removal from cache list).
 
+### Lesson 04: Unified v17.2.0 Consolidation
+- **Context**: Inconsistent version references across files (`16.2.6`, `17.1.6`, `17.2.0`).
+- **Root Cause**: Partial upgrades left query strings and constants out of sync.
+- **Resolution**: Strict single-version consolidation across `sw.js`, `index.html`, `js/app.js` and ES module imports.
+
 ---
 
 ## 🎯 5. Tech Debt & Roadmap
@@ -76,4 +81,4 @@ The following actions **MUST** trigger a Cloud Push:
 
 ---
 **Status**: ACTIVE 🛡️🏗️🛡️🚀🔥
-**Last Updated**: v16.2.5 (Established Master Protocol)
+**Last Updated**: v17.2.0 (Unified Master Protocol)

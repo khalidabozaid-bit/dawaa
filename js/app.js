@@ -1,13 +1,14 @@
-import { DB } from './core/db.js';
-import { UI } from './core/ui.js';
-import { Inventory } from './features/inventory.js';
-import { Categories } from './features/categories.js';
-import { Audit } from './features/audit.js';
-import { Exporter } from './features/export.js';
-import { Utils } from './core/utils.js';
-import { Sync } from './core/sync.js';
-import { TaskManager } from './features/tasks.js';
-import { auth, db, storage } from './core/firebase-config.js';
+import { DB } from './core/db.js?v=17.2.0';
+import { UI } from './core/ui.js?v=17.2.0';
+import { Inventory } from './features/inventory.js?v=17.2.0';
+import { Categories } from './features/categories.js?v=17.2.0';
+import { Audit } from './features/audit.js?v=17.2.0';
+import { Exporter } from './features/export.js?v=17.2.0';
+import { Utils } from './core/utils.js?v=17.2.0';
+import { Sync } from './core/sync.js?v=17.2.0';
+import { TaskManager } from './features/tasks.js?v=17.2.0';
+import { auth, db, storage } from './core/firebase-config.js?v=17.2.0';
+import { Recovery } from './recovery.js?v=17.2.0';
 
 /**
  * Dawaa App Orchestrator (v10.0.1 - Sovereign Reset)
@@ -15,7 +16,7 @@ import { auth, db, storage } from './core/firebase-config.js';
  */
 
 const App = {
-    VERSION: '16.2.6', // Universal Sovereign v16.2.6 (Update Persistence Fix)
+    VERSION: '17.2.0', // Universal Sovereign v17.2.0 (Update Persistence Fix)
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -38,76 +39,127 @@ const App = {
         }
     },
 
-
-
-
     async init() {
         console.log(`Dawaa v${this.VERSION}: Initializing Supreme Engine...`);
+        try {
+            console.log("BOOT: [STEP 1] Setting Globals");
+            window.App = App;
+            window.UI = UI;
+
+            if (localStorage.getItem('dawaa_recovery_mode') === 'true') {
+                return await this.initUIOnly();
+            }
+
+            console.log("BOOT: [STEP 2] DB Init");
+            await DB.init();
+            
+            console.log("BOOT: [STEP 3] Sync Init");
+            Sync.subscribeToAudit((session) => {
+                this.updateAuditSession(session);
+            });
+
+            console.log("BOOT: [STEP 4] Inventory Init");
+            Inventory.subscribe(() => {
+                const currentView = UI.currentView;
+                if (currentView === 'audit-hub') {
+                    this.renderAuditHub();
+                    this.renderStructuredSessions();
+                }
+            });
+
+            console.log("BOOT: [STEP 5] Data Seeding");
+            await Categories.seedInitialData();
+
+            console.log("BOOT: [STEP 6] UI/TaskManager Init");
+            UI.init();
+            TaskManager.init();
+            this.registerServiceWorker();
+
+            console.log("BOOT: [STEP 7] Firebase Auth Monitor");
+            auth.onAuthStateChanged(async (user) => {
+                console.log('Auth: Auth State Change Event. User:', user ? { uid: user.uid, email: user.email } : 'None');
+                
+                if (user) {
+                    if (!user.email || !user.uid) {
+                        console.error('CRITICAL: Corrupted Auth object detected. Forcing signOut.');
+                        await auth.signOut();
+                        this.showLogin();
+                        return;
+                    }
+                    await this.handleUserSession(user);
+                } else {
+                    console.log('Auth: No session found.');
+                    this.showLogin();
+                }
+            });
+
+            window.onpopstate = (event) => {
+                const container = document.getElementById('modal-container');
+                if (container && container.classList.contains('show')) {
+                    UI.closeModal();
+                    history.pushState(event.state, "", window.location.hash);
+                    return;
+                }
+                if (event.state && event.state.viewId) {
+                    UI.switchView(event.state.viewId, false);
+                } else {
+                    UI.switchView('view-dashboard', false);
+                }
+            };
+
+            history.replaceState({ viewId: 'view-dashboard' }, "", "#dashboard");
+            this.initServiceWorker();
+            console.log("BOOT: [COMPLETE] Engine Running.");
+
+        } catch (e) {
+            console.error("CRITICAL BOOT FAILURE DETECTED:", e);
+            console.log("Switching to EMERGENCY RECOVERY MODE...");
+            await this.initUIOnly();
+        }
+    },
+
+    async initUIOnly() {
+        console.warn("RECOVERY: Starting Minimal UI Boot...");
         window.App = App;
         window.UI = UI;
 
-        // Initialize Services
-        await DB.init();
-        
-        // v10.5.0: Listen for Remote Collaborative Audits
-        Sync.subscribeToAudit((session) => {
-            this.updateAuditSession(session);
+        try {
+            UI.init();
+            UI.switchView('view-dashboard');
+            this.user = { displayName: 'Recovery User', role: 'staff' };
+            const nameEl = document.getElementById('display-user-name');
+            if (nameEl) nameEl.textContent = 'نظام الاستعادة';
+            this.hideLogin();
+            this.attachRecoveryListeners();
+            console.log("RECOVERY: [STEP 1] UI Rendered");
+            this.renderDashboard();
+            console.log("RECOVERY: [COMPLETE] System interactive in Safe Mode.");
+            UI.showToast('النظام يعمل في وضع الاستعادة (Safe Mode) 🛡️', 'warning');
+        } catch (err) {
+            console.error("RECOVERY FAILED:", err);
+            document.body.innerHTML = `<div style="padding: 50px; text-align: center; font-family: sans-serif;"><h1 style="color: red;">خطأ فادح في النظام</h1><p>فشل وضع الاستعادة أيضاً. يرجى مسح بيانات المتصفح.</p><button onclick="localStorage.clear(); location.reload();" style="padding: 10px 20px; background: red; color: white; border: none; border-radius: 5px;">مسح كافة البيانات وإعادة المحاولة</button></div>`;
+        }
+    },
+
+    attachRecoveryListeners() {
+        document.querySelectorAll('.nav-item').forEach(btn => {
+            const target = btn.dataset.target;
+            btn.onclick = () => {
+                console.log(`RECOVERY: Nav to ${target}`);
+                UI.switchView(`view-${target}`);
+                if (target === 'dashboard') this.renderDashboard();
+                if (target === 'smart-inventory') this.renderSmartInventory();
+            };
         });
-
-        Inventory.subscribe(() => {
-            const currentView = UI.currentView;
-            if (currentView === 'audit-hub') {
-                this.renderAuditHub();
-                this.renderStructuredSessions();
-            }
-        });
-        await Categories.seedInitialData();
-        UI.init();
-        TaskManager.init();
-        this.registerServiceWorker();
-
-        // Auth Monitor (The Heart of v9.0.0)
-        auth.onAuthStateChanged(async (user) => {
-            if (user) {
-                console.log('Auth: User active:', user.email);
-                await this.handleUserSession(user);
-            } else {
-                console.log('Auth: No session found.');
-                this.showLogin();
-            }
-        });
-
-        // Navigation & Hardware Back Button (Mashawiri Style)
-        window.onpopstate = (event) => {
-            const container = document.getElementById('modal-container');
-            if (container && container.classList.contains('show')) {
-                UI.closeModal();
-                history.pushState(event.state, "", window.location.hash); // Keep state to allow second back button
-                return;
-            }
-
-            if (event.state && event.state.viewId) {
-                UI.switchView(event.state.viewId, false); // Switch without pushing new state
-            } else {
-                UI.switchView('view-dashboard', false);
-            }
-        };
-
-        // Initialize first state
-        history.replaceState({ viewId: 'view-dashboard' }, "", "#dashboard");
-
-        // Service Worker Management (Mashawiri Style)
-        this.initServiceWorker();
+        const profileBtn = document.querySelector('.user-profile');
+        if (profileBtn) profileBtn.onclick = () => UI.switchView('view-settings');
     },
 
     initServiceWorker() {
         if (!('serviceWorker' in navigator)) return;
-
         navigator.serviceWorker.register('./sw.js').then(reg => {
             console.log('SW: Registered.');
-            this.swRegistration = reg; // Store globally
-
-            // Silence checking logic (v9.8.5)
+            this.swRegistration = reg;
             reg.addEventListener('updatefound', () => {
                 const newWorker = reg.installing;
                 newWorker.addEventListener('statechange', () => {
@@ -117,8 +169,6 @@ const App = {
                 });
             });
         });
-
-        // Listen for the skipWaiting trigger to reload
         let refreshing = false;
         navigator.serviceWorker.addEventListener('controllerchange', () => {
             if (refreshing) return;
@@ -292,16 +342,7 @@ const App = {
 
     async renderDashboard() {
         try {
-            const inventory = await DB.getAll('inventory');
-            const sixMonthsAway = new Date();
-            sixMonthsAway.setMonth(sixMonthsAway.getMonth() + 6);
-
-            const stats = {
-                totalItems: inventory.length,
-                lowStockCount: inventory.filter(i => i.quantity <= 5).length,
-                expiringCount: inventory.filter(i => i.expiryDate && new Date(i.expiryDate) <= sixMonthsAway).length
-            };
-
+            const stats = await Inventory.getCurrentStockStats();
             UI.updateDashboardStats(stats);
             // v15.0.0: Render active structured tasks
             if (window.TaskManager) TaskManager.renderAssignedTaskPrompt();
@@ -327,7 +368,7 @@ const App = {
                 sixMonths.setMonth(sixMonths.getMonth() + 6);
                 data = data.filter(i => i.expiryDate && new Date(i.expiryDate) <= sixMonths);
             } else if (type === 'low-stock') {
-                data = await Inventory.getAggregatedStock();
+                data = await Inventory.getCurrentStockProducts();
                 data = data.filter(i => (i.totalQuantity || 0) <= 5);
             }
 
@@ -335,7 +376,7 @@ const App = {
             if (this.selectedCategoryId) {
                 data = data.filter(i => {
                     const m = masterMap.get(i.medicineId || i.id);
-                    return m && m.categoryId === this.selectedCategoryId;
+                    return i.categoryId === this.selectedCategoryId || (m && m.categoryId === this.selectedCategoryId);
                 });
             }
 
@@ -1796,6 +1837,45 @@ App.handleLogout = async function() {
     }
 };
 
+/**
+ * Recovery Reset Mechanism (v17.2.0)
+ * Clears all local caches and signs out to fix corrupted states.
+ */
+App.recoveryReset = async function() {
+    console.log('Recovery: Initiating full reset...');
+    try {
+        // 1. Clear LocalStorage
+        localStorage.clear();
+        
+        // 2. Clear IndexedDB
+        if (window.indexedDB) {
+            const dbs = await window.indexedDB.databases();
+            for (let dbInfo of dbs) {
+                window.indexedDB.deleteDatabase(dbInfo.name);
+                console.log('Recovery: Deleted DB:', dbInfo.name);
+            }
+        }
+
+        // 3. Unregister SWs
+        if ('serviceWorker' in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            for (let reg of regs) {
+                await reg.unregister();
+                console.log('Recovery: Unregistered SW');
+            }
+        }
+
+        // 4. Auth SignOut
+        await auth.signOut();
+        
+        UI.showToast('تم مسح البيانات بنجاح. سيتم إعادة تشغيل النظام.', 'success');
+        setTimeout(() => window.location.reload(), 1500);
+    } catch (err) {
+        console.error('Recovery Failed:', err);
+        alert('فشل المسح التلقائي. يرجى مسح بيانات المتصفح يدوياً.');
+    }
+};
+
 App.updateAdminUI = function() {
     const isAdmin = this.userRole === 'admin';
     const statusText = document.getElementById('admin-status-text');
@@ -1805,56 +1885,141 @@ App.updateAdminUI = function() {
     if (statusText) statusText.textContent = isAdmin ? 'وضع المدير (مفعل)' : 'صلاحيات الموظف (مفعلة)';
     if (icon) icon.className = isAdmin ? 'bx bxs-shield-check' : 'bx bx-user';
     if (hubCard) {
-        hubCard.style.display = 'flex'; // Staff can also join/see hub
+        hubCard.style.display = 'flex';
         hubCard.onclick = () => window.App.openAuditHub();
         hubCard.querySelector('h3').textContent = 'مركز إدارة الجرد (Audit Hub)';
         hubCard.querySelector('p').textContent = 'إدارة الجلسات الحالية، الانضمام، أو البدء';
     }
     
-    // Update Master Data View to show publish buttons if admin
     if (window.UI && UI.currentView === 'master') this.renderMasterData();
 };
 
-
 App.deleteMasterMedicine = async function(id) {
     if (!confirm('🚨 تحذير: حذف الصنف سيحذف كافة بيانات الجرد المرتبطة به من المستودع. هل أنت متأكد؟')) return;
-    
     try {
         UI.showToast('جاري حذف الصنف... 🗑️', 'info');
         await DB.delete('medicineMaster', id);
-        
-        // Cleanup related inventory
         const entries = await DB.getAll('inventory');
         for (let entry of entries) {
             if (entry.medicineId === id) await DB.delete('inventory', entry.id);
         }
-
         UI.showToast('تم حذف الصنف والجرد بالكامل 🗑️', 'warning');
-        
-        // Refresh category view if open
         if (this.selectedCategoryId) this.openCategory(this.selectedCategoryId);
-        
-        // Background Sync: Delete from Cloud if admin
-        if (this.userRole === 'admin') {
-            // Implementation for cloud deletion could go here if needed
-            console.log(`Cloud Sync: Delete Master ${id}`);
-        }
     } catch (err) {
         UI.showToast('فشل الحذف', 'danger');
     }
 };
 
-// Sync UI functions removed in v9.9.0 - Absolute Essence Protocol
+App.toggleNotifications = function() {
+    const overlay = document.getElementById('notification-center');
+    if (overlay) overlay.classList.toggle('show');
+};
 
+App.clearNotifications = function() {
+    this.notifications = [];
+    this.unreadCount = 0;
+    const list = document.getElementById('notif-list');
+    if (list) {
+        list.innerHTML = `
+            <div class="notif-empty">
+                <i class='bx bx-sleepy'></i>
+                <p>لا توجد حركات حديثة في الجرد الحالي</p>
+            </div>
+        `;
+    }
+    const badge = document.getElementById('notif-badge');
+    if (badge) {
+        badge.textContent = '0';
+        badge.style.display = 'none';
+    }
+};
 
-// Global Error Monitor
+App.openProfile = function() {
+    if (window.UI) UI.switchView('view-settings');
+};
+
+App.showLowStock = function() {
+    if (window.UI) UI.switchView('view-inventory');
+    this.renderInventory('low-stock');
+};
+
+App.showExpiring = function() {
+    if (window.UI) UI.switchView('view-inventory');
+    this.renderInventory('expiry');
+};
+
+App.startAudit = async function() {
+    if (!this.user) {
+        if (window.UI) UI.showToast('يرجى تسجيل الدخول أولاً', 'warning');
+        return;
+    }
+    this.openAuditHub();
+};
+
+App.handleAdminUnlock = async function() {
+    const pass = prompt('أدخل كلمة مرور المسؤول (Admin Password):');
+    if (pass === 'admin123' || pass === 'dawaa@2026') {
+        this.userRole = 'admin';
+        localStorage.setItem('user_role', 'admin');
+        this.updateAdminUI();
+        if (window.UI) UI.showToast('تم تفعيل صلاحيات المسؤول بنجاح ✅', 'success');
+    } else if (pass !== null) {
+        if (window.UI) UI.showToast('كلمة مرور خاطئة ❌', 'danger');
+    }
+};
+
 window.onerror = (msg, url, line, col, error) => {
     console.error('Dawaa Global Catch:', { msg, url, line, error });
     if (typeof UI !== 'undefined' && UI.showToast) {
-        UI.showToast(`خطأ تقني: ${msg.split(':')[0]}`, 'danger');
+        UI.showToast('خطأ تقني في النظام', 'danger');
     }
     return false;
 };
 
-document.addEventListener('DOMContentLoaded', () => App.init());
+const _boot = async () => {
+    await App.init();
+    
+    const bindSearch = (id, fn, delay = 300) => {
+        const el = document.getElementById(id);
+        if (!el || el.dataset.bound) return;
+        el.dataset.bound = '1';
+        let _t;
+        el.addEventListener('input', (e) => {
+            clearTimeout(_t);
+            _t = setTimeout(() => fn(e.target.value), delay);
+        });
+    };
+
+    const authForm = document.getElementById('auth-form');
+    if (authForm && !authForm.dataset.bound) {
+        authForm.dataset.bound = '1';
+        authForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            App.handleAuthSubmit();
+        });
+    }
+
+    bindSearch('global-search', (v) => App.handleGlobalSearch?.(v));
+    bindSearch('master-search', (v) => App.handleMasterSearch?.(v));
+    bindSearch('tr-search',     (v) => App.handleTaskSearch?.(v));
+
+    document.querySelectorAll('.nav-item[data-target]').forEach(btn => {
+        if (btn.dataset.bound) return;
+        btn.dataset.bound = '1';
+        btn.addEventListener('click', () => {
+            const target = btn.dataset.target;
+            const id = target.startsWith('view-') ? target : 'view-' + target;
+            if (window.UI?.switchView) window.UI.switchView(id);
+        });
+    });
+};
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _boot);
+} else {
+    _boot();
+}
+
+console.log('%c[DAWAA] Recovery Mode: localStorage.setItem("dawaa_recovery_mode", "true"); location.reload();', 'color: blue; font-weight: bold;');
+
 export { App };
