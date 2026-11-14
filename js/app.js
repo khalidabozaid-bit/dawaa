@@ -407,7 +407,7 @@ const App = {
 
     async renderInventory(type = 'detailed') {
         try {
-            const container = document.getElementById('inventory-list');
+            const container = document.getElementById('inventory-items-list') || document.getElementById('inventory-list');
             if (!container) return;
 
             this.renderCategoryChips(); // Refresh filters
@@ -1667,6 +1667,9 @@ window.switchView = (id) => {
     // Standardize IDs from nav (e.g., 'dashboard' -> 'view-dashboard')
     const finalId = id.startsWith('view-') ? id : `view-${id}`;
     UI.switchView(finalId);
+    if (finalId === 'view-inventory' && window.App?.renderInventory) {
+        window.App.renderInventory('detailed');
+    }
 };
 window.handleSearch = (query) => App.handleGlobalSearch(query);
 window.toggleTheme = () => {
@@ -2073,7 +2076,12 @@ const _boot = async () => {
         btn.addEventListener('click', () => {
             const target = btn.dataset.target;
             const id = target.startsWith('view-') ? target : 'view-' + target;
-            if (window.UI?.switchView) window.UI.switchView(id);
+            if (window.UI?.switchView) {
+                window.UI.switchView(id);
+                if (id === 'view-inventory' && window.App?.renderInventory) {
+                    window.App.renderInventory('detailed');
+                }
+            }
         });
     });
 };

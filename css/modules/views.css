@@ -700,3 +700,73 @@
     font-weight: 900;
     color: var(--primary);
 }
+
+/* --- Modern Dashboard Quick Actions (v17.2.2) --- */
+.dashboard-welcome h2 {
+    font-size: 20px;
+    font-weight: 800;
+    margin-bottom: 4px;
+    color: var(--text-main);
+}
+
+.quick-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+}
+
+.action-card-btn {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 18px;
+    border-radius: 16px;
+    border: 1px solid var(--border-color);
+    background: var(--surface);
+    color: var(--text-main);
+    cursor: pointer;
+    text-align: right;
+    transition: all 0.25s ease;
+    box-shadow: var(--shadow-sm);
+}
+
+.action-card-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.action-card-btn i {
+    font-size: 32px;
+    flex-shrink: 0;
+}
+
+.action-card-btn.primary {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(37, 99, 235, 0.15) 100%);
+    border-color: rgba(59, 130, 246, 0.3);
+}
+
+.action-card-btn.primary i {
+    color: var(--primary);
+}
+
+.action-card-btn.secondary {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(5, 150, 105, 0.15) 100%);
+    border-color: rgba(16, 185, 129, 0.3);
+}
+
+.action-card-btn.secondary i {
+    color: var(--secondary);
+}
+
+.action-card-text strong {
+    display: block;
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 2px;
+}
+
+.action-card-text small {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+}
