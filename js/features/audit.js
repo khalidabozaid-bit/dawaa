@@ -4,6 +4,7 @@ import { Sync } from '../core/sync.js';
 import { UI } from '../core/ui.js';
 import { Locations } from './locations.js';
 import { Categories } from './categories.js';
+import { Users } from './users.js';
 
 /**
  * Audit Management Service (v18.0.0 Hierarchical Flow)
@@ -49,12 +50,11 @@ export const Audit = {
     },
 
     async createSession({ name, type = 'individual', locationIds = [] }) {
-        const user = (window.App && window.App.user) || { displayName: 'خالد', email: 'khaled@dawaa.local' };
-        const uName = user.displayName || user.email || 'خالد';
+        const activeUser = Users.getActive();
+        const uName = activeUser?.name || 'خالد';
 
-        if (type === 'group' && window.App?.userRole !== 'admin') {
-            UI.showToast('صلاحيات المدير مطلوبة لإنشاء جرد جماعي للفريق ⚖️', 'warning');
-            return null;
+        if (type === 'group' && activeUser?.role !== 'admin' && window.App?.userRole !== 'admin') {
+            UI.showToast('صلاحيات المدير مفضلة لإنشاء جرد جماعي للفريق ⚖️', 'info');
         }
 
         const session = {
@@ -67,13 +67,26 @@ export const Audit = {
             participants: [uName],
             startedAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            counts: {} // key: `${locationId}___${medicineId}` -> { quantity, expiryDate, countedAt, userName }
+            counts: {} // key: `${locationId}___${medicineId}` -> { quantity, expiryDate, countedAt, userName, batches }
         };
 
         await this.saveSession(session);
         this.currentSessionId = session.id;
         UI.showToast(`تم بدء الجلسة: ${session.name} 🚀`, 'success');
         return session;
+    },
+
+    async joinSession(sessionId, userName) {
+        const session = await this.getSession(sessionId);
+        if (!session) return false;
+        const name = userName || Users.getActive()?.name || 'صيدلي';
+        if (!session.participants) session.participants = [];
+        if (!session.participants.includes(name)) {
+            session.participants.push(name);
+            await this.saveSession(session);
+            UI.showToast(`انضم ${name} إلى فريق الجرد 👥`, 'success');
+        }
+        return true;
     },
 
     async holdSession(id) {
@@ -97,7 +110,7 @@ export const Audit = {
         const session = await this.getSession(id);
         if (!session) return;
 
-        if (!confirm(`هل أنت متأكد من إنهاء واعتماد "${session.name}"؟ سيتم تحديث رصيد المستودع الفعلي بالكميات المحصورة.`)) {
+        if (!confirm(`هل أنت متأكد من إنهاء واعتماد "${session.name}"؟ سيتم تحديث رصيد المستودع الفعلي واستبدال الأرصدة القديمة بالكميات المحصورة الدقيقة.`)) {
             return false;
         }
 
@@ -105,10 +118,24 @@ export const Audit = {
         session.finalizedAt = new Date().toISOString();
         await this.saveSession(session);
 
-        // Apply counts to inventory
+        // Apply counts to inventory with True Reconciliation (no double-counting!)
         const counts = session.counts || {};
         const entries = Object.entries(counts);
         
+        // 1. Fetch current inventory to reconcile
+        const allExistingInv = (await DB.getAll('inventory')) || [];
+        const sessionCountedKeys = new Set(Object.keys(counts)); // `${locId}___${medId}`
+
+        // 2. Remove obsolete previous records for the counted pairs
+        for (const item of allExistingInv) {
+            const itemLocId = item.locationId || (item.location ? await Locations.findIdByName(item.location) : null);
+            const pairKey = `${itemLocId}___${item.medicineId}`;
+            if (sessionCountedKeys.has(pairKey)) {
+                await DB.delete('inventory', item.id);
+            }
+        }
+
+        // 3. Insert newly counted verified batches
         for (const [key, record] of entries) {
             const [locId, medId] = key.split('___');
             const loc = await Locations.get(locId);
@@ -120,12 +147,16 @@ export const Audit = {
 
             for (let bIndex = 0; bIndex < batches.length; bIndex++) {
                 const b = batches[bIndex];
+                const bQty = parseFloat(b.quantity) || 0;
+                // If single batch with 0 or multiple, store it
+                if (bQty <= 0 && batches.length > 1) continue;
+
                 await DB.put('inventory', {
                     id: `inv_audit_${session.id}_${medId}_${locId}_${bIndex}`,
                     medicineId: medId,
                     location: locName,
                     locationId: locId,
-                    quantity: parseFloat(b.quantity) || 0,
+                    quantity: bQty,
                     expiryDate: b.expiryDate || '2027-12',
                     batchIndex: bIndex,
                     auditId: session.id,
@@ -181,11 +212,17 @@ export const Audit = {
         const session = await this.getSession(sessionId);
         if (!session) return false;
 
-        const user = (window.App && window.App.user) || { displayName: 'خالد' };
-        const uName = user.displayName || user.email || 'خالد';
+        const activeUser = Users.getActive();
+        const uName = activeUser?.name || 'خالد';
 
         if (!session.counts) session.counts = {};
         const key = `${locationId}___${medicineId}`;
+
+        // Ensure user is in session participants
+        if (!session.participants) session.participants = [];
+        if (!session.participants.includes(uName)) {
+            session.participants.push(uName);
+        }
 
         // Normalize batches
         let cleanBatches = [];
@@ -194,9 +231,15 @@ export const Audit = {
                 quantity: parseFloat(b.quantity) || 0,
                 expiryDate: b.expiryDate ? b.expiryDate.trim() : '2027-12'
             })).filter(b => b.quantity >= 0);
-        } else {
+        } else if (quantity !== undefined && quantity !== null) {
             cleanBatches = [{
                 quantity: parseFloat(quantity) || 0,
+                expiryDate: expiryDate ? expiryDate.trim() : '2027-12'
+            }];
+        } else {
+            // Default 0 count if zero-count requested
+            cleanBatches = [{
+                quantity: 0,
                 expiryDate: expiryDate ? expiryDate.trim() : '2027-12'
             }];
         }
@@ -216,6 +259,19 @@ export const Audit = {
         };
 
         await this.saveSession(session);
+
+        // Collaborative live broadcast
+        if (session.type === 'group') {
+            Sync.pushAuditEntry({
+                auditId: session.id,
+                locationId,
+                medicineId,
+                quantity: totalQty,
+                batches: cleanBatches,
+                userName: uName
+            });
+        }
+
         return session.counts[key];
     },
 

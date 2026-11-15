@@ -4,6 +4,8 @@ import { Inventory } from './features/inventory.js';
 import { Categories } from './features/categories.js';
 import { Locations } from './features/locations.js';
 import { Audit } from './features/audit.js';
+import { Users } from './features/users.js';
+window.Users = Users;
 import { Exporter } from './features/export.js';
 import { Utils } from './core/utils.js';
 import { Sync } from './core/sync.js';
@@ -26,7 +28,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.3.0', // Universal Sovereign v18.3.0
+    VERSION: '18.4.0', // Universal Sovereign v18.3.0
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -123,7 +125,16 @@ const App = {
                 console.warn("Inventory Init Non-blocking Notice:", invErr);
             }
 
-            console.log("BOOT: [STEP 5] Data Seeding");
+            console.log("BOOT: [STEP 5] Data Seeding & User Init");
+            Users.init();
+            const activeUser = Users.getActive();
+            this.currentUser = activeUser;
+            this.userRole = activeUser.role;
+            this.userName = activeUser.name;
+            this.user = { uid: activeUser.id, displayName: activeUser.name, role: activeUser.role };
+            const nameEl = document.getElementById('display-user-name');
+            if (nameEl) nameEl.textContent = activeUser.name;
+
             await Categories.seedInitialData();
             await Locations.init();
             await Audit.init();
@@ -3063,14 +3074,185 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         `;
     },
 
+    
+    // --- User & Team Management Handlers (v18.4.0) ---
+    getActiveUserName() {
+        return (typeof Users !== 'undefined' && Users.getActive()) ? Users.getActive().name : (this.userName || 'خالد');
+    },
+
+    openUserSwitcherModal(onSelectCallback) {
+        const team = Users.getAll();
+        const active = Users.getActive();
+
+        UI.showModal(`
+            <div class="modal-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 12px;">
+                <h2 style="font-size:16px; margin:0;"><i class='bx bx-user-check' style="color:var(--primary);"></i> اختيار الصيدلي القائم بالعد</h2>
+            </div>
+            <p class="text-muted small mb-12">حدد من يقوم بعملية العد الآن لربط سجلات الجرد والدفعات باسمه في النظام:</p>
+
+            <div style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto; margin-bottom:15px; padding:2px;">
+                ${team.map(member => {
+                    const isActive = member.id === active.id;
+                    return `
+                        <div class="card p-10" onclick="window.App.selectUserFromModal('${member.id}')" style="display:flex; align-items:center; justify-content:space-between; cursor:pointer; border-radius:12px; background:${isActive ? 'rgba(59,130,246,0.08)' : 'var(--surface)'}; border:1.5px solid ${isActive ? 'var(--primary)' : 'var(--border-color)'}; transition:all 0.2s ease;">
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <div style="width:38px; height:38px; border-radius:10px; background:${member.color || 'var(--primary)'}22; color:${member.color || 'var(--primary)'}; display:flex; align-items:center; justify-content:center; font-size:18px;">
+                                    <i class='bx ${member.icon || 'bx-user'}'></i>
+                                </div>
+                                <div>
+                                    <div style="display:flex; align-items:center; gap:6px;">
+                                        <strong style="font-size:14px;">${member.name}</strong>
+                                        <span class="badge ${member.role === 'admin' ? 'bg-primary text-white' : 'bg-secondary'}" style="font-size:10px; padding:1px 5px; border-radius:4px;">
+                                            ${member.role === 'admin' ? 'مدير 🛡️' : 'صيدلي 💊'}
+                                        </span>
+                                    </div>
+                                    <small style="color:var(--text-muted); font-size:11px;">${member.title || 'عضو فريق'}</small>
+                                </div>
+                            </div>
+                            <div>
+                                ${isActive ? `
+                                    <span style="font-size:12px; font-weight:bold; color:var(--primary); display:flex; align-items:center; gap:2px;">
+                                        <i class='bx bx-check-circle'></i> نشط
+                                    </span>
+                                ` : `
+                                    <button type="button" class="btn-ghost sm-btn" style="font-size:11px; padding:4px 8px;">اختيار</button>
+                                `}
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+
+            <!-- Add New Team Member Box -->
+            <div style="background:var(--bg-secondary); border-radius:12px; padding:12px; border:1px dashed var(--border-color); margin-bottom:12px;">
+                <strong style="font-size:12px; display:block; margin-bottom:8px; color:var(--text-main);"><i class='bx bx-user-plus'></i> إضافة عضو جديد لفريق العمل:</strong>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+                    <input type="text" id="new-user-name" class="form-input" placeholder="اسم الصيدلي / العضو" style="font-size:12px;">
+                    <input type="text" id="new-user-title" class="form-input" placeholder="المسمى (مثلاً: صيدلي طوارئ)" style="font-size:12px;">
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <select id="new-user-role" class="form-select" style="font-size:11px; width:auto; height:32px;">
+                        <option value="staff">صلاحيات صيدلي (Staff)</option>
+                        <option value="admin">صلاحيات مدير (Admin)</option>
+                    </select>
+                    <button type="button" class="btn-primary sm-btn" onclick="window.App.addNewUserFromModal()">+ إضافة وتعيين</button>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إغلاق</button>
+            </div>
+        `);
+
+        this._userModalCallback = onSelectCallback;
+    },
+
+    selectUserFromModal(userId) {
+        const team = Users.getAll();
+        const user = team.find(u => u.id === userId);
+        if (user) {
+            Users.setActive(user);
+            this.currentUser = user;
+            this.userName = user.name;
+            this.userRole = user.role;
+            this.user = { uid: user.id, displayName: user.name, role: user.role };
+            UI.closeModal();
+            if (typeof this._userModalCallback === 'function') {
+                this._userModalCallback(user);
+                this._userModalCallback = null;
+            } else {
+                if (UI.currentView === 'audit') this.renderAuditView();
+                if (UI.currentView === 'dashboard') this.renderDashboard();
+            }
+        }
+    },
+
+    addNewUserFromModal() {
+        const nameEl = document.getElementById('new-user-name');
+        const titleEl = document.getElementById('new-user-title');
+        const roleEl = document.getElementById('new-user-role');
+        if (!nameEl || !nameEl.value.trim()) {
+            return UI.showToast('يرجى كتابة اسم العضو', 'warning');
+        }
+        const newUser = Users.addUser({
+            name: nameEl.value.trim(),
+            title: titleEl?.value.trim() || '',
+            role: roleEl?.value || 'staff'
+        });
+        if (newUser) {
+            Users.setActive(newUser);
+            this.currentUser = newUser;
+            this.userName = newUser.name;
+            this.userRole = newUser.role;
+            this.user = { uid: newUser.id, displayName: newUser.name, role: newUser.role };
+            UI.closeModal();
+            if (typeof this._userModalCallback === 'function') {
+                this._userModalCallback(newUser);
+                this._userModalCallback = null;
+            } else {
+                if (UI.currentView === 'audit') this.renderAuditView();
+                if (UI.currentView === 'dashboard') this.renderDashboard();
+            }
+        }
+    },
+
+    async joinGroupAuditSession(sessionId) {
+        const active = Users.getActive();
+        await Audit.joinSession(sessionId, active.name);
+        this.renderAuditView();
+    },
+
+    async recordZeroCountModal(medicineId) {
+        if (!confirm('هل تريد تسجيل هذا الصنف كغير متوفر (رصيد صفر) في هذا المكان؟')) return;
+        await Audit.recordCount(this.selectedAuditSessionId, this.selectedAuditLocationId, medicineId, {
+            batches: [{ quantity: 0, expiryDate: '2027-12' }]
+        });
+        UI.closeModal();
+        UI.showToast('تم تسجيل رصيد الصنف كـ صفر (0) بنجاح ✅', 'info');
+        this.renderAuditView();
+    },
+
+    setAuditFilter(filterType) {
+        this.auditMedFilter = filterType;
+        this.renderAuditView();
+    },
+
+    handleAuditMedSearch(query) {
+        this.auditMedSearch = query;
+        this.renderAuditView();
+    },
+
     async renderAuditMedicinesLevel(container, session) {
         const loc = await Locations.get(this.selectedAuditLocationId);
         const cat = await Categories.getInfo(this.selectedAuditCategoryId);
         if (!loc || !cat) return this.auditBackToCategories();
 
-        const medicines = await Audit.getMedicinesWithAuditStatus(session.id, loc.id, cat.id);
-        const uncountedCount = medicines.filter(m => !m.isCounted).length;
-        const countedCount = medicines.filter(m => m.isCounted).length;
+        const allMedicines = await Audit.getMedicinesWithAuditStatus(session.id, loc.id, cat.id);
+        const totalCount = allMedicines.length;
+        const uncountedCount = allMedicines.filter(m => !m.isCounted).length;
+        const countedCount = allMedicines.filter(m => m.isCounted).length;
+        const progressPct = totalCount > 0 ? Math.round((countedCount / totalCount) * 100) : 0;
+
+        // Apply Live Filters & Search
+        const currentFilter = this.auditMedFilter || 'all';
+        const currentSearch = (this.auditMedSearch || '').trim().toLowerCase();
+
+        let filteredMedicines = allMedicines;
+        if (currentFilter === 'uncounted') {
+            filteredMedicines = filteredMedicines.filter(m => !m.isCounted);
+        } else if (currentFilter === 'counted') {
+            filteredMedicines = filteredMedicines.filter(m => m.isCounted);
+        }
+
+        if (currentSearch) {
+            filteredMedicines = filteredMedicines.filter(m =>
+                (m.nameEN && m.nameEN.toLowerCase().includes(currentSearch)) ||
+                (m.nameAR && m.nameAR.includes(currentSearch)) ||
+                (m.id && m.id.toLowerCase().includes(currentSearch))
+            );
+        }
+
+        const activeUser = Users.getActive();
 
         container.innerHTML = `
             <!-- Breadcrumbs Bar -->
@@ -3083,66 +3265,121 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     <i class='bx bx-chevron-left'></i>
                     <span onclick="window.App.auditBackToCategories()" style="cursor:pointer">${cat.nameAR}</span>
                     <i class='bx bx-chevron-left'></i>
-                    <span class="active">الأدوية</span>
+                    <span class="active">الأدوية (${totalCount})</span>
                 </div>
             </div>
 
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <div>
-                    <h3 style="margin: 0; font-size: 15px; font-weight: 800;">أدوية ${cat.nameAR} في ${loc.nameAR}</h3>
-                    <span style="font-size: 11px; color: var(--text-muted);">
-                        المتبقي: ${uncountedCount} | تم الجرد: ${countedCount}
-                    </span>
+            <!-- Active User & Team Banner -->
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+                <div class="audit-active-user-badge" onclick="window.App.openUserSwitcherModal()" title="انقر لتبديل الصيدلي القائم بالعد">
+                    <i class='bx bx-user-check' style="color:var(--primary); font-size:14px;"></i>
+                    <span>الصيدلي: <strong style="color:var(--text-main);">${activeUser.name}</strong></span>
+                    <i class='bx bx-chevron-down' style="color:var(--text-muted); font-size:12px;"></i>
+                </div>
+
+                <div style="font-size:11px; font-weight:700; color:var(--text-muted); display:flex; align-items:center; gap:8px;">
+                    <span>إنجاز القسم: <strong>${progressPct}%</strong></span>
+                    <div style="width:70px; height:6px; background:var(--border-color); border-radius:3px; overflow:hidden;">
+                        <div style="width:${progressPct}%; height:100%; background:#10b981; border-radius:3px;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Group Session Collaborative Participants Bar -->
+            ${session.type === 'group' ? `
+                <div class="audit-team-banner">
+                    <div style="display:flex; align-items:center; gap:6px; font-size:12px;">
+                        <strong style="color:#0284c7;"><i class='bx bx-group'></i> الفريق المشارك:</strong>
+                        <div style="display:flex; gap:4px; flex-wrap:wrap;">
+                            ${(session.participants || []).map(p => `
+                                <span class="badge bg-info" style="font-size:10px; padding:2px 6px; border-radius:4px;">${p}</span>
+                            `).join('')}
+                        </div>
+                    </div>
+                    ${!(session.participants || []).includes(activeUser.name) ? `
+                        <button class="btn-ghost sm-btn" onclick="window.App.joinGroupAuditSession('${session.id}')" style="font-size:11px; padding:2px 8px;">
+                            <i class='bx bx-user-plus'></i> انضمام للفريق
+                        </button>
+                    ` : ''}
+                </div>
+            ` : ''}
+
+            <!-- Toolbar: Quick Search & Filter Chips -->
+            <div class="audit-toolbar">
+                <div class="audit-search-wrapper">
+                    <i class='bx bx-search'></i>
+                    <input type="text" id="audit-med-search" class="audit-search-input" placeholder="بحث سريع باسم الدواء الإنجليزي أو العربي..." value="${this.auditMedSearch || ''}" oninput="window.App.handleAuditMedSearch(this.value)">
+                </div>
+                <div class="audit-filters-row">
+                    <button type="button" class="audit-filter-chip ${currentFilter === 'all' ? 'active' : ''}" onclick="window.App.setAuditFilter('all')">
+                        الكل (${totalCount})
+                    </button>
+                    <button type="button" class="audit-filter-chip ${currentFilter === 'uncounted' ? 'active' : ''}" onclick="window.App.setAuditFilter('uncounted')">
+                        ⏳ بانتظار العد (${uncountedCount})
+                    </button>
+                    <button type="button" class="audit-filter-chip ${currentFilter === 'counted' ? 'active' : ''}" onclick="window.App.setAuditFilter('counted')">
+                        ✅ تم العد (${countedCount})
+                    </button>
                 </div>
             </div>
 
             <!-- Square Medicines Grid with Smart Sorting -->
-            <div class="audit-square-grid">
-                ${medicines.map(med => {
-                    const imgUrl = Categories.getMedicineImage(med);
-                    if (med.isCounted) {
-                        const batchesHtml = (med.batches && med.batches.length > 0)
-                            ? med.batches.map(b => {
-                                const badge = window.App.calcExpiryBadge(b.expiryDate);
-                                return `
-                                    <span class="batch-exterior-pill" style="display:inline-flex; align-items:center; justify-content:center; gap:2px; font-size:9px; font-weight:bold; padding:1px 5px; border-radius:4px; background:${badge.bg}; color:${badge.color}; border:1px solid ${badge.color}33; white-space:nowrap;">
-                                        <i class='bx ${badge.icon}' style="font-size:10px;"></i>
-                                        <span>${b.quantity} &times; ${b.expiryDate}</span>
-                                    </span>
-                                `;
-                            }).join('')
-                            : `<small style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${med.countedExpiry || ''}</small>`;
+            ${filteredMedicines.length === 0 ? `
+                <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
+                    <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
+                    <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة لبحثك أو الفلتر المحدد</p>
+                </div>
+            ` : `
+                <div class="audit-square-grid">
+                    ${filteredMedicines.map(med => {
+                        const imgUrl = Categories.getMedicineImage(med);
+                        if (med.isCounted) {
+                            const batchesHtml = (med.batches && med.batches.length > 0)
+                                ? med.batches.map(b => {
+                                    const badge = window.App.calcExpiryBadge(b.expiryDate);
+                                    return `
+                                        <span class="batch-exterior-pill" style="display:inline-flex; align-items:center; justify-content:center; gap:2px; font-size:9px; font-weight:bold; padding:1px 5px; border-radius:4px; background:${badge.bg}; color:${badge.color}; border:1px solid ${badge.color}33; white-space:nowrap;">
+                                            <i class='bx ${badge.icon}' style="font-size:10px;"></i>
+                                            <span>${b.quantity} &times; ${b.expiryDate}</span>
+                                        </span>
+                                    `;
+                                }).join('')
+                                : `<small style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${med.countedExpiry || ''}</small>`;
 
-                        return `
-                            <div class="square-card counted" onclick="window.App.openCountModal('${med.id}')" title="انقر لتعديل العد">
-                                <span class="badge-done">
-                                    <i class='bx bx-check'></i> تم
-                                </span>
-                                <div style="width: 34px; height: 34px; border-radius: 6px; overflow: hidden; margin-bottom: 3px; flex-shrink: 0;">
-                                    <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover;">
+                            return `
+                                <div class="square-card counted" onclick="window.App.openCountModal('${med.id}')" title="انقر لتعديل العد">
+                                    <span class="badge-done">
+                                        <i class='bx bx-check'></i> تم
+                                    </span>
+                                    <div style="width: 34px; height: 34px; border-radius: 6px; overflow: hidden; margin-bottom: 3px; flex-shrink: 0;">
+                                        <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover;">
+                                    </div>
+                                    <h3 style="font-size: 11px; font-weight: 800; margin: 0 0 3px 0; line-height: 1.2; word-break: break-word;">${med.nameEN || med.nameAR}</h3>
+                                    <div class="counted-qty-tag" style="font-size: 11px; font-weight: 800; background: rgba(16,185,129,0.15); color: var(--secondary); padding: 2px 8px; border-radius: 6px; margin: 2px 0;">
+                                        إجمالي: ${med.countedQty}
+                                    </div>
+                                    <div class="card-batches-breakdown" style="display: flex; flex-direction: column; gap: 2px; width: 100%; margin-top: 2px;">
+                                        ${batchesHtml}
+                                    </div>
+                                    <small style="font-size:9px; color:var(--text-muted); margin-top:auto; padding-top:2px; display:flex; align-items:center; gap:2px;">
+                                        <i class='bx bx-user'></i> ${med.countedBy || 'صيدلي'}
+                                    </small>
                                 </div>
-                                <h3 style="font-size: 11px; font-weight: 800; margin: 0 0 3px 0; line-height: 1.2; word-break: break-word;">${med.nameEN || med.nameAR}</h3>
-                                <div class="counted-qty-tag" style="font-size: 11px; font-weight: 800; background: rgba(16,185,129,0.15); color: var(--secondary); padding: 2px 8px; border-radius: 6px; margin: 2px 0;">
-                                    إجمالي: ${med.countedQty}
+                            `;
+                        } else {
+                            return `
+                                <div class="square-card" onclick="window.App.openCountModal('${med.id}')" title="انقر لتسجيل العد">
+                                    <div style="width: 34px; height: 34px; border-radius: 6px; overflow: hidden; margin-bottom: 4px; background: rgba(59,130,246,0.06); display:flex; align-items:center; justify-content:center; flex-shrink: 0;">
+                                        <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover;">
+                                    </div>
+                                    <h3 style="font-size: 11px; font-weight: 800; margin: 0 0 4px 0; line-height: 1.2; word-break: break-word;">${med.nameEN || med.nameAR}</h3>
+                                    <span class="square-meta" style="color: var(--primary); font-size: 10px; margin-top: auto;">بانتظار العد ⏳</span>
                                 </div>
-                                <div class="card-batches-breakdown" style="display: flex; flex-direction: column; gap: 2px; width: 100%; margin-top: 2px;">
-                                    ${batchesHtml}
-                                </div>
-                            </div>
-                        `;
-                    } else {
-                        return `
-                            <div class="square-card" onclick="window.App.openCountModal('${med.id}')" title="انقر لتسجيل العد">
-                                <div style="width: 34px; height: 34px; border-radius: 6px; overflow: hidden; margin-bottom: 4px; background: rgba(59,130,246,0.06); display:flex; align-items:center; justify-content:center; flex-shrink: 0;">
-                                    <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover;">
-                                </div>
-                                <h3 style="font-size: 11px; font-weight: 800; margin: 0 0 4px 0; line-height: 1.2; word-break: break-word;">${med.nameEN || med.nameAR}</h3>
-                                <span class="square-meta" style="color: var(--primary); font-size: 10px; margin-top: auto;">بانتظار العد ⏳</span>
-                            </div>
-                        `;
-                    }
-                }).join('')}
-            </div>
+                            `;
+                        }
+                    }).join('')}
+                </div>
+            `}
         `;
     },
 
@@ -3312,28 +3549,14 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const existingCount = (session?.counts && session.counts[countKey]) || null;
         const imgUrl = Categories.getMedicineImage(med);
 
-        // Auto-suggest known batches from session or inventory DB
+        // Clean slate for session: if not counted in this session, start completely empty!
         let initialBatches = [];
         if (existingCount && Array.isArray(existingCount.batches) && existingCount.batches.length > 0) {
             initialBatches = existingCount.batches.map(b => ({ ...b }));
         } else if (existingCount && existingCount.quantity !== undefined) {
             initialBatches = [{ quantity: existingCount.quantity, expiryDate: existingCount.expiryDate || '2027-12' }];
         } else {
-            const allInv = (await DB.getAll('inventory')) || [];
-            const prevEntries = allInv.filter(e => e.medicineId === medicineId);
-            if (prevEntries.length > 0) {
-                const seenExp = new Set();
-                initialBatches = [];
-                for (const pe of prevEntries) {
-                    const exp = pe.expiryDate || '2027-12';
-                    if (!seenExp.has(exp)) {
-                        seenExp.add(exp);
-                        initialBatches.push({ quantity: pe.quantity || 0, expiryDate: exp, isSuggested: true });
-                    }
-                }
-            } else {
-                initialBatches = [];
-            }
+            initialBatches = []; // Clean slate: no previous quantities lingering!
         }
 
         this._modalMedicineId = medicineId;
@@ -3346,6 +3569,14 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         UI.showModal(`
             <div class="modal-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 12px;">
                 <h2 style="font-size:16px; margin:0;"><i class='bx bx-barcode-reader' style="color:var(--primary);"></i> تسجيل الجرد الفعلي والدفعات</h2>
+            </div>
+            
+            <!-- Responsible Pharmacist Ribbon in Modal -->
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:var(--bg-secondary); border-radius:8px; margin-bottom:10px; font-size:11px;">
+                <span>👤 الصيدلي المسؤول عن العد: <strong style="color:var(--text-main);">${Users.getActive().name}</strong></span>
+                <button type="button" class="btn-ghost sm-btn" onclick="window.App.openUserSwitcherModal(() => window.App.openCountModal('${medicineId}'))" style="font-size:10px; padding:2px 6px;">
+                    تبديل ⇄
+                </button>
             </div>
             
             <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; padding:10px; background:var(--bg-secondary); border-radius:12px;">
@@ -3403,6 +3634,13 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:rgba(59,130,246,0.08); border-radius:10px; border:1px solid rgba(59,130,246,0.2); margin-bottom:12px;">
                 <span style="font-size:12px; font-weight:bold; color:var(--text-main);">إجمالي الكمية المسجلة:</span>
                 <strong id="modal-batch-total-qty" style="font-size:18px; font-weight:800; color:var(--primary);">${this.calcModalBatchesTotal()} وحدة</strong>
+            </div>
+
+            <!-- Zero-Count Fast Action -->
+            <div style="display:flex; justify-content:center; margin-bottom:10px;">
+                <button type="button" class="btn-ghost sm-btn text-warning" onclick="window.App.recordZeroCountModal('${medicineId}')" style="font-size:11px; width:100%; border:1px dashed var(--accent); padding:8px; border-radius:8px; display:flex; align-items:center; justify-content:center; gap:6px;">
+                    <i class='bx bx-x-circle' style="font-size:15px;"></i> تسجيل الصنف كغير متوفر في هذا المكان (رصيد: 0)
+                </button>
             </div>
 
             <div class="form-actions" style="display:flex; gap:8px;">
@@ -3529,7 +3767,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         }
 
         if (!this._modalBatches || this._modalBatches.length === 0) {
-            UI.showToast('يرجى إضافة دفعة واحدة على الأقل قبل الحفظ', 'warning');
+            if (confirm('لم تُضف أي دفعات بعد. هل ترغب في تسجيل هذا الصنف كغير متوفر (رصيد صفر 0) في هذا المكان؟')) {
+                return this.recordZeroCountModal(medicineId);
+            }
             return;
         }
 
@@ -3875,7 +4115,7 @@ App.clearNotifications = function() {
 };
 
 App.openProfile = function() {
-    if (window.UI) UI.switchView('view-settings');
+    this.openUserSwitcherModal();
 };
 
 App.showLowStock = function() {

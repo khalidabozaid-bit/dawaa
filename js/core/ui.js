@@ -220,11 +220,13 @@ export const UI = {
     toggleTheme() {
         const isDark = document.body.classList.toggle('dark-mode');
         document.body.classList.toggle('dark-theme', isDark);
+        document.documentElement.classList.toggle('dark-mode', isDark);
         localStorage.setItem('dawaa-theme', isDark ? 'dark' : 'light');
         const icon1 = document.getElementById('theme-icon');
         const icon2 = document.getElementById('settings-theme-icon');
         if (icon1) icon1.className = isDark ? 'bx bx-sun' : 'bx bx-moon';
         if (icon2) icon2.className = isDark ? 'bx bx-sun' : 'bx bx-moon';
+        this.showToast(isDark ? 'تم تفعيل الوضع الليلي 🌙' : 'تم تفعيل الوضع النهاري ☀️', 'info');
         return isDark;
     }
 };
@@ -238,9 +240,12 @@ window.toggleTheme = () => {
 };
 
 // Init theme from preference
-if (localStorage.getItem('dawaa-theme') === 'dark') {
+const savedTheme = localStorage.getItem('dawaa-theme');
+const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
     document.body.classList.add('dark-mode');
     document.body.classList.add('dark-theme');
+    document.documentElement.classList.add('dark-mode');
     const icon1 = document.getElementById('theme-icon');
     const icon2 = document.getElementById('settings-theme-icon');
     if (icon1) icon1.className = 'bx bx-sun';

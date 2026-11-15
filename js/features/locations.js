@@ -95,6 +95,13 @@ export const Locations = {
         return await DB.get('locations', id);
     },
 
+    async findIdByName(name) {
+        if (!name) return null;
+        const locs = await this.getAll();
+        const found = locs.find(l => l.nameAR === name || l.nameEN === name || l.id === name);
+        return found ? found.id : null;
+    },
+
     async save(locationData) {
         const id = locationData.id || `loc_${Utils.generateId()}`;
         const loc = {

@@ -26,6 +26,11 @@
     <link rel="stylesheet" href="css/modules/views.css">
     <link rel="stylesheet" href="css/modules/dark.css">
     <link rel="stylesheet" href="css/modules/auth.css">
+    <script id="instant-theme">
+        if (localStorage.getItem('dawaa-theme') === 'dark') {
+            document.documentElement.classList.add('dark-mode');
+        }
+    </script>
 </head>
 <body class="light-mode">
 
@@ -307,6 +312,14 @@
                     </div>
                 </div>
 
+                <div class="setting-card" onclick="window.App.openUserSwitcherModal()">
+                    <div class="setting-icon bg-info"><i class='bx bx-group'></i></div>
+                    <div class="setting-info">
+                        <h3>فريق العمل والصيادلة</h3>
+                        <p>تبديل الصيدلي القائم بالعد وإدارة الأعضاء</p>
+                    </div>
+                </div>
+
                 <div class="setting-card" onclick="window.App.handleAdminUnlock()">
                     <div class="setting-icon bg-admin"><i class='bx bx-shield-quarter' id="admin-icon"></i></div>
                     <div class="setting-info">
@@ -392,7 +405,7 @@
 
     <!-- App Scripts -->
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/app.js?v=18.0.0"></script>
+    <script type="module" src="js/app.js?v=18.4.0"></script>
     
     <!-- Navigation Logic managed by js/app.js -->
 </body>

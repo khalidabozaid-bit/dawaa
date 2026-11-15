@@ -142,3 +142,74 @@ body.dark-theme .notification-panel {
     background: var(--bg-light);
     border: 1px solid var(--border-color);
 }
+
+/* Audit & Inventory Elements in Dark Mode (v18.4.0) */
+body.dark-mode .med-image,
+body.dark-theme .med-image {
+    background: #1e293b;
+}
+
+body.dark-mode .location-box input,
+body.dark-theme .location-box input {
+    background: var(--surface);
+    color: var(--text-main);
+    border-color: var(--border-color);
+}
+
+body.dark-mode .loc-badge-btn,
+body.dark-theme .loc-badge-btn {
+    background: var(--surface);
+    border-color: var(--border-color);
+    color: var(--text-main);
+}
+
+body.dark-mode .user-select,
+body.dark-theme .user-select {
+    background: var(--surface);
+    border-color: var(--border-color);
+    color: var(--text-main);
+}
+
+body.dark-mode .add-batch-box,
+body.dark-theme .add-batch-box {
+    background: rgba(59, 130, 246, 0.08) !important;
+    border-color: rgba(59, 130, 246, 0.4) !important;
+}
+
+body.dark-mode .breadcrumbs-bar,
+body.dark-theme .breadcrumbs-bar {
+    background: #172033;
+    border-color: var(--border-color);
+}
+
+body.dark-mode .session-control-bar,
+body.dark-theme .session-control-bar {
+    background: var(--surface);
+    border-color: var(--border-color);
+}
+
+body.dark-mode .square-card.counted,
+body.dark-theme .square-card.counted {
+    background: linear-gradient(180deg, rgba(16, 185, 129, 0.08) 0%, rgba(16, 185, 129, 0.16) 100%) !important;
+    border-color: #10b981 !important;
+}
+
+body.dark-mode .square-card.counted .counted-qty-tag,
+body.dark-theme .square-card.counted .counted-qty-tag {
+    color: #34d399 !important;
+    background: rgba(16, 185, 129, 0.25) !important;
+}
+
+body.dark-mode .audit-filter-chip,
+body.dark-theme .audit-filter-chip {
+    background: var(--surface);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+}
+
+body.dark-mode .audit-filter-chip.active,
+body.dark-theme .audit-filter-chip.active {
+    background: var(--primary);
+    color: #ffffff;
+    border-color: var(--primary);
+}
