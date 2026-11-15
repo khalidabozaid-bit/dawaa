@@ -2042,7 +2042,19 @@ App.handleAuthSubmit = async function() {
         UI.showToast('جاري التحقق من الهوية...', 'info');
         localStorage.setItem('dawaa-temp-name', name);
         
-        // 1. Try to Login
+        // Match or create in local team registry
+        let team = Users.getAll();
+        let user = team.find(u => u.id === `user_${payrollNo}` || u.name === name);
+        if (!user) {
+            user = Users.addUser({
+                name: name,
+                title: 'صيدلي ميداني',
+                role: 'staff'
+            });
+        }
+        if (user) Users.setActive(user);
+
+        // 1. Try to Login with Firebase
         try {
             await auth.signInWithEmailAndPassword(email, this.SILENT_PASS);
             UI.showToast(`أهلاً بك مجدداً يا ${name}!`, 'success');
@@ -2051,11 +2063,30 @@ App.handleAuthSubmit = async function() {
             if (loginErr.code === 'auth/user-not-found' || loginErr.code === 'auth/invalid-credential') {
                 await auth.createUserWithEmailAndPassword(email, this.SILENT_PASS);
                 UI.showToast('تم إنشاء حسابك بنجاح! ✨', 'success');
+            } else if (loginErr.code === 'auth/network-request-failed' || !navigator.onLine) {
+                // Local offline fallback
+                const localUser = {
+                    uid: `local_${payrollNo}`,
+                    email: email,
+                    displayName: name
+                };
+                await this.handleUserSession(localUser);
+                UI.showToast(`دخول محلي: مرحباً ${name}`, 'success');
             } else {
                 throw loginErr;
             }
         }
     } catch (err) {
+        if (err.code === 'auth/network-request-failed' || !navigator.onLine) {
+            const localUser = {
+                uid: `local_${payrollNo}`,
+                email: email,
+                displayName: name
+            };
+            await this.handleUserSession(localUser);
+            UI.showToast(`دخول محلي: مرحباً ${name}`, 'success');
+            return;
+        }
         console.error('Auth Error:', err);
         let msg = 'خطأ في الدخول';
         if (err.code === 'auth/operation-not-allowed') msg = 'يرجى تفعيل البريد الإلكتروني في كونسول فيربيس';
@@ -2631,48 +2662,6 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </button>
             </div>
 
-            <!-- لوحة فريق عمل الجرد والصيادلة (Audit Team Command Card) -->
-            <div class="card p-15 mb-15" style="background: linear-gradient(135deg, rgba(59,130,246,0.08) 0%, rgba(16,185,129,0.08) 100%); border: 1.5px solid var(--primary); border-radius: 16px; box-shadow: var(--shadow-sm);">
-                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                    <div style="display:flex; align-items:center; gap:12px;">
-                        <div style="width:46px; height:46px; border-radius:14px; background:var(--primary); color:white; display:flex; align-items:center; justify-content:center; font-size:24px; box-shadow:0 4px 10px rgba(59,130,246,0.3); flex-shrink:0;">
-                            <i class='bx bx-user-check'></i>
-                        </div>
-                        <div>
-                            <span style="font-size:11px; font-weight:700; color:var(--text-muted); display:block;">الصيدلي المسؤول والقائم بالعد حالياً:</span>
-                            <div style="display:flex; align-items:center; gap:6px;">
-                                <strong style="font-size:16px; color:var(--text-main);">${activeUser.name}</strong>
-                                <span class="badge ${activeUser.role === 'admin' ? 'bg-primary text-white' : 'bg-secondary'}" style="font-size:10px; padding:2px 6px; border-radius:4px;">
-                                    ${activeUser.role === 'admin' ? 'مدير 🛡️' : 'صيدلي 💊'}
-                                </span>
-                            </div>
-                            <small style="display:block; color:var(--text-muted); font-size:11px;">${activeUser.title || 'مسؤول الجرد'}</small>
-                        </div>
-                    </div>
-                    
-                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                        <button type="button" class="btn-ghost sm-btn" onclick="window.App.openUserSwitcherModal()" style="border:1px solid var(--border-color); background:var(--surface); font-size:12px; padding:6px 12px; font-weight:bold;">
-                            <i class='bx bx-refresh'></i> تبديل الصيدلي
-                        </button>
-                        <button type="button" class="btn-primary sm-btn" onclick="window.App.openAddUserQuickModal()" style="font-size:12px; padding:6px 12px; font-weight:bold; background: #10b981;">
-                            <i class='bx bx-user-plus'></i> ➕ إضافة صيدلي جديد
-                        </button>
-                    </div>
-                </div>
-
-                <!-- شريط أعضاء الفريق المسجلين للتبديل السريع -->
-                <div style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                    <span style="font-size:11px; font-weight:bold; color:var(--text-muted);"><i class='bx bx-group'></i> الفريق المسجل (${allTeam.length}):</span>
-                    ${allTeam.map(u => `
-                        <span onclick="window.App.quickSwitchUser('${u.id}')" title="انقر للتبديل السريع لهذا الصيدلي" style="cursor:pointer; display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border-radius:8px; background:${u.id === activeUser.id ? 'var(--primary)' : 'var(--surface)'}; color:${u.id === activeUser.id ? '#ffffff' : 'var(--text-main)'}; border:1px solid ${u.id === activeUser.id ? 'var(--primary)' : 'var(--border-color)'}; font-size:11px; font-weight:bold; transition:all 0.2s ease;">
-                            <i class='bx ${u.icon || 'bx-user'}'></i>
-                            <span>${u.name}</span>
-                            ${u.id === activeUser.id ? `<i class='bx bx-check'></i>` : ''}
-                        </span>
-                    `).join('')}
-                </div>
-            </div>
-
             <!-- Active / On-Hold Sessions -->
             <div class="section-title mt-15 mb-10" style="display:flex; justify-content:space-between; align-items:center;">
                 <h3><i class='bx bx-play-circle'></i> الجلسات الجارية والمعلقة (${activeSessions.length})</h3>
@@ -3121,103 +3110,55 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     
     // --- User & Team Management Handlers (v18.4.0) ---
     
-    bypassLoginAsActiveUser() {
-        const activeUser = Users.getActive();
-        this.currentUser = activeUser;
-        this.userName = activeUser.name;
-        this.userRole = activeUser.role;
-        this.user = { uid: activeUser.id, displayName: activeUser.name, role: activeUser.role };
-        localStorage.removeItem('dawaa_logged_out');
-        this.hideLogin();
-        this.renderDashboard();
-        UI.showToast(`مرحباً بك يا ${activeUser.name} 👤`, 'success');
-    },
+    // =========================================================================
+    // --- USER MANAGEMENT & SETTINGS (v18.5.0 Centralized in Settings) ---
+    // =========================================================================
 
-    quickSwitchUser(userId) {
-        const team = Users.getAll();
-        const user = team.find(u => u.id === userId);
-        if (user) {
-            Users.setActive(user);
-            this.currentUser = user;
-            this.userName = user.name;
-            this.userRole = user.role;
-            this.user = { uid: user.id, displayName: user.name, role: user.role };
-            if (UI.currentView === 'audit') this.renderAuditView();
-            if (UI.currentView === 'dashboard') this.renderDashboard();
-        }
-    },
-
-    openAddUserQuickModal() {
-        UI.showModal(`
-            <div class="modal-header">
-                <h2><i class='bx bx-user-plus' style="color:var(--primary);"></i> إضافة صيدلي / مستخدم جديد</h2>
-            </div>
-            <form onsubmit="event.preventDefault(); window.App.saveNewUserFromQuickModal();">
-                <div class="form-group mb-12">
-                    <label class="form-label">اسم الصيدلي / العضو:</label>
-                    <input type="text" id="quick-new-user-name" class="form-input" placeholder="مثال: د. مروان" required autofocus>
-                </div>
-                <div class="form-group mb-12">
-                    <label class="form-label">المسمى الوظيفي / القسم:</label>
-                    <input type="text" id="quick-new-user-title" class="form-input" placeholder="مثال: صيدلي مستودع / صيدلي استقبال" value="صيدلي ميداني">
-                </div>
-                <div class="form-group mb-15">
-                    <label class="form-label">الصلاحيات في النظام:</label>
-                    <select id="quick-new-user-role" class="form-select">
-                        <option value="staff" selected>صيدلي عادي (تسجيل عد وجرد)</option>
-                        <option value="admin">مدير مسؤول (اعتماد الجرد، إنشاء جرد جماعي، تعديل الأقسام)</option>
-                    </select>
-                </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn-primary">💾 إضافة وتعيين كقائم بالعد الآن</button>
-                    <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
-                </div>
-            </form>
-        `);
-    },
-
-    saveNewUserFromQuickModal() {
-        const nameEl = document.getElementById('quick-new-user-name');
-        const titleEl = document.getElementById('quick-new-user-title');
-        const roleEl = document.getElementById('quick-new-user-role');
-        if (!nameEl || !nameEl.value.trim()) return;
-
-        const newUser = Users.addUser({
-            name: nameEl.value.trim(),
-            title: titleEl?.value.trim() || '',
-            role: roleEl?.value || 'staff'
-        });
-
-        if (newUser) {
-            Users.setActive(newUser);
-            this.currentUser = newUser;
-            this.userName = newUser.name;
-            this.userRole = newUser.role;
-            this.user = { uid: newUser.id, displayName: newUser.name, role: newUser.role };
-            UI.closeModal();
-            this.renderAuditView();
-        }
-    },
-
-    getActiveUserName() {
-        return (typeof Users !== 'undefined' && Users.getActive()) ? Users.getActive().name : (this.userName || 'خالد');
-    },
-
-    openUserSwitcherModal(onSelectCallback) {
+    openUserSettingsManager() {
         const team = Users.getAll();
         const active = Users.getActive();
 
         UI.showModal(`
-            <div class="modal-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 12px;">
-                <h2 style="font-size:16px; margin:0;"><i class='bx bx-user-check' style="color:var(--primary);"></i> اختيار الصيدلي القائم بالعد</h2>
+            <div class="modal-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 16px; display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <h2 style="font-size:18px; margin:0; display:flex; align-items:center; gap:8px;">
+                        <i class='bx bx-group' style="color:var(--primary);"></i> إدارة فريق العمل والمستخدمين
+                    </h2>
+                    <p class="text-muted small" style="margin:4px 0 0 0;">إدارة الحسابات، الصلاحيات، تعيين المستخدم النشط، وإضافة أو حذف الأعضاء</p>
+                </div>
+                <button type="button" class="btn-primary sm-btn" onclick="window.App.openAddUserModal()" style="font-size:12px; font-weight:bold; background:#10b981; display:flex; align-items:center; gap:4px;">
+                    <i class='bx bx-user-plus'></i> ➕ إضافة مستخدم جديد
+                </button>
             </div>
-            <p class="text-muted small mb-12">حدد من يقوم بعملية العد الآن لربط سجلات الجرد والدفعات باسمه في النظام:</p>
 
-            <div style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto; margin-bottom:15px; padding:2px;">
+            <!-- Active User Spotlight Banner -->
+            <div class="card p-12 mb-15" style="background: rgba(59,130,246,0.06); border: 1.5px solid var(--primary); border-radius: 12px; display:flex; align-items:center; justify-content:space-between;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div style="width:42px; height:42px; border-radius:10px; background:var(--primary); color:white; display:flex; align-items:center; justify-content:center; font-size:22px;">
+                        <i class='bx bx-user-check'></i>
+                    </div>
+                    <div>
+                        <span style="font-size:11px; font-weight:bold; color:var(--text-muted);">المستخدم النشط حالياً بالنظام:</span>
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <strong style="font-size:15px; color:var(--text-main);">${active.name}</strong>
+                            <span class="badge ${active.role === 'admin' ? 'bg-primary text-white' : 'bg-secondary'}" style="font-size:10px; padding:2px 6px; border-radius:4px;">
+                                ${active.role === 'admin' ? 'مدير 🛡️' : 'صيدلي 💊'}
+                            </span>
+                        </div>
+                        <small style="color:var(--text-muted); font-size:11px;">${active.title || 'مسؤول الصيدلية'}</small>
+                    </div>
+                </div>
+                <span class="badge" style="background:#10b981; color:white; font-size:11px; padding:4px 8px; border-radius:6px; font-weight:bold;">
+                    <i class='bx bx-check'></i> نشط الآن
+                </span>
+            </div>
+
+            <!-- Users List -->
+            <div style="display:flex; flex-direction:column; gap:8px; max-height:280px; overflow-y:auto; margin-bottom:16px; padding:2px;">
                 ${team.map(member => {
                     const isActive = member.id === active.id;
                     return `
-                        <div class="card p-10" onclick="window.App.selectUserFromModal('${member.id}')" style="display:flex; align-items:center; justify-content:space-between; cursor:pointer; border-radius:12px; background:${isActive ? 'rgba(59,130,246,0.08)' : 'var(--surface)'}; border:1.5px solid ${isActive ? 'var(--primary)' : 'var(--border-color)'}; transition:all 0.2s ease;">
+                        <div class="card p-10" style="display:flex; align-items:center; justify-content:space-between; border-radius:12px; background:var(--surface); border:1px solid ${isActive ? 'var(--primary)' : 'var(--border-color)'}; transition:all 0.2s ease;">
                             <div style="display:flex; align-items:center; gap:10px;">
                                 <div style="width:38px; height:38px; border-radius:10px; background:${member.color || 'var(--primary)'}22; color:${member.color || 'var(--primary)'}; display:flex; align-items:center; justify-content:center; font-size:18px;">
                                     <i class='bx ${member.icon || 'bx-user'}'></i>
@@ -3232,45 +3173,143 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                                     <small style="color:var(--text-muted); font-size:11px;">${member.title || 'عضو فريق'}</small>
                                 </div>
                             </div>
-                            <div>
-                                ${isActive ? `
-                                    <span style="font-size:12px; font-weight:bold; color:var(--primary); display:flex; align-items:center; gap:2px;">
-                                        <i class='bx bx-check-circle'></i> نشط
-                                    </span>
-                                ` : `
-                                    <button type="button" class="btn-ghost sm-btn" style="font-size:11px; padding:4px 8px;">اختيار</button>
-                                `}
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                ${!isActive ? `
+                                    <button type="button" class="btn-ghost sm-btn" onclick="window.App.setActiveUserFromSettings('${member.id}')" style="font-size:11px; padding:4px 8px;" title="تسجيل الدخول والتعيين كنشط">
+                                        <i class='bx bx-check'></i> تعيين
+                                    </button>
+                                ` : ''}
+                                <button type="button" class="icon-btn" onclick="window.App.openEditUserModal('${member.id}')" title="تعديل البيانات والصلاحيات" style="padding:5px;">
+                                    <i class='bx bx-edit-alt' style="font-size:16px;"></i>
+                                </button>
+                                <button type="button" class="icon-btn text-danger" onclick="window.App.deleteUserFromSettings('${member.id}')" title="حذف المستخدم" ${isActive ? 'disabled style="opacity:0.3; cursor:not-allowed; padding:5px;"' : 'style="padding:5px;"'}>
+                                    <i class='bx bx-trash' style="font-size:16px; color:${isActive ? 'var(--text-muted)' : 'var(--danger)'};"></i>
+                                </button>
                             </div>
                         </div>
                     `;
                 }).join('')}
             </div>
 
-            <!-- Add New Team Member Box -->
-            <div style="background:var(--bg-secondary); border-radius:12px; padding:12px; border:1px dashed var(--border-color); margin-bottom:12px;">
-                <strong style="font-size:12px; display:block; margin-bottom:8px; color:var(--text-main);"><i class='bx bx-user-plus'></i> إضافة عضو جديد لفريق العمل:</strong>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
-                    <input type="text" id="new-user-name" class="form-input" placeholder="اسم الصيدلي / العضو" style="font-size:12px;">
-                    <input type="text" id="new-user-title" class="form-input" placeholder="المسمى (مثلاً: صيدلي طوارئ)" style="font-size:12px;">
-                </div>
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <select id="new-user-role" class="form-select" style="font-size:11px; width:auto; height:32px;">
-                        <option value="staff">صلاحيات صيدلي (Staff)</option>
-                        <option value="admin">صلاحيات مدير (Admin)</option>
-                    </select>
-                    <button type="button" class="btn-primary sm-btn" onclick="window.App.addNewUserFromModal()">+ إضافة وتعيين</button>
-                </div>
-            </div>
-
             <div class="form-actions">
                 <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إغلاق</button>
             </div>
         `);
-
-        this._userModalCallback = onSelectCallback;
     },
 
-    selectUserFromModal(userId) {
+    openAddUserModal() {
+        UI.showModal(`
+            <div class="modal-header">
+                <h2><i class='bx bx-user-plus' style="color:var(--primary);"></i> إضافة مستخدم / صيدلي جديد</h2>
+            </div>
+            <form onsubmit="event.preventDefault(); window.App.saveNewUserFromSettings();">
+                <div class="form-group mb-12">
+                    <label class="form-label">الاسم الكامل:</label>
+                    <input type="text" id="setting-user-name" class="form-input" placeholder="مثال: د. حسام" required autofocus>
+                </div>
+                <div class="form-group mb-12">
+                    <label class="form-label">المسمى الوظيفي / التخصص:</label>
+                    <input type="text" id="setting-user-title" class="form-input" placeholder="مثال: صيدلي مستودع / صيدلي استقبال" value="صيدلي أول">
+                </div>
+                <div class="form-group mb-15">
+                    <label class="form-label">الصلاحيات في النظام:</label>
+                    <select id="setting-user-role" class="form-select">
+                        <option value="staff" selected>صيدلي (Staff - تسجيل عد وجرد)</option>
+                        <option value="admin">مدير مسؤول (Admin - كامل الصلاحيات والاعتماد)</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">💾 إضافة المستخدم</button>
+                    <button type="button" class="btn-ghost" onclick="window.App.openUserSettingsManager()">إلغاء والعودة</button>
+                </div>
+            </form>
+        `);
+    },
+
+    saveNewUserFromSettings() {
+        const nameEl = document.getElementById('setting-user-name');
+        const titleEl = document.getElementById('setting-user-title');
+        const roleEl = document.getElementById('setting-user-role');
+        if (!nameEl || !nameEl.value.trim()) return;
+
+        Users.addUser({
+            name: nameEl.value.trim(),
+            title: titleEl?.value.trim() || '',
+            role: roleEl?.value || 'staff'
+        });
+
+        this.openUserSettingsManager();
+    },
+
+    openEditUserModal(userId) {
+        const team = Users.getAll();
+        const user = team.find(u => u.id === userId);
+        if (!user) return;
+
+        UI.showModal(`
+            <div class="modal-header">
+                <h2><i class='bx bx-edit' style="color:var(--primary);"></i> تعديل بيانات المستخدم</h2>
+            </div>
+            <form onsubmit="event.preventDefault(); window.App.saveEditUserFromSettings('${user.id}');">
+                <div class="form-group mb-12">
+                    <label class="form-label">الاسم:</label>
+                    <input type="text" id="edit-user-name" class="form-input" value="${user.name}" required>
+                </div>
+                <div class="form-group mb-12">
+                    <label class="form-label">المسمى الوظيفي:</label>
+                    <input type="text" id="edit-user-title" class="form-input" value="${user.title || ''}">
+                </div>
+                <div class="form-group mb-15">
+                    <label class="form-label">الصلاحيات:</label>
+                    <select id="edit-user-role" class="form-select">
+                        <option value="staff" ${user.role !== 'admin' ? 'selected' : ''}>صيدلي (Staff)</option>
+                        <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>مدير مسؤول (Admin)</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">💾 حفظ التعديلات</button>
+                    <button type="button" class="btn-ghost" onclick="window.App.openUserSettingsManager()">إلغاء</button>
+                </div>
+            </form>
+        `);
+    },
+
+    saveEditUserFromSettings(userId) {
+        const nameEl = document.getElementById('edit-user-name');
+        const titleEl = document.getElementById('edit-user-title');
+        const roleEl = document.getElementById('edit-user-role');
+        if (!nameEl || !nameEl.value.trim()) return;
+
+        Users.updateUser(userId, {
+            name: nameEl.value.trim(),
+            title: titleEl?.value.trim() || '',
+            role: roleEl?.value || 'staff'
+        });
+
+        const active = Users.getActive();
+        if (active.id === userId) {
+            this.currentUser = active;
+            this.userName = active.name;
+            this.userRole = active.role;
+            this.user = { uid: active.id, displayName: active.name, role: active.role };
+        }
+
+        this.openUserSettingsManager();
+    },
+
+    deleteUserFromSettings(userId) {
+        const team = Users.getAll();
+        const user = team.find(u => u.id === userId);
+        if (!user) return;
+
+        if (!confirm(`هل أنت متأكد من حذف المستخدم "${user.name}" من النظام؟`)) return;
+        const res = Users.deleteUser(userId);
+        if (res) {
+            this.openUserSettingsManager();
+        }
+    },
+
+    setActiveUserFromSettings(userId) {
         const team = Users.getAll();
         const user = team.find(u => u.id === userId);
         if (user) {
@@ -3279,44 +3318,17 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             this.userName = user.name;
             this.userRole = user.role;
             this.user = { uid: user.id, displayName: user.name, role: user.role };
-            UI.closeModal();
-            if (typeof this._userModalCallback === 'function') {
-                this._userModalCallback(user);
-                this._userModalCallback = null;
-            } else {
-                if (UI.currentView === 'audit') this.renderAuditView();
-                if (UI.currentView === 'dashboard') this.renderDashboard();
-            }
+            if (UI.currentView === 'dashboard') this.renderDashboard();
+            this.openUserSettingsManager();
         }
     },
 
-    addNewUserFromModal() {
-        const nameEl = document.getElementById('new-user-name');
-        const titleEl = document.getElementById('new-user-title');
-        const roleEl = document.getElementById('new-user-role');
-        if (!nameEl || !nameEl.value.trim()) {
-            return UI.showToast('يرجى كتابة اسم العضو', 'warning');
-        }
-        const newUser = Users.addUser({
-            name: nameEl.value.trim(),
-            title: titleEl?.value.trim() || '',
-            role: roleEl?.value || 'staff'
-        });
-        if (newUser) {
-            Users.setActive(newUser);
-            this.currentUser = newUser;
-            this.userName = newUser.name;
-            this.userRole = newUser.role;
-            this.user = { uid: newUser.id, displayName: newUser.name, role: newUser.role };
-            UI.closeModal();
-            if (typeof this._userModalCallback === 'function') {
-                this._userModalCallback(newUser);
-                this._userModalCallback = null;
-            } else {
-                if (UI.currentView === 'audit') this.renderAuditView();
-                if (UI.currentView === 'dashboard') this.renderDashboard();
-            }
-        }
+    openUserSwitcherModal() {
+        this.openUserSettingsManager();
+    },
+
+    getActiveUserName() {
+        return (typeof Users !== 'undefined' && Users.getActive()) ? Users.getActive().name : (this.userName || 'خالد');
     },
 
     async joinGroupAuditSession(sessionId) {
@@ -3392,12 +3404,11 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             </div>
 
-            <!-- Active User & Team Banner -->
+            <!-- Active User & Progress Banner -->
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
-                <div class="audit-active-user-badge" onclick="window.App.openUserSwitcherModal()" title="انقر لتبديل الصيدلي القائم بالعد">
-                    <i class='bx bx-user-check' style="color:var(--primary); font-size:14px;"></i>
-                    <span>الصيدلي: <strong style="color:var(--text-main);">${activeUser.name}</strong></span>
-                    <i class='bx bx-chevron-down' style="color:var(--text-muted); font-size:12px;"></i>
+                <div style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-muted);">
+                    <i class='bx bx-user-check' style="color:var(--primary); font-size:15px;"></i>
+                    <span>الصيدلي القائم بالعد: <strong style="color:var(--text-main);">${activeUser.name}</strong></span>
                 </div>
 
                 <div style="font-size:11px; font-weight:700; color:var(--text-muted); display:flex; align-items:center; gap:8px;">
@@ -3697,9 +3708,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             <!-- Responsible Pharmacist Ribbon in Modal -->
             <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:var(--bg-secondary); border-radius:8px; margin-bottom:10px; font-size:11px;">
                 <span>👤 الصيدلي المسؤول عن العد: <strong style="color:var(--text-main);">${Users.getActive().name}</strong></span>
-                <button type="button" class="btn-ghost sm-btn" onclick="window.App.openUserSwitcherModal(() => window.App.openCountModal('${medicineId}'))" style="font-size:10px; padding:2px 6px;">
-                    تبديل ⇄
-                </button>
+                <span class="badge ${Users.getActive().role === 'admin' ? 'bg-primary text-white' : 'bg-secondary'}" style="font-size:10px; padding:2px 6px; border-radius:4px;">${Users.getActive().role === 'admin' ? 'مدير 🛡️' : 'صيدلي 💊'}</span>
             </div>
             
             <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; padding:10px; background:var(--bg-secondary); border-radius:12px;">
@@ -4238,7 +4247,7 @@ App.clearNotifications = function() {
 };
 
 App.openProfile = function() {
-    this.openUserSwitcherModal();
+    this.openUserSettingsManager();
 };
 
 App.showLowStock = function() {

@@ -93,6 +93,27 @@ export const Users = {
         return newUser;
     },
 
+    updateUser(id, { name, title, role }) {
+        let team = this.getAll();
+        const idx = team.findIndex(u => u.id === id);
+        if (idx === -1) return null;
+        if (name && name.trim()) team[idx].name = name.trim();
+        if (title !== undefined) team[idx].title = title.trim();
+        if (role) {
+            team[idx].role = role;
+            team[idx].icon = role === 'admin' ? 'bx-shield-quarter' : 'bx-user';
+            team[idx].color = role === 'admin' ? '#8b5cf6' : '#10b981';
+        }
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(team));
+        
+        const active = this.getActive();
+        if (active.id === id) {
+            this.setActive(team[idx]);
+        }
+        UI.showToast(`تم تحديث بيانات ${team[idx].name} بنجاح ✨`, 'success');
+        return team[idx];
+    },
+
     deleteUser(id) {
         const active = this.getActive();
         if (active.id === id) {
