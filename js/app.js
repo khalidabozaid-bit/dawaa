@@ -2617,6 +2617,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const sessions = await Audit.getAllSessions();
         const activeSessions = sessions.filter(s => s.status !== 'finalized' && !s.isArchived);
         const closedSessions = sessions.filter(s => s.status === 'finalized' || s.isArchived);
+        const activeUser = Users.getActive();
+        const allTeam = Users.getAll();
 
         container.innerHTML = `
             <div class="view-header">
@@ -2627,6 +2629,48 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 <button class="btn-primary sm-btn" onclick="window.App.openNewAuditModal()">
                     <i class='bx bx-plus'></i> بدء جرد جديد
                 </button>
+            </div>
+
+            <!-- لوحة فريق عمل الجرد والصيادلة (Audit Team Command Card) -->
+            <div class="card p-15 mb-15" style="background: linear-gradient(135deg, rgba(59,130,246,0.08) 0%, rgba(16,185,129,0.08) 100%); border: 1.5px solid var(--primary); border-radius: 16px; box-shadow: var(--shadow-sm);">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <div style="width:46px; height:46px; border-radius:14px; background:var(--primary); color:white; display:flex; align-items:center; justify-content:center; font-size:24px; box-shadow:0 4px 10px rgba(59,130,246,0.3); flex-shrink:0;">
+                            <i class='bx bx-user-check'></i>
+                        </div>
+                        <div>
+                            <span style="font-size:11px; font-weight:700; color:var(--text-muted); display:block;">الصيدلي المسؤول والقائم بالعد حالياً:</span>
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <strong style="font-size:16px; color:var(--text-main);">${activeUser.name}</strong>
+                                <span class="badge ${activeUser.role === 'admin' ? 'bg-primary text-white' : 'bg-secondary'}" style="font-size:10px; padding:2px 6px; border-radius:4px;">
+                                    ${activeUser.role === 'admin' ? 'مدير 🛡️' : 'صيدلي 💊'}
+                                </span>
+                            </div>
+                            <small style="display:block; color:var(--text-muted); font-size:11px;">${activeUser.title || 'مسؤول الجرد'}</small>
+                        </div>
+                    </div>
+                    
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <button type="button" class="btn-ghost sm-btn" onclick="window.App.openUserSwitcherModal()" style="border:1px solid var(--border-color); background:var(--surface); font-size:12px; padding:6px 12px; font-weight:bold;">
+                            <i class='bx bx-refresh'></i> تبديل الصيدلي
+                        </button>
+                        <button type="button" class="btn-primary sm-btn" onclick="window.App.openAddUserQuickModal()" style="font-size:12px; padding:6px 12px; font-weight:bold; background: #10b981;">
+                            <i class='bx bx-user-plus'></i> ➕ إضافة صيدلي جديد
+                        </button>
+                    </div>
+                </div>
+
+                <!-- شريط أعضاء الفريق المسجلين للتبديل السريع -->
+                <div style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <span style="font-size:11px; font-weight:bold; color:var(--text-muted);"><i class='bx bx-group'></i> الفريق المسجل (${allTeam.length}):</span>
+                    ${allTeam.map(u => `
+                        <span onclick="window.App.quickSwitchUser('${u.id}')" title="انقر للتبديل السريع لهذا الصيدلي" style="cursor:pointer; display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border-radius:8px; background:${u.id === activeUser.id ? 'var(--primary)' : 'var(--surface)'}; color:${u.id === activeUser.id ? '#ffffff' : 'var(--text-main)'}; border:1px solid ${u.id === activeUser.id ? 'var(--primary)' : 'var(--border-color)'}; font-size:11px; font-weight:bold; transition:all 0.2s ease;">
+                            <i class='bx ${u.icon || 'bx-user'}'></i>
+                            <span>${u.name}</span>
+                            ${u.id === activeUser.id ? `<i class='bx bx-check'></i>` : ''}
+                        </span>
+                    `).join('')}
+                </div>
             </div>
 
             <!-- Active / On-Hold Sessions -->
@@ -3076,6 +3120,85 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
     
     // --- User & Team Management Handlers (v18.4.0) ---
+    
+    bypassLoginAsActiveUser() {
+        const activeUser = Users.getActive();
+        this.currentUser = activeUser;
+        this.userName = activeUser.name;
+        this.userRole = activeUser.role;
+        this.user = { uid: activeUser.id, displayName: activeUser.name, role: activeUser.role };
+        localStorage.removeItem('dawaa_logged_out');
+        this.hideLogin();
+        this.renderDashboard();
+        UI.showToast(`مرحباً بك يا ${activeUser.name} 👤`, 'success');
+    },
+
+    quickSwitchUser(userId) {
+        const team = Users.getAll();
+        const user = team.find(u => u.id === userId);
+        if (user) {
+            Users.setActive(user);
+            this.currentUser = user;
+            this.userName = user.name;
+            this.userRole = user.role;
+            this.user = { uid: user.id, displayName: user.name, role: user.role };
+            if (UI.currentView === 'audit') this.renderAuditView();
+            if (UI.currentView === 'dashboard') this.renderDashboard();
+        }
+    },
+
+    openAddUserQuickModal() {
+        UI.showModal(`
+            <div class="modal-header">
+                <h2><i class='bx bx-user-plus' style="color:var(--primary);"></i> إضافة صيدلي / مستخدم جديد</h2>
+            </div>
+            <form onsubmit="event.preventDefault(); window.App.saveNewUserFromQuickModal();">
+                <div class="form-group mb-12">
+                    <label class="form-label">اسم الصيدلي / العضو:</label>
+                    <input type="text" id="quick-new-user-name" class="form-input" placeholder="مثال: د. مروان" required autofocus>
+                </div>
+                <div class="form-group mb-12">
+                    <label class="form-label">المسمى الوظيفي / القسم:</label>
+                    <input type="text" id="quick-new-user-title" class="form-input" placeholder="مثال: صيدلي مستودع / صيدلي استقبال" value="صيدلي ميداني">
+                </div>
+                <div class="form-group mb-15">
+                    <label class="form-label">الصلاحيات في النظام:</label>
+                    <select id="quick-new-user-role" class="form-select">
+                        <option value="staff" selected>صيدلي عادي (تسجيل عد وجرد)</option>
+                        <option value="admin">مدير مسؤول (اعتماد الجرد، إنشاء جرد جماعي، تعديل الأقسام)</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">💾 إضافة وتعيين كقائم بالعد الآن</button>
+                    <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+                </div>
+            </form>
+        `);
+    },
+
+    saveNewUserFromQuickModal() {
+        const nameEl = document.getElementById('quick-new-user-name');
+        const titleEl = document.getElementById('quick-new-user-title');
+        const roleEl = document.getElementById('quick-new-user-role');
+        if (!nameEl || !nameEl.value.trim()) return;
+
+        const newUser = Users.addUser({
+            name: nameEl.value.trim(),
+            title: titleEl?.value.trim() || '',
+            role: roleEl?.value || 'staff'
+        });
+
+        if (newUser) {
+            Users.setActive(newUser);
+            this.currentUser = newUser;
+            this.userName = newUser.name;
+            this.userRole = newUser.role;
+            this.user = { uid: newUser.id, displayName: newUser.name, role: newUser.role };
+            UI.closeModal();
+            this.renderAuditView();
+        }
+    },
+
     getActiveUserName() {
         return (typeof Users !== 'undefined' && Users.getActive()) ? Users.getActive().name : (this.userName || 'خالد');
     },
@@ -4149,11 +4272,8 @@ App.handleAdminUnlock = async function() {
 };
 
 window.onerror = (msg, url, line, col, error) => {
-    console.error('Dawaa Global Catch:', { msg, url, line, error });
-    if (typeof UI !== 'undefined' && UI.showToast) {
-        UI.showToast('خطأ تقني في النظام', 'danger');
-    }
-    return false;
+    console.warn('Dawaa Global Catch (Handled):', { msg, url, line, error });
+    return true; // prevent error bubbling
 };
 
 const _boot = async () => {

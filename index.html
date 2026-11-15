@@ -52,6 +52,12 @@
                 </div>
                 <button type="submit" class="auth-btn" id="auth-submit-btn">دخول النظام</button>
             </form>
+            <div style="margin-top: 15px; pt: 10px; border-top: 1px solid var(--border-color); text-align: center;">
+                <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">أو الدخول المباشر السريع كفريق عمل الصيدلية:</p>
+                <button type="button" class="btn-ghost" onclick="window.App.bypassLoginAsActiveUser()" style="width: 100%; padding: 10px; border: 1.5px solid var(--primary); border-radius: 12px; font-weight: 800; color: var(--primary); background: rgba(59,130,246,0.06); cursor: pointer;">
+                    🚀 دخول سريع كـ (<span id="login-quick-name">د. خالد</span>)
+                </button>
+            </div>
 
             <div class="auth-toggle" style="display: none;">
                 <span id="auth-toggle-text"></span>

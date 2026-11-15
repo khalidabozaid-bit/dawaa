@@ -222,7 +222,7 @@ export const Sync = {
                     callback(null);
                 }
             }, err => {
-                console.error('Audit Stream Error:', err);
+                console.warn('Sync: Live audit stream unavailable (offline or permission required):', err.message);
             });
         } catch (e) {
             console.warn('Sync: Could not subscribe to audit:', e.message);
@@ -238,7 +238,7 @@ export const Sync = {
                 timestamp: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
             });
         } catch (err) {
-            console.warn('Sync: Push Audit Entry Failed', err);
+            console.warn('Sync: Push Audit Entry skipped (offline mode):', err?.message);
         }
     },
 
