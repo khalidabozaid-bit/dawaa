@@ -2,6 +2,7 @@ import { DB } from './core/db.js';
 import { UI } from './core/ui.js';
 import { Inventory } from './features/inventory.js';
 import { Categories } from './features/categories.js';
+import { Locations } from './features/locations.js';
 import { Audit } from './features/audit.js';
 import { Exporter } from './features/export.js';
 import { Utils } from './core/utils.js';
@@ -12,6 +13,8 @@ import { Recovery } from './recovery.js';
 
 // Immediate Global Bindings to prevent undefined calls during boot
 window.UI = UI;
+window.Locations = Locations;
+window.Audit = Audit;
 window.DB = DB;
 window.db = db;
 window.auth = auth;
@@ -23,7 +26,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '17.2.8', // Universal Sovereign v17.2.8
+    VERSION: '18.0.1', // Universal Sovereign v18.0.0
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -122,6 +125,8 @@ const App = {
 
             console.log("BOOT: [STEP 5] Data Seeding");
             await Categories.seedInitialData();
+            await Locations.init();
+            await Audit.init();
 
             console.log("BOOT: [STEP 6] UI/TaskManager Init");
             UI.init();
@@ -2040,6 +2045,819 @@ App.handleLogout = async function() {
     }
 };
 
+Object.assign(App, {
+// --- v18.0.0: Hierarchical Audit Engine & Warehouse Hub ---
+auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
+    selectedAuditSessionId: null,
+    selectedAuditLocationId: null,
+    selectedAuditCategoryId: null,
+    warehouseSegment: 'medicines', // 'medicines' | 'categories' | 'locations'
+
+    // --- Warehouse Segment Navigation ---
+    switchWarehouseSegment(segment) {
+        this.warehouseSegment = segment;
+        document.querySelectorAll('.segment-btn').forEach(btn => btn.classList.remove('active'));
+        
+        const btnMap = {
+            medicines: 'seg-btn-meds',
+            categories: 'seg-btn-cats',
+            locations: 'seg-btn-locs'
+        };
+        const activeBtn = document.getElementById(btnMap[segment]);
+        if (activeBtn) activeBtn.classList.add('active');
+
+        const secMeds = document.getElementById('wh-meds-section');
+        const secCats = document.getElementById('wh-cats-section');
+        const secLocs = document.getElementById('wh-locs-section');
+
+        if (secMeds) secMeds.style.display = segment === 'medicines' ? 'block' : 'none';
+        if (secCats) secCats.style.display = segment === 'categories' ? 'block' : 'none';
+        if (secLocs) secLocs.style.display = segment === 'locations' ? 'block' : 'none';
+
+        if (segment === 'medicines') {
+            this.renderInventory();
+        } else if (segment === 'categories') {
+            this.renderWarehouseCategories();
+        } else if (segment === 'locations') {
+            this.renderWarehouseLocations();
+        }
+    },
+
+    async renderWarehouseCategories() {
+        const container = document.getElementById('wh-categories-grid');
+        if (!container) return;
+
+        try {
+            const cats = await Categories.getAllSorted();
+            const allMeds = (await DB.getAll('medicineMaster')) || [];
+
+            container.innerHTML = cats.map(c => {
+                const count = allMeds.filter(m => m.categoryId === c.id).length;
+                return `
+                    <div class="square-card" onclick="window.App.openEditCategoryModal('${c.id}')" title="تعديل التصنيف">
+                        <i class='bx ${c.icon || 'bx-category'} square-icon' style="color: ${c.color || 'var(--primary)'}"></i>
+                        <h3>${c.nameAR}</h3>
+                        <span class="square-meta">${count} صنف دواء</span>
+                    </div>
+                `;
+            }).join('');
+        } catch (err) {
+            console.error('Error rendering warehouse categories:', err);
+        }
+    },
+
+    async renderWarehouseLocations() {
+        const container = document.getElementById('wh-locations-grid');
+        if (!container) return;
+
+        try {
+            const locs = await Locations.getAll();
+            const cats = await Categories.getAllSorted();
+            const catMap = new Map(cats.map(c => [c.id, c.nameAR]));
+
+            container.innerHTML = locs.map(loc => {
+                const isAll = !loc.allowedCategories || loc.allowedCategories.includes('all');
+                const catNames = isAll 
+                    ? 'كافة التصنيفات' 
+                    : loc.allowedCategories.map(cid => catMap.get(cid) || cid).slice(0, 2).join('، ') + (loc.allowedCategories.length > 2 ? '...' : '');
+
+                return `
+                    <div class="square-card" onclick="window.App.openEditLocationModal('${loc.id}')" title="تعديل مكان التخزين">
+                        <i class='bx ${loc.icon || 'bx-map-pin'} square-icon' style="color: ${loc.color || 'var(--primary)'}"></i>
+                        <h3>${loc.nameAR}</h3>
+                        <span class="square-meta" style="font-size: 10px; color: var(--primary);">${catNames}</span>
+                        <small style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">${loc.description || ''}</small>
+                    </div>
+                `;
+            }).join('');
+        } catch (err) {
+            console.error('Error rendering warehouse locations:', err);
+        }
+    },
+
+    // --- Locations CRUD Modals ---
+    async openAddLocationModal() {
+        const cats = await Categories.getAllSorted();
+        UI.showModal(`
+            <div class="modal-header"><h2>إضافة مكان تخزين جديد</h2></div>
+            <form onsubmit="event.preventDefault(); window.App.saveLocationForm();">
+                <div class="form-group mb-12">
+                    <label class="form-label">اسم المكان (بالعربية):</label>
+                    <input type="text" id="loc-name-ar" class="form-input" placeholder="مثال: ثلاجة 2، دولاب التخدير..." required>
+                </div>
+                <div class="form-group mb-12">
+                    <label class="form-label">الاسم بالإنجليزية (اختياري):</label>
+                    <input type="text" id="loc-name-en" class="form-input" placeholder="e.g. Fridge 2">
+                </div>
+                <div class="form-group mb-12">
+                    <label class="form-label">أيقونة المكان (Boxicons):</label>
+                    <select id="loc-icon" class="form-select">
+                        <option value="bx-clinic">🏥 صيدلية (bx-clinic)</option>
+                        <option value="bx-cabinet">🚪 دولاب (bx-cabinet)</option>
+                        <option value="bx-fridge">❄️ ثلاجة (bx-fridge)</option>
+                        <option value="bx-first-aid">🩹 طوارئ (bx-first-aid)</option>
+                        <option value="bx-capsule">💊 كبسولة / استقبال (bx-capsule)</option>
+                        <option value="bx-ambulance">🚑 إسعاف (bx-ambulance)</option>
+                        <option value="bx-package">📦 صندوق / مخزن (bx-package)</option>
+                    </select>
+                </div>
+                <div class="form-group mb-12">
+                    <label class="form-label">التصنيفات المسموح بتواجدها في هذا المكان:</label>
+                    <div style="max-height: 140px; overflow-y: auto; background: var(--bg-secondary); padding: 8px; border-radius: 8px;">
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px; font-weight:bold;">
+                            <input type="checkbox" id="loc-cat-all" onchange="document.querySelectorAll('.loc-cat-item').forEach(cb => cb.checked = this.checked)">
+                            <span>تحديد الكل (كافة الأدوية)</span>
+                        </label>
+                        ${cats.map(c => `
+                            <label style="display:flex; align-items:center; gap:8px; margin-bottom:4px; font-size:12px;">
+                                <input type="checkbox" class="loc-cat-item" value="${c.id}">
+                                <span>${c.nameAR}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="form-group mb-15">
+                    <label class="form-label">وصف المكان:</label>
+                    <input type="text" id="loc-desc" class="form-input" placeholder="ملاحظات تخزينية...">
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">حفظ المكان</button>
+                    <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+                </div>
+            </form>
+        `);
+    },
+
+    async openEditLocationModal(id) {
+        const loc = await Locations.get(id);
+        if (!loc) return;
+        const cats = await Categories.getAllSorted();
+        const allowed = new Set(loc.allowedCategories || ['all']);
+
+        UI.showModal(`
+            <div class="modal-header"><h2>تعديل مكان التخزين: ${loc.nameAR}</h2></div>
+            <form onsubmit="event.preventDefault(); window.App.saveLocationForm('${id}');">
+                <div class="form-group mb-12">
+                    <label class="form-label">اسم المكان:</label>
+                    <input type="text" id="loc-name-ar" class="form-input" value="${loc.nameAR}" required>
+                </div>
+                <div class="form-group mb-12">
+                    <label class="form-label">أيقونة المكان:</label>
+                    <select id="loc-icon" class="form-select">
+                        <option value="bx-clinic" ${loc.icon === 'bx-clinic' ? 'selected' : ''}>🏥 صيدلية</option>
+                        <option value="bx-cabinet" ${loc.icon === 'bx-cabinet' ? 'selected' : ''}>🚪 دولاب</option>
+                        <option value="bx-fridge" ${loc.icon === 'bx-fridge' ? 'selected' : ''}>❄️ ثلاجة</option>
+                        <option value="bx-first-aid" ${loc.icon === 'bx-first-aid' ? 'selected' : ''}>🩹 طوارئ</option>
+                        <option value="bx-capsule" ${loc.icon === 'bx-capsule' ? 'selected' : ''}>💊 استقبال</option>
+                        <option value="bx-ambulance" ${loc.icon === 'bx-ambulance' ? 'selected' : ''}>🚑 إسعاف</option>
+                        <option value="bx-package" ${loc.icon === 'bx-package' ? 'selected' : ''}>📦 مخزن</option>
+                    </select>
+                </div>
+                <div class="form-group mb-12">
+                    <label class="form-label">التصنيفات المسموح بتواجدها في هذا المكان:</label>
+                    <div style="max-height: 140px; overflow-y: auto; background: var(--bg-secondary); padding: 8px; border-radius: 8px;">
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px; font-weight:bold;">
+                            <input type="checkbox" id="loc-cat-all" ${allowed.has('all') ? 'checked' : ''} onchange="document.querySelectorAll('.loc-cat-item').forEach(cb => cb.checked = this.checked)">
+                            <span>كافة الأدوية (بدون قيود)</span>
+                        </label>
+                        ${cats.map(c => `
+                            <label style="display:flex; align-items:center; gap:8px; margin-bottom:4px; font-size:12px;">
+                                <input type="checkbox" class="loc-cat-item" value="${c.id}" ${allowed.has(c.id) || allowed.has('all') ? 'checked' : ''}>
+                                <span>${c.nameAR}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="form-group mb-15">
+                    <label class="form-label">الوصف:</label>
+                    <input type="text" id="loc-desc" class="form-input" value="${loc.description || ''}">
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">حفظ التعديلات</button>
+                    <button type="button" class="btn-ghost" style="color:var(--danger)" onclick="window.App.deleteLocationConfirm('${id}')">حذف المكان</button>
+                    <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+                </div>
+            </form>
+        `);
+    },
+
+    async saveLocationForm(id = null) {
+        const isAll = document.getElementById('loc-cat-all')?.checked;
+        let selectedCats = [];
+        if (isAll) {
+            selectedCats = ['all'];
+        } else {
+            document.querySelectorAll('.loc-cat-item:checked').forEach(cb => selectedCats.push(cb.value));
+            if (selectedCats.length === 0) selectedCats = ['all'];
+        }
+
+        const data = {
+            id: id || undefined,
+            nameAR: document.getElementById('loc-name-ar').value.trim(),
+            nameEN: document.getElementById('loc-name-en')?.value.trim() || '',
+            icon: document.getElementById('loc-icon').value,
+            allowedCategories: selectedCats,
+            description: document.getElementById('loc-desc').value.trim()
+        };
+
+        await Locations.save(data);
+        UI.closeModal();
+        UI.showToast('تم حفظ مكان التخزين بنجاح ✨', 'success');
+        this.renderWarehouseLocations();
+    },
+
+    async deleteLocationConfirm(id) {
+        if (!confirm('هل أنت متأكد من حذف هذا المكان من المستودع؟')) return;
+        await Locations.delete(id);
+        UI.closeModal();
+        UI.showToast('تم حذف المكان', 'info');
+        this.renderWarehouseLocations();
+    },
+
+    // --- Categories CRUD Modals ---
+    openAddCategoryModal() {
+        UI.showModal(`
+            <div class="modal-header"><h2>إضافة تصنيف علاجي جديد</h2></div>
+            <form onsubmit="event.preventDefault(); window.App.saveCategoryForm();">
+                <div class="form-group mb-12">
+                    <label class="form-label">اسم التصنيف (بالعربية):</label>
+                    <input type="text" id="cat-name-ar" class="form-input" placeholder="مثال: أدوية عيون، قطرات..." required>
+                </div>
+                <div class="form-group mb-12">
+                    <label class="form-label">أيقونة التصنيف:</label>
+                    <select id="cat-icon" class="form-select">
+                        <option value="bx-capsule">💊 كبسولة</option>
+                        <option value="bx-plus-medical">🩺 طبي / عام</option>
+                        <option value="bx-injection">💉 حقن</option>
+                        <option value="bx-wind">🌬️ جهاز تنفسي</option>
+                        <option value="bx-droplet">💧 قطرات / سوائل</option>
+                        <option value="bx-heart">❤️ قلب وأوعية</option>
+                        <option value="bx-band-aid">🩹 إسعافات</option>
+                    </select>
+                </div>
+                <div class="form-group mb-15">
+                    <label class="form-label">لون التمييز:</label>
+                    <input type="color" id="cat-color" class="form-input" value="#3b82f6" style="height:40px; padding:2px;">
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">حفظ التصنيف</button>
+                    <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+                </div>
+            </form>
+        `);
+    },
+
+    async openEditCategoryModal(id) {
+        const cat = await Categories.getInfo(id);
+        UI.showModal(`
+            <div class="modal-header"><h2>تعديل التصنيف: ${cat.nameAR}</h2></div>
+            <form onsubmit="event.preventDefault(); window.App.saveCategoryForm('${id}');">
+                <div class="form-group mb-12">
+                    <label class="form-label">اسم التصنيف:</label>
+                    <input type="text" id="cat-name-ar" class="form-input" value="${cat.nameAR}" required>
+                </div>
+                <div class="form-group mb-12">
+                    <label class="form-label">الأيقونة:</label>
+                    <select id="cat-icon" class="form-select">
+                        <option value="bx-capsule" ${cat.icon === 'bx-capsule' ? 'selected' : ''}>💊 كبسولة</option>
+                        <option value="bx-plus-medical" ${cat.icon === 'bx-plus-medical' ? 'selected' : ''}>🩺 طبي / عام</option>
+                        <option value="bx-injection" ${cat.icon === 'bx-injection' ? 'selected' : ''}>💉 حقن</option>
+                        <option value="bx-wind" ${cat.icon === 'bx-wind' ? 'selected' : ''}>🌬️ تنفسي</option>
+                        <option value="bx-droplet" ${cat.icon === 'bx-droplet' ? 'selected' : ''}>💧 قطرات</option>
+                    </select>
+                </div>
+                <div class="form-group mb-15">
+                    <label class="form-label">اللون:</label>
+                    <input type="color" id="cat-color" class="form-input" value="${cat.color || '#3b82f6'}" style="height:40px; padding:2px;">
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">حفظ التعديلات</button>
+                    <button type="button" class="btn-ghost" style="color:var(--danger)" onclick="window.App.deleteCategoryConfirm('${id}')">حذف التصنيف</button>
+                    <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+                </div>
+            </form>
+        `);
+    },
+
+    async saveCategoryForm(id = null) {
+        const data = {
+            id: id || Utils.generateId(),
+            nameAR: document.getElementById('cat-name-ar').value.trim(),
+            icon: document.getElementById('cat-icon').value,
+            color: document.getElementById('cat-color').value
+        };
+        await Categories.saveCategory(data);
+        UI.closeModal();
+        UI.showToast('تم حفظ التصنيف بنجاح ✨', 'success');
+        this.renderWarehouseCategories();
+        this.renderCategoryChips();
+    },
+
+    async deleteCategoryConfirm(id) {
+        if (!confirm('حذف هذا القسم؟ لن يتم حذف الأدوية التابعة له بل ستحتاج لإعادة تصنيفها.')) return;
+        await Categories.deleteCategory(id);
+        UI.closeModal();
+        UI.showToast('تم حذف التصنيف', 'info');
+        this.renderWarehouseCategories();
+        this.renderCategoryChips();
+    },
+
+    // =========================================================================
+    // --- HIERARCHICAL AUDIT WORKFLOW (v18.0.0 Dedicated Engine) ---
+    // =========================================================================
+
+    async renderAuditView() {
+        const container = document.getElementById('audit-main-container');
+        if (!container) return;
+
+        // If no active session or at root level: show sessions dashboard
+        if (!this.selectedAuditSessionId || this.auditLevel === 'sessions') {
+            await this.renderAuditSessionsLevel(container);
+            return;
+        }
+
+        const session = await Audit.getSession(this.selectedAuditSessionId);
+        if (!session) {
+            this.auditLevel = 'sessions';
+            await this.renderAuditSessionsLevel(container);
+            return;
+        }
+
+        // LEVEL 2: Locations Grid inside Session
+        if (this.auditLevel === 'locations') {
+            await this.renderAuditLocationsLevel(container, session);
+            return;
+        }
+
+        // LEVEL 3: Categories Grid inside Location
+        if (this.auditLevel === 'categories') {
+            await this.renderAuditCategoriesLevel(container, session);
+            return;
+        }
+
+        // LEVEL 4: Medicines Grid inside Category with Smart Sorting
+        if (this.auditLevel === 'medicines') {
+            await this.renderAuditMedicinesLevel(container, session);
+            return;
+        }
+    },
+
+    async renderAuditSessionsLevel(container) {
+        const sessions = await Audit.getAllSessions();
+        const activeSessions = sessions.filter(s => s.status !== 'finalized');
+        const closedSessions = sessions.filter(s => s.status === 'finalized');
+
+        container.innerHTML = `
+            <div class="view-header">
+                <div class="header-left">
+                    <h2>مركز عمليات الجرد الميداني</h2>
+                    <p class="text-muted small">جرد منظم وهرمي: جلسة ⬅️ أماكن ⬅️ تصنيفات ⬅️ أدوية</p>
+                </div>
+                <button class="btn-primary sm-btn" onclick="window.App.openNewAuditModal()">
+                    <i class='bx bx-plus'></i> بدء جرد جديد
+                </button>
+            </div>
+
+            <!-- Active / On-Hold Sessions -->
+            <div class="section-title mt-15 mb-10">
+                <h3><i class='bx bx-time-five'></i> الجلسات النشطة والمعلقة (${activeSessions.length})</h3>
+            </div>
+            
+            ${activeSessions.length === 0 ? `
+                <div class="empty-state mb-20" style="padding: 30px; text-align: center; background: var(--surface); border-radius: 16px; border: 1px dashed var(--border-color);">
+                    <i class='bx bx-clipboard' style="font-size: 40px; color: var(--primary); opacity: 0.6;"></i>
+                    <h3 style="margin: 10px 0 5px 0;">لا توجد جلسة جرد نشطة حالياً</h3>
+                    <p class="text-muted small mb-15">ابدأ جرد فردي سريع أو جرد جماعي للفريق وحدد الأماكن</p>
+                    <button class="btn-primary sm-btn" onclick="window.App.openNewAuditModal()">+ بدء جرد جديد الآن</button>
+                </div>
+            ` : `
+                <div class="sessions-list mb-25" style="display: flex; flex-direction: column; gap: 12px;">
+                    ${activeSessions.map(s => {
+                        const isHold = s.status === 'on_hold';
+                        const countKeys = Object.keys(s.counts || {}).length;
+                        return `
+                            <div class="card p-15" style="background: var(--surface); border-radius: 16px; border: 1px solid var(--border-color); box-shadow: var(--shadow-sm);">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="badge ${isHold ? 'bg-soft text-warning' : 'bg-primary text-white'}" style="padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: bold;">
+                                            ${isHold ? '⏸️ معلقة' : '🟢 جارية'}
+                                        </span>
+                                        <span class="badge ${s.type === 'group' ? 'bg-info' : 'bg-secondary'}" style="padding: 3px 8px; border-radius: 6px; font-size: 11px;">
+                                            ${s.type === 'group' ? '👥 جماعي' : '👤 فردي'}
+                                        </span>
+                                        <h3 style="margin: 0; font-size: 15px; font-weight: 800;">${s.name}</h3>
+                                    </div>
+                                    <span style="font-size: 11px; color: var(--text-muted);">${new Date(s.startedAt).toLocaleDateString('ar-EG')}</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                                    <span style="font-size: 12px; font-weight: 700; color: var(--text-muted);">
+                                        <i class='bx bx-check-circle' style="color: var(--success)"></i> تم إحصاء: ${countKeys} عنصر
+                                    </span>
+                                    <div style="display: flex; gap: 6px;">
+                                        <button class="btn-primary sm-btn" onclick="window.App.openAuditSession('${s.id}')">
+                                            ▶️ متابعة الجرد
+                                        </button>
+                                        ${!isHold ? `
+                                            <button class="btn-ghost sm-btn" onclick="window.App.holdAuditSession('${s.id}')" title="تعليق مؤقت">
+                                                ⏸️
+                                            </button>
+                                        ` : `
+                                            <button class="btn-ghost sm-btn" onclick="window.App.resumeAuditSession('${s.id}')" title="استئناف">
+                                                ▶️
+                                            </button>
+                                        `}
+                                        <button class="btn-ghost sm-btn text-danger" onclick="window.App.finalizeAuditSession('${s.id}')" title="إنهاء واعتماد">
+                                            🏁
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            `}
+
+            <!-- Closed / Completed Sessions Archive -->
+            ${closedSessions.length > 0 ? `
+                <div class="section-title mb-10">
+                    <h3><i class='bx bx-archive'></i> سجل الجلسات المكتملة (${closedSessions.length})</h3>
+                </div>
+                <div class="sessions-list" style="display: flex; flex-direction: column; gap: 8px;">
+                    ${closedSessions.slice(0, 5).map(s => `
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--bg-secondary); border-radius:12px; font-size:12px;">
+                            <div>
+                                <strong>${s.name}</strong>
+                                <span class="badge bg-soft" style="margin-right:6px;">مكتملة ✅</span>
+                            </div>
+                            <span class="text-muted">${new Date(s.finalizedAt || s.startedAt).toLocaleDateString('ar-EG')}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+        `;
+    },
+
+    async renderAuditLocationsLevel(container, session) {
+        const allLocs = await Locations.getAll();
+        const sessionLocIds = new Set(session.locationIds || []);
+        const activeLocations = allLocs.filter(l => sessionLocIds.has(l.id));
+
+        container.innerHTML = `
+            <!-- Breadcrumbs Bar -->
+            <div class="breadcrumbs-bar">
+                <button class="btn-crumb-back" onclick="window.App.auditBackToSessions()" title="العودة للجلسات">
+                    <i class='bx bx-right-arrow-alt'></i>
+                </button>
+                <div class="breadcrumbs-trail">
+                    <span onclick="window.App.auditBackToSessions()" style="cursor:pointer">الجلسات</span>
+                    <i class='bx bx-chevron-left'></i>
+                    <span class="active">${session.name}</span>
+                </div>
+            </div>
+
+            <!-- Session Control Bar -->
+            <div class="session-control-bar">
+                <div class="ctrl-info">
+                    <h3>${session.name}</h3>
+                    <span style="font-size: 11px; color: var(--text-muted);">
+                        الحالة: ${session.status === 'on_hold' ? '⏸️ معلقة' : '🟢 جارية'} | النمط: ${session.type === 'group' ? '👥 جماعي' : '👤 فردي'}
+                    </span>
+                </div>
+                <div class="ctrl-actions">
+                    ${session.status !== 'on_hold' ? `
+                        <button class="btn-ghost sm-btn" onclick="window.App.holdAuditSession('${session.id}')">
+                            <i class='bx bx-pause'></i> تعليق
+                        </button>
+                    ` : `
+                        <button class="btn-ghost sm-btn" onclick="window.App.resumeAuditSession('${session.id}')">
+                            <i class='bx bx-play'></i> استئناف
+                        </button>
+                    `}
+                    <button class="btn-primary sm-btn" onclick="window.App.finalizeAuditSession('${session.id}')">
+                        <i class='bx bx-check'></i> إنهاء واعتماد
+                    </button>
+                </div>
+            </div>
+
+            <div class="section-title mb-12">
+                <h3><i class='bx bx-map-pin'></i> اختر المكان لبدء الجرد الميداني:</h3>
+            </div>
+
+            <!-- Square Locations Grid -->
+            <div class="audit-square-grid">
+                ${await Promise.all(activeLocations.map(async (loc) => {
+                    const stats = await Audit.getLocationStats(session.id, loc.id);
+                    return `
+                        <div class="square-card" onclick="window.App.openAuditLocation('${loc.id}')">
+                            <i class='bx ${loc.icon || 'bx-map-pin'} square-icon' style="color: ${loc.color || 'var(--primary)'}"></i>
+                            <h3>${loc.nameAR}</h3>
+                            <span class="square-meta">${stats.counted} / ${stats.total} تم جردها</span>
+                            <div style="width: 80%; height: 4px; background: var(--border-color); border-radius: 2px; margin-top: 8px; overflow: hidden;">
+                                <div style="width: ${stats.progress}%; height: 100%; background: #10b981; border-radius: 2px;"></div>
+                            </div>
+                        </div>
+                    `;
+                })).then(cards => cards.join(''))}
+            </div>
+        `;
+    },
+
+    async renderAuditCategoriesLevel(container, session) {
+        const loc = await Locations.get(this.selectedAuditLocationId);
+        if (!loc) return this.auditBackToLocations();
+
+        const categories = await Locations.getCategoriesForLocation(loc.id);
+
+        container.innerHTML = `
+            <!-- Breadcrumbs Bar -->
+            <div class="breadcrumbs-bar">
+                <button class="btn-crumb-back" onclick="window.App.auditBackToLocations()" title="العودة للأماكن">
+                    <i class='bx bx-right-arrow-alt'></i>
+                </button>
+                <div class="breadcrumbs-trail">
+                    <span onclick="window.App.auditBackToSessions()" style="cursor:pointer">الجلسات</span>
+                    <i class='bx bx-chevron-left'></i>
+                    <span onclick="window.App.auditBackToLocations()" style="cursor:pointer">${loc.nameAR}</span>
+                    <i class='bx bx-chevron-left'></i>
+                    <span class="active">التصنيفات</span>
+                </div>
+            </div>
+
+            <div class="section-title mb-12">
+                <h3><i class='bx ${loc.icon || 'bx-map-pin'}'></i> أقسام الأدوية في "${loc.nameAR}":</h3>
+                <p class="text-muted small">اختر القسم لاستعراض الأدوية وتسجيل الأرصدة</p>
+            </div>
+
+            <!-- Square Categories Grid -->
+            <div class="audit-square-grid">
+                ${await Promise.all(categories.map(async (cat) => {
+                    const meds = await Locations.getMedicinesForLocation(loc.id, cat.id);
+                    return `
+                        <div class="square-card" onclick="window.App.openAuditCategory('${cat.id}')">
+                            <i class='bx ${cat.icon || 'bx-category'} square-icon' style="color: ${cat.color || 'var(--primary)'}"></i>
+                            <h3>${cat.nameAR}</h3>
+                            <span class="square-meta">${meds.length} صنف دواء</span>
+                        </div>
+                    `;
+                })).then(cards => cards.join(''))}
+            </div>
+        `;
+    },
+
+    async renderAuditMedicinesLevel(container, session) {
+        const loc = await Locations.get(this.selectedAuditLocationId);
+        const cat = await Categories.getInfo(this.selectedAuditCategoryId);
+        if (!loc || !cat) return this.auditBackToCategories();
+
+        const medicines = await Audit.getMedicinesWithAuditStatus(session.id, loc.id, cat.id);
+        const uncountedCount = medicines.filter(m => !m.isCounted).length;
+        const countedCount = medicines.filter(m => m.isCounted).length;
+
+        container.innerHTML = `
+            <!-- Breadcrumbs Bar -->
+            <div class="breadcrumbs-bar">
+                <button class="btn-crumb-back" onclick="window.App.auditBackToCategories()" title="العودة للتصنيفات">
+                    <i class='bx bx-right-arrow-alt'></i>
+                </button>
+                <div class="breadcrumbs-trail">
+                    <span onclick="window.App.auditBackToLocations()" style="cursor:pointer">${loc.nameAR}</span>
+                    <i class='bx bx-chevron-left'></i>
+                    <span onclick="window.App.auditBackToCategories()" style="cursor:pointer">${cat.nameAR}</span>
+                    <i class='bx bx-chevron-left'></i>
+                    <span class="active">الأدوية</span>
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div>
+                    <h3 style="margin: 0; font-size: 15px; font-weight: 800;">أدوية ${cat.nameAR} في ${loc.nameAR}</h3>
+                    <span style="font-size: 11px; color: var(--text-muted);">
+                        المتبقي: ${uncountedCount} | تم الجرد: ${countedCount}
+                    </span>
+                </div>
+            </div>
+
+            <!-- Square Medicines Grid with Smart Sorting -->
+            <div class="audit-square-grid">
+                ${medicines.map(med => {
+                    const imgUrl = Categories.getMedicineImage(med);
+                    if (med.isCounted) {
+                        return `
+                            <div class="square-card counted" onclick="window.App.openCountModal('${med.id}')" title="انقر لتعديل العد">
+                                <span class="badge-done">
+                                    <i class='bx bx-check'></i> تم
+                                </span>
+                                <div style="width: 44px; height: 44px; border-radius: 8px; overflow: hidden; margin-bottom: 6px;">
+                                    <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover;">
+                                </div>
+                                <h3>${med.nameEN || med.nameAR}</h3>
+                                <div class="counted-qty-tag">الرصيد: ${med.countedQty}</div>
+                                <small style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${med.countedExpiry || ''}</small>
+                            </div>
+                        `;
+                    } else {
+                        return `
+                            <div class="square-card" onclick="window.App.openCountModal('${med.id}')" title="انقر لتسجيل العد">
+                                <div style="width: 44px; height: 44px; border-radius: 8px; overflow: hidden; margin-bottom: 6px; background: rgba(59,130,246,0.06); display:flex; align-items:center; justify-content:center;">
+                                    <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover;">
+                                </div>
+                                <h3>${med.nameEN || med.nameAR}</h3>
+                                <span class="square-meta" style="color: var(--primary);">بانتظار العد ⏳</span>
+                            </div>
+                        `;
+                    }
+                }).join('')}
+            </div>
+        `;
+    },
+
+    // --- Audit Navigation Handlers ---
+    openAuditSession(id) {
+        this.selectedAuditSessionId = id;
+        Audit.currentSessionId = id;
+        this.auditLevel = 'locations';
+        this.renderAuditView();
+    },
+
+    openAuditLocation(locId) {
+        this.selectedAuditLocationId = locId;
+        Audit.currentLocationId = locId;
+        this.auditLevel = 'categories';
+        this.renderAuditView();
+    },
+
+    openAuditCategory(catId) {
+        this.selectedAuditCategoryId = catId;
+        Audit.currentCategoryId = catId;
+        this.auditLevel = 'medicines';
+        this.renderAuditView();
+    },
+
+    auditBackToSessions() {
+        this.auditLevel = 'sessions';
+        this.selectedAuditSessionId = null;
+        this.renderAuditView();
+    },
+
+    auditBackToLocations() {
+        this.auditLevel = 'locations';
+        this.selectedAuditLocationId = null;
+        this.renderAuditView();
+    },
+
+    auditBackToCategories() {
+        this.auditLevel = 'categories';
+        this.selectedAuditCategoryId = null;
+        this.renderAuditView();
+    },
+
+    async holdAuditSession(id) {
+        await Audit.holdSession(id);
+        this.renderAuditView();
+    },
+
+    async resumeAuditSession(id) {
+        await Audit.resumeSession(id);
+        this.renderAuditView();
+    },
+
+    async finalizeAuditSession(id) {
+        const ok = await Audit.finalizeSession(id);
+        if (ok) {
+            this.auditLevel = 'sessions';
+            this.selectedAuditSessionId = null;
+            this.renderAuditView();
+            this.renderDashboard();
+        }
+    },
+
+    // --- Audit Creation Modal ---
+    async openNewAuditModal() {
+        const locs = await Locations.getAll();
+        UI.showModal(`
+            <div class="modal-header"><h2>بدء جلسة جرد ميداني جديدة</h2></div>
+            <form onsubmit="event.preventDefault(); window.App.startNewAuditFromModal();">
+                <div class="form-group mb-12">
+                    <label class="form-label">اسم الجلسة:</label>
+                    <input type="text" id="audit-session-name" class="form-input" value="جرد ${new Date().toLocaleDateString('ar-EG')}" required>
+                </div>
+                <div class="form-group mb-12">
+                    <label class="form-label">نمط الجرد:</label>
+                    <div style="display: flex; gap: 10px;">
+                        <label style="flex:1; display:flex; align-items:center; gap:8px; padding:10px; border-radius:10px; background:var(--bg-secondary); cursor:pointer;">
+                            <input type="radio" name="audit-mode" value="individual" checked>
+                            <div>
+                                <strong style="display:block; font-size:13px;">👤 جرد فردي</strong>
+                                <small style="color:var(--text-muted); font-size:11px;">عد سريع لجهازك</small>
+                            </div>
+                        </label>
+                        <label style="flex:1; display:flex; align-items:center; gap:8px; padding:10px; border-radius:10px; background:var(--bg-secondary); cursor:pointer;">
+                            <input type="radio" name="audit-mode" value="group">
+                            <div>
+                                <strong style="display:block; font-size:13px;">👥 جرد جماعي</strong>
+                                <small style="color:var(--text-muted); font-size:11px;">مشاركة الفريق وسحابي</small>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group mb-15">
+                    <label class="form-label">حدد الأماكن المشمولة في الجرد:</label>
+                    <div style="max-height: 160px; overflow-y: auto; background: var(--bg-secondary); padding: 8px; border-radius: 8px;">
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:8px; font-weight:bold;">
+                            <input type="checkbox" id="audit-loc-all" checked onchange="document.querySelectorAll('.audit-loc-item').forEach(cb => cb.checked = this.checked)">
+                            <span>تحديد كافة الأماكن</span>
+                        </label>
+                        ${locs.map(l => `
+                            <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:12px;">
+                                <input type="checkbox" class="audit-loc-item" value="${l.id}" checked>
+                                <span>${l.nameAR}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">🚀 بدء الجلسة الآن</button>
+                    <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+                </div>
+            </form>
+        `);
+    },
+
+    async startNewAuditFromModal() {
+        const name = document.getElementById('audit-session-name').value.trim();
+        const type = document.querySelector('input[name="audit-mode"]:checked')?.value || 'individual';
+        const locationIds = [];
+        document.querySelectorAll('.audit-loc-item:checked').forEach(cb => locationIds.push(cb.value));
+
+        if (locationIds.length === 0) {
+            return UI.showToast('يرجى تحديد مكان واحد على الأقل للجرد', 'warning');
+        }
+
+        const session = await Audit.createSession({ name, type, locationIds });
+        if (session) {
+            UI.closeModal();
+            this.selectedAuditSessionId = session.id;
+            this.auditLevel = 'locations';
+            UI.switchView('view-audit');
+            this.renderAuditView();
+        }
+    },
+
+    // --- Fast Count Modal (Level 5) ---
+    async openCountModal(medicineId) {
+        const med = await DB.get('medicineMaster', medicineId);
+        if (!med) return;
+        const loc = await Locations.get(this.selectedAuditLocationId);
+        const session = await Audit.getSession(this.selectedAuditSessionId);
+        const countKey = `${this.selectedAuditLocationId}___${medicineId}`;
+        const existingCount = (session?.counts && session.counts[countKey]) || null;
+        const imgUrl = Categories.getMedicineImage(med);
+
+        UI.showModal(`
+            <div class="modal-header">
+                <h2>تسجيل الجرد الفعلي</h2>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:15px; padding:10px; background:var(--bg-secondary); border-radius:12px;">
+                <div style="width:50px; height:50px; border-radius:8px; overflow:hidden;">
+                    <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover;">
+                </div>
+                <div>
+                    <h3 style="margin:0; font-size:15px; font-weight:800;">${med.nameEN || med.nameAR}</h3>
+                    <p style="margin:2px 0 0 0; font-size:12px; color:var(--text-muted);">المكان: ${loc?.nameAR || 'المستودع'}</p>
+                </div>
+            </div>
+            <form onsubmit="event.preventDefault(); window.App.saveCountFromModal('${medicineId}');">
+                <div class="form-group mb-12">
+                    <label class="form-label">الكمية الفعلية المحصورة:</label>
+                    <input type="number" id="count-qty" class="form-input" style="font-size:22px; font-weight:800; text-align:center;" min="0" step="1" value="${existingCount ? existingCount.quantity : 0}" required autofocus>
+                </div>
+                <div class="form-group mb-15">
+                    <label class="form-label">تاريخ الصلاحية:</label>
+                    <input type="text" id="count-expiry" class="form-input" placeholder="YYYY-MM (مثال: 2027-12)" value="${existingCount ? existingCount.expiryDate : '2027-12'}" required>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">💾 حفظ واعتماد العد</button>
+                    <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+                </div>
+            </form>
+        `);
+    },
+
+    async saveCountFromModal(medicineId) {
+        const qty = document.getElementById('count-qty').value;
+        const expiry = document.getElementById('count-expiry').value.trim();
+
+        await Audit.recordCount(this.selectedAuditSessionId, this.selectedAuditLocationId, medicineId, {
+            quantity: qty,
+            expiryDate: expiry
+        });
+
+        UI.closeModal();
+        UI.showToast('تم تسجيل الجرد بنجاح ✅', 'success');
+        this.renderAuditView();
+    }
+});
+
 /**
  * Recovery Reset Mechanism (v17.2.0)
  * Clears all local caches and signs out to fix corrupted states.
@@ -2220,6 +3038,8 @@ const _boot = async () => {
                 window.UI.switchView(id);
                 if (id === 'view-inventory' && window.App?.renderInventory) {
                     window.App.renderInventory('detailed');
+                } else if (id === 'view-audit' && window.App?.renderAuditView) {
+                    window.App.renderAuditView();
                 }
             }
         });

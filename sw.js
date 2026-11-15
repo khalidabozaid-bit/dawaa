@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'dawaa-cache-v17.2.8';
+const CACHE_NAME = 'dawaa-cache-v18.0.1';
 const IMAGE_CACHE_NAME = 'dawaa-images-v1'; // Dedicated store for medicine visual assets
 const MAX_IMAGES = 100; // Limit to avoid device storage bloat
 
@@ -21,6 +21,8 @@ const ASSETS_TO_CACHE = [
   './js/core/sync.js',
   './js/features/inventory.js',
   './js/features/categories.js',
+  './js/features/locations.js',
+  './js/features/audit.js',
   './js/features/export.js',
   './js/app.js',
   './js/core/seed_data.js',

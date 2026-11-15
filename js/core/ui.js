@@ -59,6 +59,9 @@ export const UI = {
             case 'dashboard':
                 App.renderDashboard();
                 break;
+            case 'audit':
+                if (App.renderAuditView) App.renderAuditView();
+                break;
             case 'inventory':
                 App.renderInventory();
                 break;

@@ -1,4 +1,4 @@
-# 🛡️ Dawaa Master Protocol (SYSTEM_PROTOCOL v17.2.8) 🛡️
+# 🛡️ Dawaa Master Protocol (SYSTEM_PROTOCOL v18.0.1) 🛡️
 
 This document is the **Source of Truth** for the Dawaa PWA architecture. It serves as a mandatory pre-flight checklist and operational manual for any AI assistant or developer working on the codebase.
 
@@ -79,6 +79,19 @@ The following actions **MUST** trigger a Cloud Push:
   - Implemented interactive touch stock counters (`+` / `-`) with immediate IndexedDB update and cloud synchronization.
   - Wired direct one-click Excel reports (`full`, `expiring`, `low-stock`) using SheetJS.
 
+### Lesson 06: Dedicated Hierarchical Audit Engine & Warehouse Multi-Dimensional Hub (v18.0.1)
+- **Context**: Conflation of general warehouse catalog management with field audit stocktaking.
+- **Resolution**:
+  - Separated concerns into 4 clear bottom navigation tabs: الرئيسية (Dashboard), الجرد (Audit Hub), المستودع (Warehouse Hub), الإعدادات (Settings).
+  - Warehouse Hub expanded into 3 dimensions via segmented controls: الأدوية (Medicines), التصنيفات (Categories), أماكن التخزين (Locations).
+  - Added dynamic storage location management (صيدلية، ثلاجة، دولاب...) with per-location category restrictions.
+  - Built 5-level hierarchical audit workflow:
+    1. الجلسات (Sessions: Individual / Group, Hold ⏸️, Resume ▶️, Finalize 🏁)
+    2. الأماكن المحددة (Square Locations Grid with Progress %)
+    3. التصنيفات المرتبطة بالمكان (Square Categories Grid)
+    4. أدوية القسم مع الفرز الذكي (Smart Sorting: Uncounted on top, Counted sinking to bottom with ✅ and count)
+    5. نافذة تسجيل العد السريع (Quick Count Modal with quantity and expiry date)
+
 ---
 
 ## 🎯 5. Tech Debt & Roadmap
@@ -86,8 +99,9 @@ The following actions **MUST** trigger a Cloud Push:
 - [ ] **Push Notifications**: Implement Firebase Cloud Messaging (FCM).
 - [x] **Offline Guard**: Implemented real-time network status indicator badge & automatic reconnect sync (v17.2.0).
 - [x] **Unified 3-View Warehouse Flow & Interactive Counters**: Completed in v17.2.3.
+- [x] **Hierarchical Audit Workflow & Full Storage Location Management**: Completed in v18.0.1.
 - [ ] **Conflict Solver**: Implement smarter "Multi-user edit" resolution.
 
 ---
 **Status**: ACTIVE 🛡️🏗️🛡️🚀🔥
-**Last Updated**: v17.2.8 (Unified Master Protocol)
+**Last Updated**: v18.0.1 (Unified Master Protocol)

@@ -6,14 +6,16 @@
  */
 
 const DB_NAME = 'DawaaMedicalDB';
-const DB_VERSION = 6; // v11.0.0: High-Performance Audit Indexing
+const DB_VERSION = 8; // v11.0.0: High-Performance Audit Indexing
 
 const STORES = {
     MASTER: 'medicineMaster', 
     INVENTORY: 'inventory',   
     CATEGORIES: 'categories',
     SETTINGS: 'settings',
-    AUDITS: 'audits' // v10.5.0: Formal Inventory Sessions      
+    AUDITS: 'audits',
+    LOCATIONS: 'locations',
+    AUDIT_SESSIONS: 'audit_sessions'
 };
 
 export const DB = {
@@ -64,6 +66,16 @@ export const DB = {
                 // Audits Store (v5 - Supreme Auditor)
                 if (!db.objectStoreNames.contains(STORES.AUDITS)) {
                     db.createObjectStore(STORES.AUDITS, { keyPath: 'id' });
+                }
+
+                // Locations Store (v18.0.0)
+                if (!db.objectStoreNames.contains(STORES.LOCATIONS)) {
+                    db.createObjectStore(STORES.LOCATIONS, { keyPath: 'id' });
+                }
+
+                // Audit Sessions Store (v18.0.0)
+                if (!db.objectStoreNames.contains(STORES.AUDIT_SESSIONS)) {
+                    db.createObjectStore(STORES.AUDIT_SESSIONS, { keyPath: 'id' });
                 }
             };
 

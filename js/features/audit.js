@@ -1,88 +1,239 @@
+// js/features/audit.js
 import { DB } from '../core/db.js';
 import { Sync } from '../core/sync.js';
 import { UI } from '../core/ui.js';
-import { Inventory } from './inventory.js';
+import { Locations } from './locations.js';
+import { Categories } from './categories.js';
 
 /**
- * Audit Management Service (v11.0.0 Architectural Sovereign)
- * Handles lifecycle, presence, and session state.
+ * Audit Management Service (v18.0.0 Hierarchical Flow)
+ * Manages full lifecycle: Individual & Group sessions, Location Grids,
+ * Category Grids, Smart Sorting (Uncounted on top, Counted at bottom with ✅),
+ * Hold, Resume, and Finalize.
  */
+
 export const Audit = {
-    activeSession: null,
-    isJoined: false,
+    currentSessionId: null,
+    currentLocationId: null,
+    currentCategoryId: null,
 
-    async start(mode, user) {
-        if (mode === 'team' && window.App?.userRole !== 'admin') {
-            return UI.showToast('صلاحيات المدير مطلوبة لبدء جرد جماعي ⚖️', 'warning');
+    async init() {
+        console.log('Audit: Initializing Hierarchical Audit Engine...');
+    },
+
+    async getAllSessions() {
+        try {
+            const sessions = (await DB.getAll('audit_sessions')) || [];
+            return sessions.sort((a, b) => new Date(b.startedAt || 0) - new Date(a.startedAt || 0));
+        } catch (err) {
+            console.warn('Error fetching audit sessions:', err);
+            return [];
         }
+    },
+
+    async getSession(id) {
+        if (!id) return null;
+        return (await DB.get('audit_sessions', id)) || null;
+    },
+
+    async saveSession(session) {
+        if (!session.id) session.id = `audit_${Date.now()}`;
+        session.updatedAt = new Date().toISOString();
+        await DB.put('audit_sessions', session);
         
-        const name = prompt('أدخل اسم عملية الجرد (مثلاً: جرد الرفوف الأمامية):');
-        if (!name) return null;
-
-        const session = {
-            id: 'audit_' + Date.now(),
-            name: name,
-            type: mode,
-            host: user.displayName || user.email,
-            participants: [user.displayName || user.email],
-            startTime: new Date().toISOString()
-        };
-
-        if (mode === 'team') {
-            await DB.put('audits', session);
+        // Broadcast in team mode
+        if (session.type === 'group') {
             Sync.broadcastAuditStatus(session);
         }
-        
         return session;
     },
 
-    async join(userName) {
-        if (await Sync.joinAudit(userName)) {
-            this.isJoined = true;
-            return true;
+    async createSession({ name, type = 'individual', locationIds = [] }) {
+        const user = (window.App && window.App.user) || { displayName: 'خالد', email: 'khaled@dawaa.local' };
+        const uName = user.displayName || user.email || 'خالد';
+
+        if (type === 'group' && window.App?.userRole !== 'admin') {
+            UI.showToast('صلاحيات المدير مطلوبة لإنشاء جرد جماعي للفريق ⚖️', 'warning');
+            return null;
         }
-        return false;
+
+        const session = {
+            id: `audit_${Date.now()}`,
+            name: name || `جرد ${type === 'individual' ? 'فردي' : 'جماعي'} - ${new Date().toLocaleDateString('ar-EG')}`,
+            type: type, // 'individual' or 'group'
+            status: 'active', // 'active' | 'on_hold' | 'finalized'
+            locationIds: locationIds.length > 0 ? locationIds : ['loc_pharmacy', 'loc_cabinet', 'loc_fridge'],
+            host: uName,
+            participants: [uName],
+            startedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            counts: {} // key: `${locationId}___${medicineId}` -> { quantity, expiryDate, countedAt, userName }
+        };
+
+        await this.saveSession(session);
+        this.currentSessionId = session.id;
+        UI.showToast(`تم بدء الجلسة: ${session.name} 🚀`, 'success');
+        return session;
     },
 
-    async end() {
-        if (!confirm('هل أنت متأكد من إنهاء عملية الجرد الحالية؟')) return false;
-        Sync.broadcastAuditStatus(null);
+    async holdSession(id) {
+        const session = await this.getSession(id);
+        if (!session) return;
+        session.status = 'on_hold';
+        await this.saveSession(session);
+        UI.showToast('تم تعليق الجلسة مؤقتاً ⏸️', 'info');
+    },
+
+    async resumeSession(id) {
+        const session = await this.getSession(id);
+        if (!session) return;
+        session.status = 'active';
+        await this.saveSession(session);
+        this.currentSessionId = id;
+        UI.showToast('تم استئناف الجلسة ▶️', 'success');
+    },
+
+    async finalizeSession(id) {
+        const session = await this.getSession(id);
+        if (!session) return;
+
+        if (!confirm(`هل أنت متأكد من إنهاء واعتماد "${session.name}"؟ سيتم تحديث رصيد المستودع الفعلي بالكميات المحصورة.`)) {
+            return false;
+        }
+
+        session.status = 'finalized';
+        session.finalizedAt = new Date().toISOString();
+        await this.saveSession(session);
+
+        // Apply counts to inventory
+        const counts = session.counts || {};
+        const entries = Object.entries(counts);
+        
+        for (const [key, record] of entries) {
+            const [locId, medId] = key.split('___');
+            const loc = await Locations.get(locId);
+            const locName = loc ? loc.nameAR : 'المستودع الرئيسي';
+
+            await DB.put('inventory', {
+                id: `inv_audit_${session.id}_${medId}_${locId}`,
+                medicineId: medId,
+                location: locName,
+                locationId: locId,
+                quantity: parseFloat(record.quantity) || 0,
+                expiryDate: record.expiryDate || '2027-12',
+                auditId: session.id,
+                userName: record.userName || session.host,
+                timestamp: record.countedAt || new Date().toISOString()
+            });
+
+            if (window.App?.userRole === 'admin') {
+                Sync.push(medId);
+            }
+        }
+
+        UI.showToast('تم اعتماد وإنهاء الجلسة وتحديث المخزون بنجاح! 🎊', 'success');
         return true;
     },
 
-    /**
-     * Operational Analytics (v12.0.0 Command Hub)
-     */
-    async getSessionStats(auditId) {
-        if (!auditId) return { totalEntries: 0, totalUnits: 0, uniqueCount: 0 };
-        
-        const entries = await Inventory.getEntriesByAudit(auditId);
-        const uniqueMeds = new Set(entries.map(e => e.medicineId));
-        
-        const totalUnits = entries.reduce((sum, e) => sum + (parseFloat(e.quantity) || 0), 0);
-        
-        // Leaderboard & Location Matrix
-        let parts = {};
-        let locs = {};
+    async recordCount(sessionId, locationId, medicineId, { quantity, expiryDate }) {
+        const session = await this.getSession(sessionId);
+        if (!session) return false;
 
-        entries.forEach(e => {
-            let uName = e.userName && e.userName.trim() ? e.userName : 'عضو خفي';
-            parts[uName] = (parts[uName] || 0) + 1; // Count of successful additions
+        const user = (window.App && window.App.user) || { displayName: 'خالد' };
+        const uName = user.displayName || user.email || 'خالد';
 
-            let lName = e.location || 'غير محدد';
-            locs[lName] = (locs[lName] || 0) + 1;
-        });
+        if (!session.counts) session.counts = {};
+        const key = `${locationId}___${medicineId}`;
+
+        session.counts[key] = {
+            quantity: parseFloat(quantity) || 0,
+            expiryDate: expiryDate || '2027-12',
+            countedAt: new Date().toISOString(),
+            userName: uName
+        };
+
+        await this.saveSession(session);
+        return session.counts[key];
+    },
+
+    async getSessionStats(sessionId) {
+        const session = await this.getSession(sessionId);
+        if (!session) return { totalMedicines: 0, countedMedicines: 0, progress: 0 };
+
+        const counts = session.counts || {};
+        const locationIds = session.locationIds || [];
+
+        let totalMedsCount = 0;
+        for (const locId of locationIds) {
+            const meds = await Locations.getMedicinesForLocation(locId);
+            totalMedsCount += meds.length;
+        }
+
+        const countedCount = Object.keys(counts).length;
+        const progress = totalMedsCount > 0 ? Math.round((countedCount / totalMedsCount) * 100) : 0;
 
         return {
-            totalEntries: entries.length,
-            totalUnits: totalUnits,
-            uniqueCount: uniqueMeds.size,
-            participantsStatus: Object.entries(parts)
-                                    .map(([name, count]) => ({name, count}))
-                                    .sort((a,b)=> b.count - a.count), // Sort by highest
-            locations: Object.entries(locs)
-                                    .map(([name, count]) => ({name, count}))
-                                    .sort((a,b)=> b.count - a.count)
+            totalMedicines: totalMedsCount,
+            countedMedicines: countedCount,
+            progress: Math.min(100, progress),
+            status: session.status,
+            name: session.name,
+            type: session.type
         };
+    },
+
+    async getLocationStats(sessionId, locationId) {
+        const session = await this.getSession(sessionId);
+        if (!session) return { total: 0, counted: 0, progress: 0 };
+
+        const meds = await Locations.getMedicinesForLocation(locationId);
+        const counts = session.counts || {};
+
+        let counted = 0;
+        for (const m of meds) {
+            const key = `${locationId}___${m.id}`;
+            if (counts[key] !== undefined) counted++;
+        }
+
+        const progress = meds.length > 0 ? Math.round((counted / meds.length) * 100) : 0;
+        return {
+            total: meds.length,
+            counted,
+            progress: Math.min(100, progress)
+        };
+    },
+
+    /**
+     * Resolves medicines for a specific session location and category,
+     * with Smart Sorting: Uncounted on top, Counted at the bottom with ✅.
+     */
+    async getMedicinesWithAuditStatus(sessionId, locationId, categoryId) {
+        const session = await this.getSession(sessionId);
+        const counts = (session && session.counts) || {};
+
+        const medicines = await Locations.getMedicinesForLocation(locationId, categoryId);
+
+        const enriched = medicines.map(med => {
+            const key = `${locationId}___${med.id}`;
+            const countRecord = counts[key];
+            const isCounted = !!countRecord;
+
+            return {
+                ...med,
+                isCounted,
+                countedQty: isCounted ? countRecord.quantity : null,
+                countedExpiry: isCounted ? countRecord.expiryDate : null,
+                countedAt: isCounted ? countRecord.countedAt : null,
+                countedBy: isCounted ? countRecord.userName : null
+            };
+        });
+
+        // Smart Sort: Uncounted first (false before true), then alphabetical
+        return enriched.sort((a, b) => {
+            if (a.isCounted !== b.isCounted) {
+                return a.isCounted ? 1 : -1; // Uncounted (false) comes first
+            }
+            return (a.nameEN || '').localeCompare(b.nameEN || '');
+        });
     }
 };
