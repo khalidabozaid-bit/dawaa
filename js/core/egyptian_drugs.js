@@ -153,49 +153,74 @@ export const EGYPTIAN_DRUGS_CATALOG = [
     { nameEN: "Betadine Surgical Scrub", nameAR: "بيتادين رغوي جراحي معقم للجلد", active: "Povidone-iodine 7.5%", categoryId: "Topical", type: "medicine" },
 
     // --- 8. مستلزمات وغيار طبي (Consumables) ---
-    { nameEN: "Syringe 3 ml Sterile (Box 100)", nameAR: "سرنجات 3 سم معقمة (علبة 100)", active: "مستلزمات حقن معقمة سن أزرق", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Syringe 5 ml Sterile (Box 100)", nameAR: "سرنجات 5 سم معقمة (علبة 100)", active: "مستلزمات حقن معقمة سن أخضر", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Syringe 10 ml Sterile", nameAR: "سرنجات 10 سم معقمة", active: "مستلزمات حقن وغسيل", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Syringe 20 ml Sterile", nameAR: "سرنجات 20 سم معقمة", active: "مستلزمات حقن وسحب وتغذية", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Feeding Syringe 50 ml", nameAR: "سرنجة 50 سم قسطرة وتغذية رايل", active: "مستلزمات تغذية رايل", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Insulin Syringe 100 U (Box 100)", nameAR: "سرنجات أنسولين 100 وحدة (علبة 100)", active: "مستلزمات أنسولين سن رفيع", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "IV Cannula Gauge 18 (Green)", nameAR: "كانيولا وريدية مقاس 18 خضراء", active: "كانيولات وريدية ونقل دم", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "IV Cannula Gauge 20 (Pink)", nameAR: "كانيولا وريدية مقاس 20 وردية للبالغين", active: "كانيولات وريدية", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "IV Cannula Gauge 22 (Blue)", nameAR: "كانيولا وريدية مقاس 22 زرقاء للأوردة الدقيقة", active: "كانيولات وريدية", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "IV Cannula Gauge 24 (Yellow)", nameAR: "كانيولا وريدية مقاس 24 صفراء أطفال وحديثي ولادة", active: "كانيولات وريدية أطفال", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "IV Infusion Giving Set", nameAR: "جهاز وريد معقم بمفلتر لنقل المحاليل", active: "مستلزمات محاليل وريدية", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Blood Transfusion Giving Set", nameAR: "جهاز نقل دم معقم بفلتر ترويق", active: "مستلزمات نقل دم ومشتقاته", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "3-Way Stopcock Sterile", nameAR: "وصلة وريدية ثلاثية معقمة (3-Way)", active: "مستلزمات محاليل وحقن وريدي", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Sterile Gauze Swabs 10x10 cm", nameAR: "شاش طبي معقم باكت 10×10 سم", active: "مستلزمات غيار وجروح", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Gauze Roll Bandage 10 cm", nameAR: "رول شاش طبي ملفوف 10 سم × 5 م", active: "مستلزمات غيار وتضميد", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Medical Absorbent Cotton 500 g", nameAR: "قطن طبي ممتص 500 جم لفة", active: "مستلزمات غيار طبي", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Adhesive Plaster Tape 5 cm", nameAR: "بلاستر طبي لاصق قماش 5 سم عريض", active: "مستلزمات تثبيت وغيار", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Micropore Paper Tape 1 inch", nameAR: "بلاستر طبي ورقي حساس ميكروبور 1 بوصة", active: "مستلزمات تثبيت كانيولات", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Elastic Crepe Bandage 10 cm", nameAR: "رباط ضاغط طبي مرن 10 سم", active: "مستلزمات عظام والتواء وكسور", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Elastic Crepe Bandage 15 cm", nameAR: "رباط ضاغط طبي مرن 15 سم عريض", active: "مستلزمات عظام ومفاصل", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Examination Gloves Latex (Box 100)", nameAR: "جوانتيات فحص لاتكس طبية (علبة 100)", active: "مكافحة عدوى ووقاية", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Surgical Sterile Gloves Size 7.5", nameAR: "جوانتي جراحي معقم كيس مزدوج 7.5", active: "مكافحة عدوى وعمليات", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Ethyl Alcohol 70% Spray 500 ml", nameAR: "كحول إيثيلي 70% بخاخ مطهر 500 مل", active: "مطهرات ومعقمات أيدي وأسطح", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Oxygen Face Mask Adult", nameAR: "ماسك أكسجين بالبالغين مع خرطوم توصيل", active: "مستلزمات تنفس وأكسجين", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Nasal Oxygen Cannula", nameAR: "نظارة أكسجين أنفية مرنة مع خرطوم", active: "مستلزمات تنفس وأكسجين", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Foley Catheter 2-Way Size 16", nameAR: "قسطرة بولية فولي سيليكون مقاس 16", active: "مستلزمات قساطر بولية", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Urine Drainage Bag 2000 ml", nameAR: "كيس جمع بول 2000 مل بصمام مانع للارتداد", active: "مستلزمات مسالك وقساطر", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Ryle Feeding Tube Size 16", nameAR: "أنبوبة رايل تغذية معدة مقاس 16", active: "مستلزمات تغذية وقساطر", categoryId: "Consumables", type: "consumable" },
-    { nameEN: "Accu-Chek Instant Test Strips 50", nameAR: "شرائط قياس سكر أكيو تشيك إنستانت (علبة 50)", active: "مستلزمات تشخيص سكر", categoryId: "Consumables", type: "consumable" }
+    { nameEN: "Syringe 3 ml Sterile (Box 100)", nameAR: "سرنجات 3 سم معقمة (علبة 100)", active: "مستلزمات حقن معقمة سن أزرق", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Syringe 5 ml Sterile (Box 100)", nameAR: "سرنجات 5 سم معقمة (علبة 100)", active: "مستلزمات حقن معقمة سن أخضر", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Syringe 10 ml Sterile", nameAR: "سرنجات 10 سم معقمة", active: "مستلزمات حقن وغسيل", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Syringe 20 ml Sterile", nameAR: "سرنجات 20 سم معقمة", active: "مستلزمات حقن وسحب وتغذية", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Feeding Syringe 50 ml", nameAR: "سرنجة 50 سم قسطرة وتغذية رايل", active: "مستلزمات تغذية رايل", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Insulin Syringe 100 U (Box 100)", nameAR: "سرنجات أنسولين 100 وحدة (علبة 100)", active: "مستلزمات أنسولين سن رفيع", categoryId: "Consumables", type: "supply" },
+    { nameEN: "IV Cannula Gauge 18 (Green)", nameAR: "كانيولا وريدية مقاس 18 خضراء", active: "كانيولات وريدية ونقل دم", categoryId: "Consumables", type: "supply" },
+    { nameEN: "IV Cannula Gauge 20 (Pink)", nameAR: "كانيولا وريدية مقاس 20 وردية للبالغين", active: "كانيولات وريدية", categoryId: "Consumables", type: "supply" },
+    { nameEN: "IV Cannula Gauge 22 (Blue)", nameAR: "كانيولا وريدية مقاس 22 زرقاء للأوردة الدقيقة", active: "كانيولات وريدية", categoryId: "Consumables", type: "supply" },
+    { nameEN: "IV Cannula Gauge 24 (Yellow)", nameAR: "كانيولا وريدية مقاس 24 صفراء أطفال وحديثي ولادة", active: "كانيولات وريدية أطفال", categoryId: "Consumables", type: "supply" },
+    { nameEN: "IV Infusion Giving Set", nameAR: "جهاز وريد معقم بمفلتر لنقل المحاليل", active: "مستلزمات محاليل وريدية", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Blood Transfusion Giving Set", nameAR: "جهاز نقل دم معقم بفلتر ترويق", active: "مستلزمات نقل دم ومشتقاته", categoryId: "Consumables", type: "supply" },
+    { nameEN: "3-Way Stopcock Sterile", nameAR: "وصلة وريدية ثلاثية معقمة (3-Way)", active: "مستلزمات محاليل وحقن وريدي", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Sterile Gauze Swabs 10x10 cm", nameAR: "شاش طبي معقم باكت 10×10 سم", active: "مستلزمات غيار وجروح", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Gauze Roll Bandage 10 cm", nameAR: "رول شاش طبي ملفوف 10 سم × 5 م", active: "مستلزمات غيار وتضميد", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Medical Absorbent Cotton 500 g", nameAR: "قطن طبي ممتص 500 جم لفة", active: "مستلزمات غيار طبي", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Adhesive Plaster Tape 5 cm", nameAR: "بلاستر طبي لاصق قماش 5 سم عريض", active: "مستلزمات تثبيت وغيار", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Micropore Paper Tape 1 inch", nameAR: "بلاستر طبي ورقي حساس ميكروبور 1 بوصة", active: "مستلزمات تثبيت كانيولات", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Elastic Crepe Bandage 10 cm", nameAR: "رباط ضاغط طبي مرن 10 سم", active: "مستلزمات عظام والتواء وكسور", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Elastic Crepe Bandage 15 cm", nameAR: "رباط ضاغط طبي مرن 15 سم عريض", active: "مستلزمات عظام ومفاصل", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Examination Gloves Latex (Box 100)", nameAR: "جوانتيات فحص لاتكس طبية (علبة 100)", active: "مكافحة عدوى ووقاية", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Surgical Sterile Gloves Size 7.5", nameAR: "جوانتي جراحي معقم كيس مزدوج 7.5", active: "مكافحة عدوى وعمليات", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Ethyl Alcohol 70% Spray 500 ml", nameAR: "كحول إيثيلي 70% بخاخ مطهر 500 مل", active: "مطهرات ومعقمات أيدي وأسطح", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Oxygen Face Mask Adult", nameAR: "ماسك أكسجين بالبالغين مع خرطوم توصيل", active: "مستلزمات تنفس وأكسجين", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Nasal Oxygen Cannula", nameAR: "نظارة أكسجين أنفية مرنة مع خرطوم", active: "مستلزمات تنفس وأكسجين", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Foley Catheter 2-Way Size 16", nameAR: "قسطرة بولية فولي سيليكون مقاس 16", active: "مستلزمات قساطر بولية", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Urine Drainage Bag 2000 ml", nameAR: "كيس جمع بول 2000 مل بصمام مانع للارتداد", active: "مستلزمات مسالك وقساطر", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Ryle Feeding Tube Size 16", nameAR: "أنبوبة رايل تغذية معدة مقاس 16", active: "مستلزمات تغذية وقساطر", categoryId: "Consumables", type: "supply" },
+    { nameEN: "Accu-Chek Instant Test Strips 50", nameAR: "شرائط قياس سكر أكيو تشيك إنستانت (علبة 50)", active: "مستلزمات تشخيص سكر", categoryId: "Consumables", type: "supply" }
 ];
+
+function normalizeArabic(text) {
+    if (!text) return '';
+    return String(text)
+        .toLowerCase()
+        .replace(/[أإآء]/g, 'ا')
+        .replace(/[ة]/g, 'ه')
+        .replace(/[ى]/g, 'ي')
+        .replace(/[ڤ]/g, 'ف')
+        .replace(/[ً-ْ]/g, '')
+        .trim();
+}
 
 export const EgyptianDrugs = {
     getAll() {
-        return EGYPTIAN_DRUGS_CATALOG;
+        return [...EGYPTIAN_DRUGS_CATALOG];
     },
 
     search(query, limit = 8) {
-        if (!query || !query.trim()) return [];
-        const q = query.trim().toLowerCase();
+        if (!query) return [];
+        const strQuery = String(query).trim();
+        if (!strQuery) return [];
+
+        const qRaw = strQuery.toLowerCase();
+        const qNorm = normalizeArabic(strQuery);
+
         return EGYPTIAN_DRUGS_CATALOG.filter(item => {
-            return (item.nameEN && item.nameEN.toLowerCase().includes(q)) ||
-                   (item.nameAR && item.nameAR.toLowerCase().includes(q)) ||
-                   (item.active && item.active.toLowerCase().includes(q));
+            const en = (item.nameEN || '').toLowerCase();
+            const arRaw = (item.nameAR || '').toLowerCase();
+            const arNorm = normalizeArabic(item.nameAR || '');
+            const actRaw = (item.active || '').toLowerCase();
+            const actNorm = normalizeArabic(item.active || '');
+
+            return en.includes(qRaw) ||
+                   arRaw.includes(qRaw) ||
+                   arNorm.includes(qNorm) ||
+                   actRaw.includes(qRaw) ||
+                   actNorm.includes(qNorm);
         }).slice(0, limit);
     }
 };

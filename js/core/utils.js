@@ -6,45 +6,65 @@
 
 export const Utils = {
     generateId() {
-        return crypto.randomUUID();
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+            return crypto.randomUUID();
+        }
+        return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9);
     },
 
     formatDate(dateStr) {
-        if (!dateStr) return 'N/A';
+        if (!dateStr) return 'غير محدد';
         const date = new Date(dateStr);
-        return date.toLocaleDateString('ar-EG', { year: 'numeric', month: 'long' });
+        if (isNaN(date.getTime())) return 'غير صالح';
+        return date.toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' });
     },
 
     getExpiryStatus(expiryDate) {
         if (!expiryDate) return { label: 'غير محدد', class: 'status-unknown' };
         
-        const now = new Date();
         const exp = new Date(expiryDate);
-        const diffMonths = (exp.getFullYear() - now.getFullYear()) * 12 + (exp.getMonth() - now.getMonth());
+        if (isNaN(exp.getTime())) return { label: 'تاريخ غير صالح', class: 'status-expired' };
 
-        if (diffMonths < 0) return { label: 'منتهي', class: 'status-expired' };
-        if (diffMonths <= 6) return { label: 'قريب الانتهاء', class: 'status-warning' };
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+
+        // If expiryDate was YYYY-MM, set to last day of that month
+        if (typeof expiryDate === 'string' && /^\d{4}-\d{2}$/.test(expiryDate.trim())) {
+            const [y, m] = expiryDate.trim().split('-').map(Number);
+            exp.setFullYear(y, m, 0); // last day of month
+            exp.setHours(23, 59, 59, 999);
+        }
+
+        if (exp < now) {
+            return { label: 'منتهي الصلاحية', class: 'status-expired' };
+        }
+
+        const sixMonths = new Date(now);
+        sixMonths.setMonth(sixMonths.getMonth() + 6);
+
+        if (exp <= sixMonths) {
+            return { label: 'قريب الانتهاء', class: 'status-warning' };
+        }
         return { label: 'صالح', class: 'status-safe' };
     },
 
-    debounce(func, wait) {
+    debounce(func, wait = 300) {
         let timeout;
-        return function executedFunction(...args) {
-            const later = () => {
-                clearTimeout(timeout);
-                func(...args);
-            };
+        return function(...args) {
+            const context = this;
             clearTimeout(timeout);
-            timeout = setTimeout(later, wait);
+            timeout = setTimeout(() => func.apply(context, args), wait);
         };
     },
 
     fileToBase64(file) {
         return new Promise((resolve, reject) => {
+            if (!file) return resolve(null);
             const reader = new FileReader();
-            reader.readAsDataURL(file);
             reader.onload = () => resolve(reader.result);
             reader.onerror = error => reject(error);
+            reader.onabort = () => reject(new Error('File reading aborted'));
+            reader.readAsDataURL(file);
         });
     }
 };

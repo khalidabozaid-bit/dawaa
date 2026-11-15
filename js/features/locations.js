@@ -33,7 +33,7 @@ export const DEFAULT_LOCATIONS = [
         nameEN: 'Medical Refrigerator',
         icon: 'bx-fridge',
         color: '#06b6d4',
-        allowedCategories: ['Injections', 'Emergency', 'Serum'],
+        allowedCategories: ['Injections'],
         description: 'الأمصال وحقن التبريد والأدوية الحساسة للحرارة'
     },
     {
@@ -42,7 +42,7 @@ export const DEFAULT_LOCATIONS = [
         nameEN: 'Emergency Cabinet',
         icon: 'bx-first-aid',
         color: '#ef4444',
-        allowedCategories: ['Injections', 'Emergency', 'NSAID'],
+        allowedCategories: ['Injections', 'Analgesics'],
         description: 'أدوية الحالات الحرجة والإسعافات الأولية'
     },
     {
@@ -51,7 +51,7 @@ export const DEFAULT_LOCATIONS = [
         nameEN: 'Reception Cabinet',
         icon: 'bx-capsule',
         color: '#10b981',
-        allowedCategories: ['Anti-Flu', 'Laryng.', 'NSAID'],
+        allowedCategories: ['Respiratory', 'Analgesics'],
         description: 'أدوية البرد والمسكنات السريعة'
     },
     {
@@ -60,7 +60,7 @@ export const DEFAULT_LOCATIONS = [
         nameEN: 'Ambulance Kit',
         icon: 'bx-ambulance',
         color: '#f59e0b',
-        allowedCategories: ['Injections', 'Emergency'],
+        allowedCategories: ['Injections', 'Consumables'],
         description: 'حقن ومستلزمات الطوارئ المتنقلة'
     }
 ];

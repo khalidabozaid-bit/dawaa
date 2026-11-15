@@ -347,8 +347,8 @@
 }
 
 .report-icon.primary { background: var(--primary-light); color: var(--primary); }
-.report-icon.warning { background: #fee2e2; color: var(--danger); }
-.report-icon.danger { background: #ffedd5; color: var(--accent); }
+.report-icon.warning { background: #fef3c7; color: var(--accent); }
+.report-icon.danger { background: #fee2e2; color: var(--danger); }
 
 .report-info h3 { font-size: 15px; font-weight: 800; margin-bottom: 4px; }
 .report-info p { font-size: 12px; color: var(--text-muted); font-weight: 600; }

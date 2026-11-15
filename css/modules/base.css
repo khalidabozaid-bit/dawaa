@@ -1,18 +1,25 @@
 :root {
     /* Color Palette - Medical Professional */
-    --primary: #3b82f6; /* More vibrant blue from screenshot */
+    --primary: #3b82f6;
+    --primary-rgb: 59, 130, 246;
+    --primary-color: var(--primary);
     --primary-light: #eff6ff;
     --secondary: #10b981;
     --accent: #f59e0b;
     --danger: #ef4444;
-    --emergency: #8b5cf6;        /* Emergency Purple */
+    --emergency: #8b5cf6;
+    --info: #0284c7;
+    --success: #10b981;
     
     --bg-main: #f1f5f9;
     --bg-light: #f8fafc;
+    --bg-color: var(--bg-main);
+    --bg-soft: rgba(59, 130, 246, 0.08);
     --card-bg: #ffffff;
     --surface: #ffffff;
     --bg-secondary: #f1f5f9;
     --text-main: #1e293b;
+    --text-color: var(--text-main);
     --text-secondary: #475569;
     --text-muted: #64748b;
     --border-color: #e2e8f0;
@@ -21,6 +28,7 @@
     --glass-bg: rgba(255, 255, 255, 0.85);
     --glass-border: rgba(255, 255, 255, 0.4);
     --premium-blue: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
     
     /* Layout Constants */
     --header-height: 70px;
@@ -32,13 +40,14 @@
     /* Premium Shadows */
     --shadow-sm: 0 2px 4px rgba(0,0,0,0.02);
     --shadow-md: 0 8px 24px rgba(149, 157, 165, 0.12);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
     --shadow-premium: 0 12px 40px rgba(0, 0, 0, 0.08);
     
     /* Animation */
     --transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-* {
+*, *::before, *::after {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
@@ -46,12 +55,12 @@
 }
 
 body {
-    font-family: 'Tajawal', 'Inter', sans-serif;
+    font-family: 'Tajawal', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background-color: var(--bg-light);
     color: var(--text-main);
     line-height: 1.6;
     overflow-x: hidden;
-    transition: var(--transition);
+    transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 .container {

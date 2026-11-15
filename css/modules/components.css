@@ -750,7 +750,12 @@
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     color: var(--text-color);
-    padding: 12px;/* v12.0.0 Supreme Commander HUD Styles */
+    padding: 12px;
+    border-radius: 12px;
+    font-weight: 600;
+}
+
+/* v12.0.0 Supreme Commander HUD Styles */
 .hub-idle-state {
     padding: 40px 20px;
 }
@@ -987,9 +992,6 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 10px;
-}
-    border-radius: 12px;
-    font-weight: 600;
 }
 
 @keyframes pulseAudit {

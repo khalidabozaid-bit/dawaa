@@ -1,13 +1,15 @@
 // sw.js
-const CACHE_NAME = 'dawaa-cache-v18.6.0';
-const IMAGE_CACHE_NAME = 'dawaa-images-v1'; // Dedicated store for medicine visual assets
-const MAX_IMAGES = 100; // Limit to avoid device storage bloat
-
+const CACHE_NAME = 'dawaa-cache-v18.6.1';
+const IMAGE_CACHE_NAME = 'dawaa-images-v1';
+const MAX_IMAGES = 150;
 
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
   './manifest.json',
+  './assets/icons/default-med.png',
+  './assets/icons/icon-192.png',
+  './assets/icons/icon-512.png',
   './css/modules/base.css',
   './css/modules/layout.css',
   './css/modules/components.css',
@@ -19,20 +21,25 @@ const ASSETS_TO_CACHE = [
   './js/core/utils.js',
   './js/core/firebase-config.js',
   './js/core/sync.js',
+  './js/core/seed_data.js',
+  './js/core/egyptian_drugs.js',
   './js/features/inventory.js',
   './js/features/categories.js',
   './js/features/locations.js',
   './js/features/audit.js',
   './js/features/users.js',
+  './js/features/tasks.js',
   './js/features/export.js',
+  './js/recovery.js',
   './js/app.js',
-  './js/core/seed_data.js',
-  './js/core/egyptian_drugs.js',
+  'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js',
+  'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js',
+  'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js',
+  'https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js',
   'https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@400;500;600;700;800&display=swap',
   'https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css',
   'https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js'
 ];
-
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -41,14 +48,14 @@ self.addEventListener('install', (event) => {
         ASSETS_TO_CACHE.map((url) =>
           fetch(url, { cache: 'reload' })
             .then((res) => {
-              if (res.ok) return cache.put(url, res);
+              if (res && res.ok) return cache.put(url, res);
             })
             .catch((err) => console.warn('SW cache item failed:', url, err))
         )
       );
     })
   );
-  self.skipWaiting(); // Immediate activation v17.2.1
+  self.skipWaiting();
 });
 
 self.addEventListener('message', (event) => {
@@ -58,80 +65,88 @@ self.addEventListener('message', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  self.clients.claim(); // v9.10.1: Immediate sovereignty
-  
-  // Purge older caches (v10.1.0: Preserve IMAGE_CACHE_NAME)
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME && cacheName !== IMAGE_CACHE_NAME) {
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
+    Promise.all([
+      self.clients.claim(),
+      caches.keys().then((cacheNames) => {
+        return Promise.all(
+          cacheNames
+            .filter((name) => name !== CACHE_NAME && name !== IMAGE_CACHE_NAME)
+            .map((name) => caches.delete(name))
+        );
+      })
+    ])
   );
 });
 
-/**
- * Strategy: Visual Sovereignty (Stale-While-Revalidate) v10.1.0
- * For images, use the cache but fetch updates in the background.
- */
 async function handleImageFetch(request) {
+  if (request.method !== 'GET') {
+    return fetch(request);
+  }
+
   const cache = await caches.open(IMAGE_CACHE_NAME);
-  const cachedResponse = await cache.match(request);
+  const cachedResponse = await cache.match(request, { ignoreSearch: true });
   
   const fetchPromise = fetch(request).then(networkResponse => {
-      if (networkResponse.ok) {
-          cache.put(request, networkResponse.clone());
-          limitCacheSize(IMAGE_CACHE_NAME, MAX_IMAGES);
-      }
-      return networkResponse;
-  }).catch(() => {
-      // Silently fail network if offline; we already have cachedResponse
+    if (networkResponse && networkResponse.ok) {
+      cache.put(request, networkResponse.clone());
+      limitCacheSize(IMAGE_CACHE_NAME, MAX_IMAGES);
+    }
+    return networkResponse;
+  }).catch(async () => {
+    return cachedResponse || (await caches.match('./assets/icons/default-med.png')) || new Response('', { status: 404 });
   });
 
   return cachedResponse || fetchPromise;
 }
 
-/**
- * Prevent device storage bloat v10.1.0
- */
 async function limitCacheSize(cacheName, maxItems) {
-  const cache = await caches.open(cacheName);
-  const keys = await cache.keys();
-  if (keys.length > maxItems) {
-      await cache.delete(keys[0]);
-  }
+  try {
+    const cache = await caches.open(cacheName);
+    const keys = await cache.keys();
+    if (keys.length > maxItems) {
+      for (let i = 0; i < (keys.length - maxItems); i++) {
+        await cache.delete(keys[i]);
+      }
+    }
+  } catch (e) {}
 }
 
-
 self.addEventListener('fetch', (event) => {
+  // Never intercept non-GET requests (mutations, uploads, Firestore writes)
+  if (event.request.method !== 'GET') return;
+
   const url = new URL(event.request.url);
+
+  // Chrome extensions and non-HTTP
+  if (!url.protocol.startsWith('http')) return;
   
-  // v10.1.0: Intercept image requests (Medicine Photos & Icons)
+  // Image requests
   const isImage = event.request.destination === 'image' || 
-                  url.pathname.match(/\.(png|jpg|jpeg|gif|webp)$/i) ||
+                  url.pathname.match(/\.(png|jpg|jpeg|gif|webp|svg)$/i) ||
                   url.origin.includes('firebasestorage');
 
   if (isImage) {
-      event.respondWith(handleImageFetch(event.request));
-      return;
+    event.respondWith(handleImageFetch(event.request));
+    return;
   }
 
-  // Network-First for HTML navigation so updates load immediately when online
+  // Navigation requests (HTML SPA)
   if (event.request.mode === 'navigate') {
-      event.respondWith(
-          fetch(event.request).catch(() => caches.match('./index.html'))
-      );
-      return;
+    event.respondWith(
+      fetch(event.request).catch(async () => {
+        const cached = await caches.match('./index.html', { ignoreSearch: true });
+        return cached || new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } });
+      })
+    );
+    return;
   }
 
+  // General GET requests
   event.respondWith(
     fetch(event.request)
       .then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200 && event.request.method === 'GET') {
+        if (networkResponse && networkResponse.status === 200) {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseToCache);
@@ -139,7 +154,9 @@ self.addEventListener('fetch', (event) => {
         }
         return networkResponse;
       })
-      .catch(() => caches.match(event.request))
+      .catch(async () => {
+        const cached = await caches.match(event.request, { ignoreSearch: true });
+        return cached || new Response('Network error (offline)', { status: 504, headers: { 'Content-Type': 'text/plain' } });
+      })
   );
 });
-

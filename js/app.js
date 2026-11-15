@@ -33,7 +33,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.6.0', // Universal Sovereign v18.6.0
+    VERSION: '18.6.1', // Universal Sovereign v18.6.1
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -96,6 +96,8 @@ const App = {
             console.log("BOOT: [STEP 1] Setting Globals");
             window.App = App;
             window.UI = UI;
+            const verEl = document.getElementById('app-version-tag');
+            if (verEl) verEl.textContent = `v${this.VERSION}`;
 
             if (localStorage.getItem('dawaa_recovery_mode') === 'true') {
                 return await this.initUIOnly();
@@ -324,7 +326,7 @@ const App = {
                     email: user.email,
                     displayName: localStorage.getItem('dawaa-temp-name') || user.email.split('@')[0],
                     role: role,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    createdAt: (typeof firebase !== 'undefined' && firebase?.firestore?.FieldValue?.serverTimestamp ? firebase.firestore.FieldValue.serverTimestamp() : new Date().toISOString())
                 };
                 
                 await db.collection('users').doc(user.uid).set(profile);
@@ -922,7 +924,7 @@ const App = {
             }
 
             UI.closeModal();
-            this.renderInventoryList(await Inventory.getAggregatedStock(), 'inventory-grid', true);
+            await this.renderInventory(); if (this.renderDashboard) this.renderDashboard();
         } catch (err) {
             console.error('Save Entry Failed:', err);
             UI.showToast('فشل حفظ البيانات ❌', 'danger');
@@ -1502,7 +1504,9 @@ const App = {
 
 
     async handleMasterSearch(query) {
-        if (!query) return this.renderInventory(); this.renderDashboard();
+        if (!query) {
+            return this.renderInventory();
+        }
         try {
             const results = await Categories.searchMaster(query);
             this.renderMasterData(results);
@@ -1962,20 +1966,17 @@ window.toggleTheme = () => {
 // --- Settings Logic ---
 App.handleBackup = async function() {
     try {
-        UI.showToast('جاري تحضير الملف...', 'info');
+        UI.showToast('جاري تحضير النسخة الاحتياطية...', 'info');
         const data = {
-            categories: await DB.getAll('categories'),
-            medicineMaster: await DB.getAll('medicineMaster'),
-            inventory: await DB.getAll('inventory'),
+            categories: (await DB.getAll('categories')) || [],
+            medicineMaster: (await DB.getAll('medicineMaster')) || [],
+            inventory: (await DB.getAll('inventory')) || [],
+            locations: (await DB.getAll('locations')) || [],
+            audit_sessions: (await DB.getAll('audit_sessions')) || [],
+            team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '9.8.0'
+            version: '18.6.1'
         };
-
-
-
-
-
-
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -1984,7 +1985,7 @@ App.handleBackup = async function() {
         a.download = `dawaa_backup_${new Date().toISOString().split('T')[0]}.dawaa`;
         a.click();
         URL.revokeObjectURL(url);
-        UI.showToast('تم تصدير النسخة الاحتياطية بنجاح', 'success');
+        UI.showToast('تم تصدير النسخة الاحتياطية الشاملة بنجاح ✅', 'success');
     } catch (err) {
         UI.showToast('فشل التصدير: ' + err.message, 'danger');
     }
@@ -1992,7 +1993,7 @@ App.handleBackup = async function() {
 
 App.handleRestore = async function(input) {
     if (!input.files || !input.files[0]) return;
-    if (!confirm('تحذير: سيتم مسح البيانات الحالية واستبدالها بالنسخة المرفوعة. هل أنت متأكد؟')) return;
+    if (!confirm('تحذير: سيتم استبدال البيانات الحالية بالنسخة الاحتياطية المرفوعة. هل تريد المتابعة؟')) return;
 
     try {
         UI.showToast('جاري استعادة البيانات...', 'info');
@@ -2003,16 +2004,32 @@ App.handleRestore = async function(input) {
             try {
                 const data = JSON.parse(e.target.result);
                 
-                await DB.clear('categories');
-                await DB.clear('medicineMaster');
-                await DB.clear('inventory');
+                if (Array.isArray(data.categories) && data.categories.length > 0) {
+                    await DB.clear('categories');
+                    for (const cat of data.categories) await DB.put('categories', cat);
+                }
+                if (Array.isArray(data.medicineMaster) && data.medicineMaster.length > 0) {
+                    await DB.clear('medicineMaster');
+                    for (const med of data.medicineMaster) await DB.put('medicineMaster', med);
+                }
+                if (Array.isArray(data.inventory)) {
+                    await DB.clear('inventory');
+                    for (const inv of data.inventory) await DB.put('inventory', inv);
+                }
+                if (Array.isArray(data.locations) && data.locations.length > 0) {
+                    await DB.clear('locations');
+                    for (const loc of data.locations) await DB.put('locations', loc);
+                }
+                if (Array.isArray(data.audit_sessions)) {
+                    await DB.clear('audit_sessions');
+                    for (const s of data.audit_sessions) await DB.put('audit_sessions', s);
+                }
+                if (Array.isArray(data.team) && data.team.length > 0) {
+                    localStorage.setItem('dawaa_team_members', JSON.stringify(data.team));
+                }
 
-                for (const cat of data.categories) await DB.put('categories', cat);
-                for (const med of data.medicineMaster) await DB.put('medicineMaster', med);
-                for (const inv of data.inventory) await DB.put('inventory', inv);
-
-                UI.showToast('تمت استعادة البيانات بنجاح!', 'success');
-                setTimeout(() => window.location.reload(), 1500);
+                UI.showToast('تمت استعادة كافة البيانات الشاملة بنجاح! ✨', 'success');
+                setTimeout(() => window.location.reload(), 1200);
             } catch (err) {
                 UI.showToast('فشل قراءة الملف: ' + err.message, 'danger');
             }
@@ -4301,7 +4318,12 @@ App.updateAdminUI = function() {
         hubCard.querySelector('p').textContent = 'إدارة الجلسات الحالية، الانضمام، أو البدء';
     }
     
-    if (window.UI && UI.currentView === 'master') this.renderInventory(); this.renderDashboard();
+    if (window.UI && (UI.currentView === 'master' || UI.currentView === 'inventory')) {
+        this.renderInventory();
+    }
+    if (window.UI && UI.currentView === 'dashboard') {
+        this.renderDashboard();
+    }
 };
 
 App.deleteMasterMedicine = async function(id) {
@@ -4379,8 +4401,8 @@ App.handleAdminUnlock = async function() {
 };
 
 window.onerror = (msg, url, line, col, error) => {
-    console.warn('Dawaa Global Catch (Handled):', { msg, url, line, error });
-    return true; // prevent error bubbling
+    console.error('Dawaa Global Catch:', { msg, url, line, error });
+    return false; // allow standard error logging
 };
 
 const _boot = async () => {

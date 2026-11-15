@@ -22,9 +22,9 @@ export const Inventory = {
             medicineId: data.medicineId,
             location: data.location || 'المستودع الرئيسي',
             quantity: parseFloat(data.quantity) || 0,
-            expiryDate: data.expiryDate || '2027-12',
+            expiryDate: data.expiryDate || null,
             auditId: data.auditId || null,
-            userName: data.userName || (window.App && window.App.user ? window.App.user.displayName || window.App.user.email : 'خالد'),
+            userName: data.userName || (window.App && window.App.user ? window.App.user.displayName || window.App.user.email : 'صيدلي'),
             type: data.type || 'medicine',
             timestamp: new Date().toISOString()
         };
@@ -83,19 +83,21 @@ export const Inventory = {
             if (!stockMap.has(medId)) {
                 stockMap.set(medId, {
                     totalQuantity: 0,
-                    earliestExpiry: entry.expiryDate || '2027-12',
+                    earliestExpiry: entry.expiryDate || null,
                     location: entry.location || 'المستودع الرئيسي'
                 });
             }
             const s = stockMap.get(medId);
             s.totalQuantity += Number(entry.quantity || 0);
-            if (entry.expiryDate && entry.expiryDate < s.earliestExpiry) {
-                s.earliestExpiry = entry.expiryDate;
+            if (entry.expiryDate) {
+                if (!s.earliestExpiry || new Date(entry.expiryDate) < new Date(s.earliestExpiry)) {
+                    s.earliestExpiry = entry.expiryDate;
+                }
             }
         }
 
         return masterData.map(m => {
-            const stock = stockMap.get(m.id) || { totalQuantity: 15, earliestExpiry: '2027-12', location: 'المستودع الرئيسي' };
+            const stock = stockMap.get(m.id) || { totalQuantity: 0, earliestExpiry: null, location: 'غير محدد' };
             return {
                 id: m.id,
                 medicineId: m.id,
@@ -113,14 +115,35 @@ export const Inventory = {
 
     async getCurrentStockStats() {
         const stock = await this.getCurrentStockProducts();
+        const now = new Date();
         const sixMonthsAway = new Date();
         sixMonthsAway.setMonth(sixMonthsAway.getMonth() + 6);
 
         return {
             totalItems: stock.length,
             lowStockCount: stock.filter(item => (item.totalQuantity || 0) <= 5).length,
-            expiringCount: stock.filter(item => item.earliestExpiry && new Date(item.earliestExpiry) <= sixMonthsAway).length
+            expiringCount: stock.filter(item => {
+                if (!item.earliestExpiry) return false;
+                const d = new Date(item.earliestExpiry);
+                return !isNaN(d.getTime()) && d <= sixMonthsAway && d >= now;
+            }).length,
+            expiredCount: stock.filter(item => {
+                if (!item.earliestExpiry) return false;
+                const d = new Date(item.earliestExpiry);
+                return !isNaN(d.getTime()) && d < now;
+            }).length
         };
+    },
+
+    async getEntriesByAudit(auditId) {
+        if (!auditId) return [];
+        const entries = (await DB.getAll('inventory')) || [];
+        return entries.filter(e => e.auditId === auditId);
+    },
+
+    async getRecentAuditActivity(sessionId) {
+        const entries = await this.getEntriesByAudit(sessionId);
+        return entries.slice(-10).reverse();
     },
 
     renderCard(item, master, isAggregated = true) {
