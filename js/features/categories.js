@@ -49,6 +49,9 @@ export const Categories = {
                     });
                 }
             }
+
+            // Pre-populate category cache
+            await this.getAllSorted();
         } catch (err) {
             console.error('Dawaa Categories: Seed Error:', err);
         }
@@ -68,11 +71,69 @@ export const Categories = {
 
     async getAllSorted() {
         const cats = await DB.getAll('categories');
+        this.cache = cats;
+        this._cache = cats;
         return cats.sort((a, b) => (a.nameAR || '').localeCompare(b.nameAR || ''));
     },
 
+    getCategoryNameAR(catId) {
+        if (!catId) return 'عام';
+        if (CATEGORY_MAP[catId] && CATEGORY_MAP[catId].ar) {
+            return CATEGORY_MAP[catId].ar;
+        }
+        const cache = this.cache || this._cache;
+        if (cache) {
+            const found = cache.find(c => c.id === catId);
+            if (found && found.nameAR) return found.nameAR;
+        }
+        // Common translations mapping
+        const aliases = {
+            'Antibiotics': 'مضادات حيوية',
+            'NSAID': 'مسكنات وآلام',
+            'Analgesics': 'مسكنات وخافض حرارة',
+            'Anti-Flu': 'أدوية البرد والإنفلونزا',
+            'Laryng.': 'أذن وحنجرة وجهاز تنفسي',
+            'Local Prep': 'كريمات ودهانات',
+            'GIT Prep': 'أدوية المعدة والجهاز الهضمي',
+            'Gastro': 'أدوية الجهاز الهضمي والقولون',
+            'Respiratory': 'جهاز تنفسي',
+            'Eye-Ear-Nose': 'قطرات عيون وأذن',
+            'Eye-Ear': 'قطرات ومراهم عيون وأذن',
+            'Injections': 'حقن وأمبولات',
+            'Consumables': 'مستلزمات طبية',
+            'Emergency': 'أدوية ومستلزمات الطوارئ',
+            'Serum': 'محاليل وأمصال تعويضية',
+            'Dermatology': 'مراهم وجلدية',
+            'Antihistamines': 'مضادات الحساسية والربو'
+        };
+        return aliases[catId] || catId;
+    },
+
+    getCategoryIcon(catId) {
+        if (!catId) return 'bx-category';
+        if (CATEGORY_MAP[catId] && CATEGORY_MAP[catId].icon) {
+            return CATEGORY_MAP[catId].icon;
+        }
+        const cache = this.cache || this._cache;
+        if (cache) {
+            const found = cache.find(c => c.id === catId);
+            if (found && found.icon) return found.icon;
+        }
+        return 'bx-purchase-tag-alt';
+    },
+
     async getInfo(id) {
-        return await DB.get('categories', id) || { nameAR: id, icon: 'bx-package', color: '#64748b' };
+        if (CATEGORY_MAP[id]) {
+            return {
+                id: id,
+                nameAR: CATEGORY_MAP[id].ar,
+                icon: CATEGORY_MAP[id].icon,
+                color: CATEGORY_MAP[id].color
+            };
+        }
+        const fromDb = await DB.get('categories', id);
+        if (fromDb) return fromDb;
+        return { nameAR: this.getCategoryNameAR(id), icon: this.getCategoryIcon(id), color: '#64748b' };
     },
 
     async saveCategory(cat) {
@@ -117,16 +178,14 @@ export const Categories = {
     },
 
     getMedicineImage(med, options = {}) {
-        if (!med || !med.imagePath || med.imagePath === '') {
-            return `assets/icons/default-med.png`; // Fallback
+        if (!med) return 'assets/icons/default-med.png';
+        const img = med.imagePath || med.image || med.imageUrl || med.photo;
+        if (!img || img === '' || img === 'null' || img === 'undefined') {
+            return 'assets/icons/default-med.png'; // Fallback to default icon
         }
         
-        // v9.9.6: Unified Visualizer - Support Base64 AND Cloud URLs
-        if (med.imagePath.startsWith('data:image') || med.imagePath.startsWith('http')) {
-            return med.imagePath;
-        }
-        
-        return `assets/icons/default-med.png`;
+        // Return whatever image is stored (Base64 data:image, Cloud URL, Local asset path, Blob)
+        return img;
     },
 
 

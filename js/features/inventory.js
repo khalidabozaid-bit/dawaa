@@ -1,6 +1,8 @@
 // js/features/inventory.js
 import { DB } from '../core/db.js';
 import { Utils } from '../core/utils.js';
+import { Categories } from './categories.js';
+import { CATEGORY_MAP } from '../core/seed_data.js';
 
 /**
  * Inventory Management Feature
@@ -124,18 +126,49 @@ export const Inventory = {
     renderCard(item, master, isAggregated = true) {
         const m = master || item;
         if (!m) return '';
-        const imgUrl = window.Categories ? window.Categories.getMedicineImage(m) : 'assets/icons/default-med.png';
+        const imgUrl = Categories ? Categories.getMedicineImage(m) : (m.imagePath || 'assets/icons/default-med.png');
         const medId = item.medicineId || item.id || m.id;
         
-        let catName = m.categoryId || 'عام';
-        let catIcon = 'bx-purchase-tag-alt';
-        if (window.Categories && window.Categories.cache) {
-            const cat = window.Categories.cache.find(c => c.id === m.categoryId);
-            if (cat) {
-                catName = cat.nameAR;
-                catIcon = cat.icon || 'bx-category';
-            }
-        }
+        const DICT = {
+            'antibiotics': 'مضادات حيوية',
+            'antibiotic': 'مضادات حيوية',
+            'nsaid': 'مسكنات وآلام',
+            'analgesics': 'مسكنات وخافض حرارة',
+            'anti-flu': 'أدوية البرد والإنفلونزا',
+            'flu': 'أدوية البرد',
+            'cold': 'أدوية البرد',
+            'laryng.': 'أذن وحنجرة',
+            'laryng': 'أذن وحنجرة',
+            'local prep': 'كريمات ودهانات',
+            'local': 'كريمات ودهانات',
+            'git prep': 'أدوية المعدة',
+            'git': 'أدوية المعدة',
+            'gastro': 'أدوية المعدة والقولون',
+            'respiratory': 'جهاز تنفسي',
+            'eye-ear-nose': 'قطرات عيون وأذن',
+            'eye-ear': 'قطرات ومراهم عيون وأذن',
+            'injections': 'حقن',
+            'injection': 'حقن',
+            'consumables': 'مستلزمات طبية',
+            'emergency': 'أدوية ومستلزمات الطوارئ',
+            'serum': 'محاليل وأمصال',
+            'dermatology': 'مراهم وجلدية',
+            'antihistamines': 'مضادات الحساسية والربو'
+        };
+
+        const cleanCat = (m.categoryId || '').toString().trim().toLowerCase();
+        let catName = DICT[cleanCat] || (CATEGORY_MAP && CATEGORY_MAP[m.categoryId] ? CATEGORY_MAP[m.categoryId].ar : (m.categoryId || 'عام'));
+        let catIcon = (CATEGORY_MAP && CATEGORY_MAP[m.categoryId]?.icon) || 'bx-purchase-tag-alt';
+        if (cleanCat.includes('antibiotic')) catIcon = 'bx-dna';
+        else if (cleanCat.includes('nsaid')) catIcon = 'bx-plus-medical';
+        else if (cleanCat.includes('flu') || cleanCat.includes('cold')) catIcon = 'bx-wind';
+        else if (cleanCat.includes('laryng')) catIcon = 'bx-microphone-off';
+        else if (cleanCat.includes('git') || cleanCat.includes('gastro')) catIcon = 'bx-dish';
+        else if (cleanCat.includes('local')) catIcon = 'bx-spray-can';
+        else if (cleanCat.includes('respir')) catIcon = 'bx-mask';
+        else if (cleanCat.includes('eye')) catIcon = 'bx-bullseye';
+        else if (cleanCat.includes('inject')) catIcon = 'bx-injection';
+        else if (cleanCat.includes('consum')) catIcon = 'bx-package';
         
         return `
             <div class="inventory-card master-catalog-card" data-med-id="${medId}" style="display:flex; align-items:center; gap:12px; padding:12px 16px; margin-bottom:12px; border-radius:16px; background:var(--surface); border:1px solid var(--border-color); box-shadow:var(--shadow-sm); transition:all 0.2s ease;">

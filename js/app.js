@@ -17,6 +17,9 @@ import { Recovery } from './recovery.js';
 window.UI = UI;
 window.Locations = Locations;
 window.Audit = Audit;
+window.Categories = Categories;
+window.Inventory = Inventory;
+window.Users = Users;
 window.DB = DB;
 window.db = db;
 window.auth = auth;
@@ -28,7 +31,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.4.0', // Universal Sovereign v18.3.0
+    VERSION: '18.5.0', // Universal Sovereign v18.5.0
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -486,15 +489,14 @@ const App = {
             const cats = await Categories.getAllSorted();
             const allMeds = (await DB.getAll('medicineMaster')) || [];
 
-            // 1. Populate Dropdown Select (v18.2.0)
+            // 1. Populate Dropdown Select - Just the Category name in Arabic, no counts
             const selectEl = document.getElementById('category-dropdown-select');
             if (selectEl) {
                 selectEl.innerHTML = `
-                    <option value="">📦 جميع التصنيفات (عرض الكل - ${allMeds.length} صنف)</option>
+                    <option value="">📦 جميع التصنيفات</option>
                     ${cats.map(c => {
-                        const count = allMeds.filter(m => m.categoryId === c.id).length;
                         const isSel = this.selectedCategoryId === c.id ? 'selected' : '';
-                        return `<option value="${c.id}" ${isSel}>${c.nameAR} (${c.nameEN || ''}) — ${count} صنف</option>`;
+                        return `<option value="${c.id}" ${isSel}>${c.nameAR}</option>`;
                     }).join('')}
                 `;
             }
@@ -773,7 +775,7 @@ const App = {
                     <i class='bx bx-transfer-alt'></i>
                     <div class="search-info">
                         <span class="search-name">${m.nameEN} (كود #${m.id})</span>
-                        <span class="search-sub">من قسم: ${m.categoryId}</span>
+                        <span class="search-sub">من قسم: ${Categories.getCategoryNameAR(m.categoryId)}</span>
                     </div>
                     <button class="sm-btn btn-secondary">سحب للقسم</button>
                 </div>
