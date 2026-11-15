@@ -1,4 +1,4 @@
-# 🛡️ Dawaa Master Protocol (SYSTEM_PROTOCOL v17.2.7) 🛡️
+# 🛡️ Dawaa Master Protocol (SYSTEM_PROTOCOL v17.2.8) 🛡️
 
 This document is the **Source of Truth** for the Dawaa PWA architecture. It serves as a mandatory pre-flight checklist and operational manual for any AI assistant or developer working on the codebase.
 
@@ -90,4 +90,4 @@ The following actions **MUST** trigger a Cloud Push:
 
 ---
 **Status**: ACTIVE 🛡️🏗️🛡️🚀🔥
-**Last Updated**: v17.2.7 (Unified Master Protocol)
+**Last Updated**: v17.2.8 (Unified Master Protocol)

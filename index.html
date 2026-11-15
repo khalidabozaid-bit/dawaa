@@ -70,7 +70,7 @@
             </div>
             <div class="app-logo">
                 <i class='bx bxs-capsule'></i>
-                <h1>دواء <span style="font-size: 10px; opacity: 0.5">v17.2.7</span></h1>
+                <h1>دواء <span style="font-size: 10px; opacity: 0.5">v17.2.8</span></h1>
                 <span id="network-status" class="network-status-badge online" title="حالة الاتصال بالسحابة">
                     <i class='bx bx-wifi'></i>
                 </span>
@@ -186,6 +186,7 @@
             </div>
 
             <!-- Quick Category Filters -->
+            <div id="inventory-filter-alert" class="mb-15" style="display: none;"></div>
             <div id="category-chips" class="category-chips-container mb-20">
                 <!-- Chips rendered here -->
             </div>
@@ -294,7 +295,7 @@
             </div>
 
             <div class="version-footer mt-20">
-                <p>دواء للمستودعات الذكية - v17.2.7</p>
+                <p>دواء للمستودعات الذكية - v17.2.8</p>
                 <p style="font-size: 11px; opacity: 0.6">نظام حديث ومتكامل لجرد وإدارة الأدوية</p>
             </div>
         </section>
@@ -302,7 +303,7 @@
         <!-- Audit Hub View (Modal / Sub-view for Team Auditing) -->
         <section id="view-audit-hub" class="view">
             <div class="view-header">
-                <button class="back-btn" onclick="window.UI.switchView('view-settings')" title="العودة للإعدادات">
+                <button class="back-btn" onclick="window.history.length > 1 ? window.history.back() : window.UI.switchView('view-dashboard')" title="العودة">
                     <i class='bx bx-chevron-right'></i>
                 </button>
                 <h2>مركز عمليات الجرد</h2>
@@ -313,6 +314,39 @@
             </div>
             <div id="hub-session-content" class="mt-20"></div>
             <div id="hub-structured-content" class="mt-20" style="display: none;"></div>
+        </section>
+
+        <!-- Task Runner View (High-Speed Counting) -->
+        <section id="view-task-runner" class="view">
+            <div class="view-header">
+                <button class="back-btn" onclick="window.history.length > 1 ? window.history.back() : window.UI.switchView('view-dashboard')" title="العودة">
+                    <i class='bx bx-chevron-right'></i>
+                </button>
+                <div class="task-info-bar">
+                    <h2 id="tr-location-name">جاري تحميل المهمة...</h2>
+                    <p id="tr-session-name" class="text-muted small">...</p>
+                </div>
+                <button class="btn-primary sm-btn" onclick="window.App.finishTask()">إنهاء المهمة ✅</button>
+            </div>
+
+            <div class="progress-container mt-15">
+                <div class="progress-text" style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; margin-bottom: 6px;">
+                    <span>نسبة الإنجاز</span>
+                    <span id="tr-progress-pct">0%</span>
+                </div>
+                <div class="progress-bar-wrap" style="height: 8px; background: var(--border-color); border-radius: 4px; overflow: hidden;">
+                    <div id="tr-progress-bar" class="progress-bar" style="width: 0%; height: 100%; background: var(--primary); transition: width 0.3s ease;"></div>
+                </div>
+            </div>
+
+            <div class="search-bar mt-20">
+                <i class='bx bx-search'></i>
+                <input type="text" id="tr-search" placeholder="بحث سريع في المهمة..." oninput="window.App.handleTaskSearch(this.value)">
+            </div>
+
+            <div id="tr-items-list" class="task-items-list mt-20">
+                <!-- Fast Counting Cards rendered here -->
+            </div>
         </section>
     </main>
 

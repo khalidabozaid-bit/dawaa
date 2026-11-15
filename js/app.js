@@ -23,7 +23,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '17.2.7', // Universal Sovereign v17.2.7
+    VERSION: '17.2.8', // Universal Sovereign v17.2.8
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -410,6 +410,31 @@ const App = {
             const container = document.getElementById('inventory-items-list') || document.getElementById('inventory-list');
             if (!container) return;
 
+            this.currentFilterType = type;
+            const alertContainer = document.getElementById('inventory-filter-alert');
+            if (alertContainer) {
+                if (type === 'low-stock') {
+                    alertContainer.style.display = 'block';
+                    alertContainer.innerHTML = `
+                        <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--danger); padding: 8px 14px; border-radius: 12px; font-size: 13px; font-weight: 700;">
+                            <span><i class='bx bx-trending-down'></i> تصفية: عرض الأرصدة الحرجة (5 أو أقل)</span>
+                            <button onclick="window.App.renderInventory('detailed')" style="border: none; background: var(--surface); color: var(--text-main); padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: bold; cursor: pointer;">عرض الكل ✖</button>
+                        </div>
+                    `;
+                } else if (type === 'expiry') {
+                    alertContainer.style.display = 'block';
+                    alertContainer.innerHTML = `
+                        <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: var(--warning); padding: 8px 14px; border-radius: 12px; font-size: 13px; font-weight: 700;">
+                            <span><i class='bx bx-time-five'></i> تصفية: الأدوية التي تنتهي خلال 6 أشهر</span>
+                            <button onclick="window.App.renderInventory('detailed')" style="border: none; background: var(--surface); color: var(--text-main); padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: bold; cursor: pointer;">عرض الكل ✖</button>
+                        </div>
+                    `;
+                } else {
+                    alertContainer.style.display = 'none';
+                    alertContainer.innerHTML = '';
+                }
+            }
+
             this.renderCategoryChips(); // Refresh filters
 
             let data = await Inventory.getCurrentStockProducts();
@@ -422,11 +447,10 @@ const App = {
                 sixMonths.setMonth(sixMonths.getMonth() + 6);
                 data = data.filter(i => (i.earliestExpiry || i.expiryDate) && new Date(i.earliestExpiry || i.expiryDate) <= sixMonths);
             } else if (type === 'low-stock') {
-                data = await Inventory.getCurrentStockProducts();
                 data = data.filter(i => (i.totalQuantity || 0) <= 5);
             }
 
-            // 2. Secondary Filtering by Category (Efficiency Protocol)
+            // 2. Secondary Filtering by Category
             if (this.selectedCategoryId) {
                 data = data.filter(i => {
                     const m = masterMap.get(i.medicineId || i.id);
@@ -464,7 +488,12 @@ const App = {
 
     filterByCategory(catId) {
         this.selectedCategoryId = catId;
-        this.renderInventory();
+        const searchInput = document.getElementById('global-search');
+        if (searchInput && searchInput.value.trim().length > 0) {
+            this.handleGlobalSearch(searchInput.value);
+        } else {
+            this.renderInventory(this.currentFilterType || 'detailed');
+        }
     },
 
     async renderReportData(data, container, isAggregated = false) {
@@ -1022,7 +1051,8 @@ const App = {
 
             const medId = await Categories.saveMedicine(data);
             UI.closeModal();
-            this.renderMasterData();
+            this.renderInventory();
+            this.renderDashboard();
 
             // Background Cloud Upload (v9.9.5 - Ironclad)
             if (file && this.userRole === 'admin') {
@@ -1073,7 +1103,7 @@ const App = {
 
             await Categories.saveMedicine(updated);
             UI.closeModal();
-            this.renderMasterData();
+            this.renderInventory(); this.renderDashboard();
 
             // Background Cloud Upload (v9.9.5 - Ironclad Update)
             if (file && this.userRole === 'admin') {
@@ -1338,7 +1368,7 @@ const App = {
                 await Categories.deleteMedicine(id);
                 UI.showToast('تم الحذف', 'info');
                 UI.closeModal();
-                this.renderMasterData();
+                this.renderInventory(); this.renderDashboard();
             } catch (err) {
                 UI.showToast(err.message, 'danger');
             }
@@ -1364,14 +1394,27 @@ const App = {
         const q = (query || '').trim().toLowerCase();
         try {
             let data = await Inventory.getCurrentStockProducts();
+            
+            // Respect active filter type if set
+            if (this.currentFilterType === 'expiry') {
+                const sixMonths = new Date();
+                sixMonths.setMonth(sixMonths.getMonth() + 6);
+                data = data.filter(i => (i.earliestExpiry || i.expiryDate) && new Date(i.earliestExpiry || i.expiryDate) <= sixMonths);
+            } else if (this.currentFilterType === 'low-stock') {
+                data = data.filter(i => (i.totalQuantity || 0) <= 5);
+            }
+
+            if (this.selectedCategoryId) {
+                data = data.filter(m => m.categoryId === this.selectedCategoryId);
+            }
+
             if (q.length > 0) {
                 data = data.filter(m => 
                     (m.nameEN && m.nameEN.toLowerCase().includes(q)) ||
                     (m.nameAR && m.nameAR.toLowerCase().includes(q)) ||
-                    (m.categoryId && m.categoryId.toLowerCase().includes(q))
+                    (m.categoryId && m.categoryId.toLowerCase().includes(q)) ||
+                    (m.id && m.id.toLowerCase().includes(q))
                 );
-            } else if (this.selectedCategoryId) {
-                data = data.filter(m => m.categoryId === this.selectedCategoryId);
             }
 
             this.renderInventoryList(data, 'inventory-items-list', true);
@@ -1412,7 +1455,7 @@ const App = {
 
 
     async handleMasterSearch(query) {
-        if (!query) return this.renderMasterData();
+        if (!query) return this.renderInventory(); this.renderDashboard();
         try {
             const results = await Categories.searchMaster(query);
             this.renderMasterData(results);
@@ -2051,7 +2094,7 @@ App.updateAdminUI = function() {
         hubCard.querySelector('p').textContent = 'إدارة الجلسات الحالية، الانضمام، أو البدء';
     }
     
-    if (window.UI && UI.currentView === 'master') this.renderMasterData();
+    if (window.UI && UI.currentView === 'master') this.renderInventory(); this.renderDashboard();
 };
 
 App.deleteMasterMedicine = async function(id) {
@@ -2099,11 +2142,13 @@ App.openProfile = function() {
 };
 
 App.showLowStock = function() {
+    this.selectedCategoryId = null;
     if (window.UI) UI.switchView('view-inventory');
     this.renderInventory('low-stock');
 };
 
 App.showExpiring = function() {
+    this.selectedCategoryId = null;
     if (window.UI) UI.switchView('view-inventory');
     this.renderInventory('expiry');
 };
