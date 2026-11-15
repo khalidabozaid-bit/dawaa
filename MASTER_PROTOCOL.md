@@ -1,4 +1,4 @@
-# 🛡️ Dawaa Master Protocol (SYSTEM_PROTOCOL v18.1.0) 🛡️
+# 🛡️ Dawaa Master Protocol (SYSTEM_PROTOCOL v18.2.0) 🛡️
 
 This document is the **Source of Truth** for the Dawaa PWA architecture. It serves as a mandatory pre-flight checklist and operational manual for any AI assistant or developer working on the codebase.
 
@@ -106,6 +106,19 @@ The following actions **MUST** trigger a Cloud Push:
   - Dedicated Expiry Monitor Screen: Built standalone view/modal accessible via Dashboard stat card and quick actions, displaying all medicines chronologically by earliest expiration date with KPI status cards (حرجة، تنبيه، صالحة), filter tabs, and real-time search.
   - Dark/Light Mode Theme Overhaul: Unified `dark-mode` and `dark-theme` classes across `ui.js` and `dark.css`, updated header and settings icons simultaneously, and provided full dark theme overrides for all cards, forms, inputs, modals, and segmented controls.
 
+### Lesson 08: Exterior Batch Pills, Native Calendar Pickers, Warehouse Dropdown Filter, and Audit Origin Reference (v18.2.0)
+- **Context**: Practical operational refinements requested by user:
+  1. Multi-batch count modal required a clear separated "Add Batch Box" (`صندوق إضافة دفعة جديدة`) at the bottom rather than confusing in-place rows.
+  2. Exterior medicine cards in audit needed to display total quantity and each batch breakdown (`[ 10 × 2026-03 🔴 ]`, `[ 15 × 2027-12 🟢 ]`) with color status directly on the card without opening the modal.
+  3. Date inputs were difficult to type on mobile, needing native calendar/month pickers (`<input type="month">`) plus quick year shortcuts (`+1سنة`, `+2سنة`).
+  4. Warehouse category chips were cut off when many categories existed; replaced by a clean category dropdown selector displaying all categories with icons and counts.
+  5. Expiry Monitor needed clear attribution to which audit session the data is based on ("مرتكزة على أنهي جرد"), along with a session switcher dropdown and metadata.
+- **Resolution**:
+  - Audit Exterior Card: Counted cards render prominent total count and individual color-coded batch pill badges.
+  - Multi-Batch Modal: Designed dedicated Add Batch Box at the bottom with `<input type="month">` native picker and quick year shortcuts, keeping the current batches neatly listed at the top.
+  - Warehouse Category Filter: Replaced horizontal chips with full `#category-dropdown-select` containing every category and its medicine count.
+  - Expiry Monitor: Added Audit Origin Reference Box showing session name, host, date, and status, with full dropdown support to switch between live stock and past audits.
+
 ---
 
 ## 🎯 5. Tech Debt & Roadmap
@@ -115,8 +128,9 @@ The following actions **MUST** trigger a Cloud Push:
 - [x] **Unified 3-View Warehouse Flow & Interactive Counters**: Completed in v17.2.3.
 - [x] **Hierarchical Audit Workflow & Full Storage Location Management**: Completed in v18.0.1.
 - [x] **Multi-Batch Audit with Auto-Suggest & Color Coding, Dedicated Expiry Monitor, Master Warehouse**: Completed in v18.1.0.
+- [x] **Exterior Batch Pills, Calendar Picker, Category Dropdown, and Audit Reference in Expiry Monitor**: Completed in v18.2.0.
 - [ ] **Conflict Solver**: Implement smarter "Multi-user edit" resolution.
 
 ---
 **Status**: ACTIVE 🛡️🏗️🛡️🚀🔥
-**Last Updated**: v18.1.0 (Unified Master Protocol)
+**Last Updated**: v18.2.0 (Unified Master Protocol)

@@ -26,7 +26,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.1.0', // Universal Sovereign v18.1.0
+    VERSION: '18.2.0', // Universal Sovereign v18.2.0
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -471,28 +471,51 @@ const App = {
 
 
     async renderCategoryChips() {
-        const container = document.getElementById('category-chips');
-        if (!container) return;
-
         try {
             const cats = await Categories.getAllSorted();
-            container.innerHTML = `
-                <div class="category-chip ${!this.selectedCategoryId ? 'active' : ''}" onclick="window.App.filterByCategory(null)">
-                    <i class='bx bx-category'></i> <span>الكل</span>
-                </div>
-                ${cats.map(c => `
-                    <div class="category-chip ${this.selectedCategoryId === c.id ? 'active' : ''}" onclick="window.App.filterByCategory('${c.id}')">
-                        <i class='bx ${c.icon}'></i> <span>${c.nameAR}</span>
+            const allMeds = (await DB.getAll('medicineMaster')) || [];
+
+            // 1. Populate Dropdown Select (v18.2.0)
+            const selectEl = document.getElementById('category-dropdown-select');
+            if (selectEl) {
+                selectEl.innerHTML = `
+                    <option value="">📦 جميع التصنيفات (عرض الكل - ${allMeds.length} صنف)</option>
+                    ${cats.map(c => {
+                        const count = allMeds.filter(m => m.categoryId === c.id).length;
+                        const isSel = this.selectedCategoryId === c.id ? 'selected' : '';
+                        return `<option value="${c.id}" ${isSel}>${c.nameAR} (${c.nameEN || ''}) — ${count} صنف</option>`;
+                    }).join('')}
+                `;
+            }
+
+            // 2. Populate Chips container (if present)
+            const container = document.getElementById('category-chips');
+            if (container) {
+                container.innerHTML = `
+                    <div class="category-chip ${!this.selectedCategoryId ? 'active' : ''}" onclick="window.App.filterByCategory('')">
+                        <i class='bx bx-category'></i> <span>الكل</span>
                     </div>
-                `).join('')}
-            `;
+                    ${cats.map(c => `
+                        <div class="category-chip ${this.selectedCategoryId === c.id ? 'active' : ''}" onclick="window.App.filterByCategory('${c.id}')">
+                            <i class='bx ${c.icon}'></i> <span>${c.nameAR}</span>
+                        </div>
+                    `).join('')}
+                `;
+            }
         } catch (err) {
-            console.error(err);
+            console.error('Error rendering category filter:', err);
         }
     },
 
     filterByCategory(catId) {
-        this.selectedCategoryId = catId;
+        this.selectedCategoryId = catId || null;
+        
+        // Sync Dropdown Select
+        const selectEl = document.getElementById('category-dropdown-select');
+        if (selectEl && selectEl.value !== (catId || '')) {
+            selectEl.value = catId || '';
+        }
+
         const searchInput = document.getElementById('global-search');
         if (searchInput && searchInput.value.trim().length > 0) {
             this.handleGlobalSearch(searchInput.value);
@@ -2819,6 +2842,18 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 ${medicines.map(med => {
                     const imgUrl = Categories.getMedicineImage(med);
                     if (med.isCounted) {
+                        const batchesHtml = (med.batches && med.batches.length > 0)
+                            ? med.batches.map(b => {
+                                const badge = window.App.calcExpiryBadge(b.expiryDate);
+                                return `
+                                    <span class="batch-exterior-pill" style="display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:bold; padding:2px 6px; border-radius:6px; background:${badge.bg}; color:${badge.color}; border:1px solid ${badge.color}40; margin:1px 0;">
+                                        <i class='bx ${badge.icon}' style="font-size:11px;"></i>
+                                        <span>${b.quantity} &times; ${b.expiryDate}</span>
+                                    </span>
+                                `;
+                            }).join('')
+                            : `<small style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${med.countedExpiry || ''}</small>`;
+
                         return `
                             <div class="square-card counted" onclick="window.App.openCountModal('${med.id}')" title="انقر لتعديل العد">
                                 <span class="badge-done">
@@ -2828,8 +2863,12 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                                     <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover;">
                                 </div>
                                 <h3>${med.nameEN || med.nameAR}</h3>
-                                <div class="counted-qty-tag">الرصيد: ${med.countedQty}</div>
-                                <small style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${med.countedExpiry || ''}</small>
+                                <div class="counted-qty-tag" style="font-size:12px; font-weight:800; background:rgba(16,185,129,0.15); color:var(--secondary); padding:2px 8px; border-radius:6px; margin:4px 0;">
+                                    إجمالي: ${med.countedQty}
+                                </div>
+                                <div class="card-batches-breakdown" style="display:flex; flex-direction:column; gap:2px; width:100%; margin-top:4px;">
+                                    ${batchesHtml}
+                                </div>
                             </div>
                         `;
                     } else {
@@ -3004,7 +3043,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         }
     },
 
-    // --- Fast Multi-Batch Count Modal (Level 5) with Suggestions #2 and #4 ---
+    // --- Fast Multi-Batch Count Modal (Level 5) with Dedicated Add Box & Calendar ---
     async openCountModal(medicineId) {
         const med = await DB.get('medicineMaster', medicineId);
         if (!med) return;
@@ -3014,73 +3053,44 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const existingCount = (session?.counts && session.counts[countKey]) || null;
         const imgUrl = Categories.getMedicineImage(med);
 
-        // Item #4: Auto-suggest / prefill known batches from session or inventory DB
+        // Auto-suggest known batches from session or inventory DB
         let initialBatches = [];
         if (existingCount && Array.isArray(existingCount.batches) && existingCount.batches.length > 0) {
-            initialBatches = existingCount.batches;
+            initialBatches = existingCount.batches.map(b => ({ ...b }));
         } else if (existingCount && existingCount.quantity !== undefined) {
             initialBatches = [{ quantity: existingCount.quantity, expiryDate: existingCount.expiryDate || '2027-12' }];
         } else {
-            // Check inventory entries for previously known batches
             const allInv = (await DB.getAll('inventory')) || [];
             const prevEntries = allInv.filter(e => e.medicineId === medicineId);
             if (prevEntries.length > 0) {
-                // Remove duplicates by expiryDate
                 const seenExp = new Set();
                 initialBatches = [];
                 for (const pe of prevEntries) {
                     const exp = pe.expiryDate || '2027-12';
                     if (!seenExp.has(exp)) {
                         seenExp.add(exp);
-                        initialBatches.push({ quantity: pe.quantity || '', expiryDate: exp, isSuggested: true });
+                        initialBatches.push({ quantity: pe.quantity || 0, expiryDate: exp, isSuggested: true });
                     }
                 }
             } else {
-                initialBatches = [{ quantity: '', expiryDate: '2027-12' }];
+                initialBatches = [];
             }
         }
 
-        const renderBatchRowHtml = (batch, index) => {
-            const expBadge = this.calcExpiryBadge(batch.expiryDate || '2027-12');
-            return `
-                <div class="batch-row" style="display:flex; flex-direction:column; gap:8px; padding:12px; background:var(--bg-secondary); border-radius:12px; border:1px solid var(--border-color); position:relative;">
-                    ${batch.isSuggested ? `
-                        <div style="font-size:10px; color:var(--primary); font-weight:bold; display:flex; align-items:center; gap:4px;">
-                            <i class='bx bx-history'></i> دفعة مسجلة سابقاً في النظام (عدّل الكمية الحالية)
-                        </div>
-                    ` : ''}
-                    <div style="display:flex; gap:10px; align-items:flex-end;">
-                        <div style="flex:1;">
-                            <label class="form-label" style="font-size:11px; margin-bottom:4px;">الكمية (العدد):</label>
-                            <input type="number" class="form-input batch-qty-input" min="0" step="1" value="${batch.quantity !== undefined ? batch.quantity : ''}" placeholder="0" style="font-size:18px; font-weight:800; text-align:center; padding:8px;" oninput="window.App.updateModalBatchTotal()" required>
-                        </div>
-                        <div style="flex:1.4;">
-                            <label class="form-label" style="font-size:11px; margin-bottom:4px;">تاريخ الصلاحية:</label>
-                            <input type="text" class="form-input batch-expiry-input" value="${batch.expiryDate || '2027-12'}" placeholder="YYYY-MM (مثال 2027-12)" style="font-size:14px; font-weight:bold; padding:8px; border-color:${expBadge.color};" oninput="window.App.updateBatchExpiryIndicator(this)" required>
-                        </div>
-                        <button type="button" class="icon-btn text-danger batch-del-btn" onclick="window.App.removeBatchRow(this)" title="حذف هذه الدفعة" style="height:42px; width:42px; border-radius:10px; background:var(--surface); border:1px solid var(--border-color); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                            <i class='bx bx-trash' style="font-size:18px; color:var(--danger);"></i>
-                        </button>
-                    </div>
-                    <!-- Item #2: Dynamic Expiry Indicator Badge -->
-                    <div class="batch-expiry-badge-container">
-                        <span class="batch-expiry-badge" style="display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:bold; padding:3px 8px; border-radius:6px; background:${expBadge.bg}; color:${expBadge.color};">
-                            <i class='bx ${expBadge.icon}'></i> ${expBadge.text}
-                        </span>
-                    </div>
-                </div>
-            `;
-        };
+        this._modalMedicineId = medicineId;
+        this._modalBatches = initialBatches;
 
-        const totalQtyInitial = initialBatches.reduce((s, b) => s + (parseFloat(b.quantity) || 0), 0);
+        const defaultYear = new Date().getFullYear() + 2;
+        const defaultExpiry = `${defaultYear}-12`;
+        const initialBadge = this.calcExpiryBadge(defaultExpiry);
 
         UI.showModal(`
-            <div class="modal-header">
-                <h2>تسجيل الجرد الفعلي (دُفعات وتواريخ متعددة)</h2>
+            <div class="modal-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 12px;">
+                <h2 style="font-size:16px; margin:0;"><i class='bx bx-barcode-reader' style="color:var(--primary);"></i> تسجيل الجرد الفعلي والدفعات</h2>
             </div>
             
-            <div style="display:flex; align-items:center; gap:12px; margin-bottom:15px; padding:10px; background:var(--bg-secondary); border-radius:12px;">
-                <div style="width:48px; height:48px; border-radius:10px; overflow:hidden; flex-shrink:0;">
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; padding:10px; background:var(--bg-secondary); border-radius:12px;">
+                <div style="width:46px; height:46px; border-radius:10px; overflow:hidden; flex-shrink:0;">
                     <img src="${imgUrl}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                 </div>
                 <div style="flex:1; min-width:0;">
@@ -3089,122 +3099,183 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             </div>
 
-            <form onsubmit="event.preventDefault(); window.App.saveCountFromModal('${medicineId}');">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <label class="form-label" style="margin:0; font-size:12px; font-weight:bold;">دُفعات الصلاحية والكميات المحصورة:</label>
-                    <button type="button" class="btn-ghost sm-btn" onclick="window.App.addBatchRow()" style="font-size:11px; color:var(--primary); font-weight:bold;">
-                        <i class='bx bx-plus-circle'></i> إضافة دفعة / صلاحية أخرى
-                    </button>
+            <!-- 1. Registered Batches List -->
+            <div style="margin-bottom: 12px;">
+                <label class="form-label" style="font-size:12px; font-weight:bold; margin-bottom:6px; display:block;">الدفعات المسجلة حالياً:</label>
+                <div id="modal-batches-list-container" style="display:flex; flex-direction:column; gap:8px; max-height:160px; overflow-y:auto; padding:2px;">
+                    ${this.renderModalBatchesHtml()}
+                </div>
+            </div>
+
+            <!-- 2. Dedicated Add Batch Box (صندوق إضافة دفعة جديدة) -->
+            <div class="add-batch-box" style="background: rgba(59,130,246,0.04); border: 1.5px dashed var(--primary); border-radius: 12px; padding: 12px; margin-bottom: 14px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+                    <strong style="font-size: 12px; color: var(--primary); display:flex; align-items:center; gap: 4px;">
+                        <i class='bx bx-plus-circle'></i> صندوق إضافة دفعة جديدة
+                    </strong>
+                    <span id="new-batch-badge-preview" style="font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 6px; background: ${initialBadge.bg}; color: ${initialBadge.color};">
+                        ${initialBadge.text}
+                    </span>
                 </div>
 
-                <div id="batch-rows-container" style="display:flex; flex-direction:column; gap:10px; max-height:280px; overflow-y:auto; margin-bottom:15px; padding:2px;">
-                    ${initialBatches.map((b, idx) => renderBatchRowHtml(b, idx)).join('')}
+                <div style="display:grid; grid-template-columns: 1fr 1.6fr; gap: 8px; margin-bottom: 10px;">
+                    <div>
+                        <label class="form-label" style="font-size: 11px; margin-bottom:3px;">الكمية (العدد):</label>
+                        <input type="number" id="new-batch-qty" class="form-input" min="1" step="1" placeholder="مثال: 15" style="font-size: 16px; font-weight: 800; text-align: center; padding: 6px;">
+                    </div>
+                    <div>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+                            <label class="form-label" style="font-size: 11px; margin:0;">تاريخ الصلاحية (تقويم):</label>
+                            <div style="display:flex; gap: 3px;">
+                                <button type="button" class="btn-ghost" style="padding: 1px 5px; font-size: 9px; border-radius: 4px;" onclick="window.App.quickSetNewBatchExpiry(1)">+1سنة</button>
+                                <button type="button" class="btn-ghost" style="padding: 1px 5px; font-size: 9px; border-radius: 4px;" onclick="window.App.quickSetNewBatchExpiry(2)">+2سنة</button>
+                            </div>
+                        </div>
+                        <input type="month" id="new-batch-expiry" class="form-input" value="${defaultExpiry}" onchange="window.App.updateNewBatchBadgePreview()" style="font-size: 13px; font-weight: bold; cursor: pointer; padding: 6px;">
+                    </div>
                 </div>
 
-                <!-- Live Cumulative Total -->
-                <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:rgba(59,130,246,0.08); border-radius:10px; border:1px solid rgba(59,130,246,0.2); margin-bottom:15px;">
-                    <span style="font-size:13px; font-weight:bold; color:var(--text-main);">إجمالي الكمية المحصورة:</span>
-                    <strong id="modal-batch-total-qty" style="font-size:20px; font-weight:800; color:var(--primary);">${totalQtyInitial} وحدة</strong>
-                </div>
+                <button type="button" class="btn-primary sm-btn w-100" onclick="window.App.addNewBatchFromBox()" style="display:flex; align-items:center; justify-content:center; gap: 6px; padding: 7px; font-size: 12px;">
+                    <i class='bx bx-plus'></i> إضافة هذه الدفعة للقائمة
+                </button>
+            </div>
 
-                <div class="form-actions">
-                    <button type="submit" class="btn-primary">💾 حفظ واعتماد العد</button>
-                    <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
-                </div>
-            </form>
+            <!-- Cumulative Live Total -->
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:rgba(59,130,246,0.08); border-radius:10px; border:1px solid rgba(59,130,246,0.2); margin-bottom:12px;">
+                <span style="font-size:12px; font-weight:bold; color:var(--text-main);">إجمالي الكمية المسجلة:</span>
+                <strong id="modal-batch-total-qty" style="font-size:18px; font-weight:800; color:var(--primary);">${this.calcModalBatchesTotal()} وحدة</strong>
+            </div>
+
+            <div class="form-actions" style="display:flex; gap:8px;">
+                <button type="button" class="btn-primary" onclick="window.App.saveCountFromModal('${medicineId}')" style="flex:1;">💾 حفظ واعتماد العد</button>
+                <button type="button" class="btn-ghost" onclick="window.UI.closeModal()" style="flex:0.6;">إلغاء</button>
+            </div>
         `);
     },
 
-    addBatchRow() {
-        const container = document.getElementById('batch-rows-container');
-        if (!container) return;
-        const newRow = document.createElement('div');
-        newRow.className = 'batch-row';
-        newRow.style.cssText = 'display:flex; flex-direction:column; gap:8px; padding:12px; background:var(--bg-secondary); border-radius:12px; border:1px solid var(--border-color); position:relative;';
-        
-        const expBadge = this.calcExpiryBadge('2027-12');
-        newRow.innerHTML = `
-            <div style="display:flex; gap:10px; align-items:flex-end;">
-                <div style="flex:1;">
-                    <label class="form-label" style="font-size:11px; margin-bottom:4px;">الكمية (العدد):</label>
-                    <input type="number" class="form-input batch-qty-input" min="0" step="1" value="" placeholder="0" style="font-size:18px; font-weight:800; text-align:center; padding:8px;" oninput="window.App.updateModalBatchTotal()" required autofocus>
+    renderModalBatchesHtml() {
+        if (!this._modalBatches || this._modalBatches.length === 0) {
+            return `
+                <div style="text-align:center; padding:15px; color:var(--text-muted); font-size:11px; background:var(--bg-secondary); border-radius:8px;">
+                    <i class='bx bx-info-circle'></i> لا توجد دفعات مضافة بعد. أدخل الكمية والتاريخ في الصندوق أدناه ثم اضغط "إضافة".
                 </div>
-                <div style="flex:1.4;">
-                    <label class="form-label" style="font-size:11px; margin-bottom:4px;">تاريخ الصلاحية:</label>
-                    <input type="text" class="form-input batch-expiry-input" value="2027-12" placeholder="YYYY-MM" style="font-size:14px; font-weight:bold; padding:8px; border-color:${expBadge.color};" oninput="window.App.updateBatchExpiryIndicator(this)" required>
+            `;
+        }
+
+        return this._modalBatches.map((b, idx) => {
+            const badge = this.calcExpiryBadge(b.expiryDate);
+            return `
+                <div class="modal-batch-card" style="display:flex; align-items:center; justify-content:space-between; background:var(--surface); border:1px solid var(--border-color); border-radius:8px; padding:6px 12px; box-shadow:0 1px 2px rgba(0,0,0,0.03);">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <strong style="font-size:14px; color:var(--primary);">${b.quantity} وحدة</strong>
+                        <span style="color:var(--text-muted); font-size:12px;">&bull;</span>
+                        <span style="font-weight:bold; font-size:12px; color:var(--text-main); display:inline-flex; align-items:center; gap:3px;">
+                            <i class='bx bx-calendar'></i> ${b.expiryDate}
+                        </span>
+                        <span style="display:inline-flex; align-items:center; gap:2px; font-size:10px; font-weight:bold; padding:1px 6px; border-radius:4px; background:${badge.bg}; color:${badge.color};">
+                            <i class='bx ${badge.icon}'></i> ${badge.text}
+                        </span>
+                        ${b.isSuggested ? `<span style="font-size:9px; background:rgba(59,130,246,0.1); color:var(--primary); padding:1px 4px; border-radius:3px;">سابق 📋</span>` : ''}
+                    </div>
+                    <button type="button" class="icon-btn text-danger" onclick="window.App.removeModalBatch(${idx})" title="حذف هذه الدفعة" style="padding:4px;">
+                        <i class='bx bx-trash' style="font-size:16px; color:var(--danger);"></i>
+                    </button>
                 </div>
-                <button type="button" class="icon-btn text-danger batch-del-btn" onclick="window.App.removeBatchRow(this)" title="حذف هذه الدفعة" style="height:42px; width:42px; border-radius:10px; background:var(--surface); border:1px solid var(--border-color); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                    <i class='bx bx-trash' style="font-size:18px; color:var(--danger);"></i>
-                </button>
-            </div>
-            <div class="batch-expiry-badge-container">
-                <span class="batch-expiry-badge" style="display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:bold; padding:3px 8px; border-radius:6px; background:${expBadge.bg}; color:${expBadge.color};">
-                    <i class='bx ${expBadge.icon}'></i> ${expBadge.text}
-                </span>
-            </div>
-        `;
-        container.appendChild(newRow);
-        this.updateModalBatchTotal();
+            `;
+        }).join('');
     },
 
-    removeBatchRow(btn) {
-        const rows = document.querySelectorAll('.batch-row');
-        if (rows.length <= 1) {
-            UI.showToast('يجب الاحتفاظ بدفعة واحدة على الأقل', 'warning');
+    calcModalBatchesTotal() {
+        if (!this._modalBatches) return 0;
+        return this._modalBatches.reduce((s, b) => s + (parseFloat(b.quantity) || 0), 0);
+    },
+
+    addNewBatchFromBox() {
+        const qtyEl = document.getElementById('new-batch-qty');
+        const expEl = document.getElementById('new-batch-expiry');
+        if (!qtyEl || !expEl) return;
+
+        const qty = parseFloat(qtyEl.value);
+        const exp = expEl.value ? expEl.value.trim() : '';
+
+        if (!qty || qty <= 0) {
+            UI.showToast('يرجى إدخال كمية صحيحة أكبر من صفر', 'warning');
+            qtyEl.focus();
             return;
         }
-        const row = btn.closest('.batch-row');
-        if (row) row.remove();
-        this.updateModalBatchTotal();
-    },
 
-    updateBatchExpiryIndicator(input) {
-        const badgeObj = this.calcExpiryBadge(input.value);
-        input.style.borderColor = badgeObj.color;
-        const row = input.closest('.batch-row');
-        if (row) {
-            const badgeContainer = row.querySelector('.batch-expiry-badge-container');
-            if (badgeContainer) {
-                badgeContainer.innerHTML = `
-                    <span class="batch-expiry-badge" style="display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:bold; padding:3px 8px; border-radius:6px; background:${badgeObj.bg}; color:${badgeObj.color};">
-                        <i class='bx ${badgeObj.icon}'></i> ${badgeObj.text}
-                    </span>
-                `;
-            }
+        if (!exp) {
+            UI.showToast('يرجى اختيار تاريخ الصلاحية من التقويم', 'warning');
+            expEl.focus();
+            return;
         }
+
+        if (!this._modalBatches) this._modalBatches = [];
+        this._modalBatches.push({ quantity: qty, expiryDate: exp });
+
+        // Reset Box Inputs
+        qtyEl.value = '';
+        qtyEl.focus();
+
+        // Refresh List & Total
+        const listContainer = document.getElementById('modal-batches-list-container');
+        if (listContainer) listContainer.innerHTML = this.renderModalBatchesHtml();
+
+        const totalEl = document.getElementById('modal-batch-total-qty');
+        if (totalEl) totalEl.textContent = `${this.calcModalBatchesTotal()} وحدة`;
     },
 
-    updateModalBatchTotal() {
-        const inputs = document.querySelectorAll('.batch-qty-input');
-        let total = 0;
-        inputs.forEach(inp => {
-            total += parseFloat(inp.value) || 0;
-        });
+    removeModalBatch(index) {
+        if (!this._modalBatches) return;
+        this._modalBatches.splice(index, 1);
+
+        const listContainer = document.getElementById('modal-batches-list-container');
+        if (listContainer) listContainer.innerHTML = this.renderModalBatchesHtml();
+
         const totalEl = document.getElementById('modal-batch-total-qty');
-        if (totalEl) totalEl.textContent = `${total} وحدة`;
+        if (totalEl) totalEl.textContent = `${this.calcModalBatchesTotal()} وحدة`;
+    },
+
+    quickSetNewBatchExpiry(yearsToAdd) {
+        const expEl = document.getElementById('new-batch-expiry');
+        if (!expEl) return;
+        const now = new Date();
+        const year = now.getFullYear() + yearsToAdd;
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        expEl.value = `${year}-${month}`;
+        this.updateNewBatchBadgePreview();
+    },
+
+    updateNewBatchBadgePreview() {
+        const expEl = document.getElementById('new-batch-expiry');
+        const badgeContainer = document.getElementById('new-batch-badge-preview');
+        if (!expEl || !badgeContainer) return;
+
+        const badge = this.calcExpiryBadge(expEl.value);
+        badgeContainer.style.background = badge.bg;
+        badgeContainer.style.color = badge.color;
+        badgeContainer.innerHTML = badge.text;
     },
 
     async saveCountFromModal(medicineId) {
-        const rows = document.querySelectorAll('.batch-row');
-        const batches = [];
-        rows.forEach(row => {
-            const qty = row.querySelector('.batch-qty-input')?.value;
-            const exp = row.querySelector('.batch-expiry-input')?.value.trim();
-            if (qty !== undefined && qty !== '') {
-                batches.push({
-                    quantity: parseFloat(qty) || 0,
-                    expiryDate: exp || '2027-12'
-                });
-            }
-        });
+        // Auto-include uncommitted input from the Add Batch Box if filled
+        const qtyEl = document.getElementById('new-batch-qty');
+        const expEl = document.getElementById('new-batch-expiry');
+        if (qtyEl && expEl && parseFloat(qtyEl.value) > 0 && expEl.value) {
+            if (!this._modalBatches) this._modalBatches = [];
+            this._modalBatches.push({
+                quantity: parseFloat(qtyEl.value),
+                expiryDate: expEl.value.trim()
+            });
+        }
 
-        if (batches.length === 0) {
-            UI.showToast('يرجى إدخال كمية دفعة واحدة على الأقل', 'warning');
+        if (!this._modalBatches || this._modalBatches.length === 0) {
+            UI.showToast('يرجى إضافة دفعة واحدة على الأقل قبل الحفظ', 'warning');
             return;
         }
 
         await Audit.recordCount(this.selectedAuditSessionId, this.selectedAuditLocationId, medicineId, {
-            batches: batches
+            batches: this._modalBatches
         });
 
         UI.closeModal();
@@ -3212,77 +3283,153 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         this.renderAuditView();
     },
 
-    // --- Dedicated Expiry Monitor (شاشة متابعة الصلاحيات المستقلة) ---
+    // --- Dedicated Expiry Monitor with Audit Reference & Session Selector ---
     async openExpiryMonitorModal() {
         try {
-            const inventory = (await DB.getAll('inventory')) || [];
+            const sessions = (await Audit.getAllSessions()) || [];
             const masterMeds = (await DB.getAll('medicineMaster')) || [];
             const masterMap = new Map(masterMeds.map(m => [m.id, m]));
             const locs = (await Locations.getAll()) || [];
             const locMap = new Map(locs.map(l => [l.id, l.nameAR]));
 
-            // Flatten & Sort by expiry date ascending
-            const items = inventory.map(item => {
-                const med = masterMap.get(item.medicineId) || { nameEN: 'Unknown', nameAR: 'غير معروف' };
-                const locName = item.location || locMap.get(item.locationId) || 'المستودع الرئيسي';
-                const badge = this.calcExpiryBadge(item.expiryDate);
-                return {
-                    id: item.id,
-                    medicineId: item.medicineId,
-                    nameEN: med.nameEN || med.nameAR,
-                    nameAR: med.nameAR || med.nameEN,
-                    imagePath: med.imagePath,
-                    location: locName,
-                    quantity: item.quantity,
-                    expiryDate: item.expiryDate || '2027-12',
-                    badge: badge
-                };
-            }).sort((a, b) => (a.expiryDate || '').localeCompare(b.expiryDate || ''));
+            const currentSource = this._selectedExpirySourceId || 'live';
+            let items = [];
+            let sourceMeta = { name: 'المخزون الحالي المعتمد', date: 'الرصيد النشط', host: 'النظام', statusText: 'معتمد 🏁' };
+
+            if (currentSource === 'live') {
+                const inventory = (await DB.getAll('inventory')) || [];
+                const lastFinalized = sessions.find(s => s.status === 'finalized');
+                if (lastFinalized) {
+                    sourceMeta = {
+                        name: lastFinalized.name,
+                        date: new Date(lastFinalized.finalizedAt || lastFinalized.updatedAt).toLocaleDateString('ar-EG'),
+                        host: lastFinalized.host || 'خالد',
+                        statusText: 'آخر جرد معتمد 🏁'
+                    };
+                }
+                items = inventory.map(item => {
+                    const med = masterMap.get(item.medicineId) || { nameEN: 'Unknown', nameAR: 'غير معروف' };
+                    const locName = item.location || locMap.get(item.locationId) || 'المستودع الرئيسي';
+                    const badge = this.calcExpiryBadge(item.expiryDate);
+                    return {
+                        id: item.id,
+                        medicineId: item.medicineId,
+                        nameEN: med.nameEN || med.nameAR,
+                        nameAR: med.nameAR || med.nameEN,
+                        imagePath: med.imagePath,
+                        location: locName,
+                        quantity: item.quantity,
+                        expiryDate: item.expiryDate || '2027-12',
+                        badge: badge
+                    };
+                });
+            } else {
+                const targetSession = sessions.find(s => s.id === currentSource);
+                if (targetSession) {
+                    sourceMeta = {
+                        name: targetSession.name,
+                        date: new Date(targetSession.startedAt).toLocaleDateString('ar-EG'),
+                        host: targetSession.host || 'خالد',
+                        statusText: targetSession.status === 'finalized' ? 'معتمد 🏁' : (targetSession.status === 'active' ? 'جاري 🟢' : 'معلق ⏸️')
+                    };
+                    const counts = targetSession.counts || {};
+                    for (const [key, record] of Object.entries(counts)) {
+                        const [locId, medId] = key.split('___');
+                        const med = masterMap.get(medId) || { nameEN: 'Unknown', nameAR: 'غير معروف' };
+                        const locName = locMap.get(locId) || 'المستودع';
+                        const batches = (record.batches && record.batches.length > 0)
+                            ? record.batches
+                            : [{ quantity: record.quantity, expiryDate: record.expiryDate }];
+                        for (const b of batches) {
+                            items.push({
+                                medicineId: medId,
+                                nameEN: med.nameEN || med.nameAR,
+                                nameAR: med.nameAR || med.nameEN,
+                                imagePath: med.imagePath,
+                                location: locName,
+                                quantity: b.quantity,
+                                expiryDate: b.expiryDate || '2027-12',
+                                badge: this.calcExpiryBadge(b.expiryDate)
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Sort by earliest expiration date ascending
+            items.sort((a, b) => (a.expiryDate || '').localeCompare(b.expiryDate || ''));
 
             const criticalCount = items.filter(i => i.badge.status === 'critical').length;
             const warningCount = items.filter(i => i.badge.status === 'warning').length;
             const goodCount = items.filter(i => i.badge.status === 'good').length;
 
             UI.showModal(`
-                <div class="modal-header" style="border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:15px;">
+                <div class="modal-header" style="border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:12px;">
                     <div>
                         <h2 style="margin:0; font-size:18px;"><i class='bx bx-calendar-event' style="color:var(--primary);"></i> شاشة متابعة تواريخ الصلاحية الشاملة</h2>
-                        <small class="text-muted">مراقبة تواريخ الصلاحية لجميع الأدوية والمواقع بحسب آخر جرد</small>
+                        <small class="text-muted">مراقبة تواريخ الصلاحية لجميع الأدوية والمواقع بحسب الجلسة المحددة</small>
+                    </div>
+                </div>
+
+                <!-- Audit Origin Reference Box (ارتكاز الجلسة) -->
+                <div class="expiry-audit-reference-box" style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:12px; padding:10px 14px; margin-bottom:12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <span style="font-size:12px; font-weight:bold; color:var(--text-main); display:flex; align-items:center; gap:6px;">
+                            <i class='bx bx-git-commit' style="color:var(--primary); font-size:18px;"></i> الجلسة المرتكز عليها:
+                        </span>
+                        <span style="font-size:11px; padding:2px 8px; border-radius:6px; background:rgba(59,130,246,0.12); color:var(--primary); font-weight:bold;">
+                            ${sourceMeta.statusText}
+                        </span>
+                    </div>
+                    <select id="expiry-source-select" class="form-select" style="font-size:12px; font-weight:bold; padding:6px 10px; margin-bottom:6px;" onchange="window.App.switchExpiryMonitorSource(this.value)">
+                        <option value="live" ${currentSource === 'live' ? 'selected' : ''}>📌 المخزون العام الحالي (حسب آخر جرد معتمد)</option>
+                        ${sessions.map(s => `
+                            <option value="${s.id}" ${currentSource === s.id ? 'selected' : ''}>
+                                📋 ${s.name} (${s.status === 'finalized' ? 'معتمد 🏁' : (s.status === 'active' ? 'جاري 🟢' : 'معلق ⏸️')}) — ${new Date(s.startedAt).toLocaleDateString('ar-EG')}
+                            </option>
+                        `).join('')}
+                    </select>
+                    <div style="font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:10px;">
+                        <span><i class='bx bx-user'></i> المسؤول: <strong style="color:var(--text-main);">${sourceMeta.host}</strong></span>
+                        <span>&bull;</span>
+                        <span><i class='bx bx-time'></i> التاريخ: <strong style="color:var(--text-main);">${sourceMeta.date}</strong></span>
+                        <span>&bull;</span>
+                        <span><i class='bx bx-layer'></i> إجمالي الأصناف: <strong style="color:var(--text-main);">${items.length}</strong></span>
                     </div>
                 </div>
 
                 <!-- KPI Status Bar -->
-                <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:15px;">
-                    <div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.25); border-radius:10px; padding:10px; text-align:center;">
-                        <span style="font-size:11px; color:var(--danger); font-weight:bold; display:block;">حرجة / منتهية (&le; 3 شهور)</span>
-                        <strong style="font-size:20px; color:var(--danger);">${criticalCount}</strong>
+                <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:12px;">
+                    <div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.25); border-radius:10px; padding:8px; text-align:center;">
+                        <span style="font-size:10px; color:var(--danger); font-weight:bold; display:block;">حرجة / منتهية (&le; 3 شهور)</span>
+                        <strong style="font-size:18px; color:var(--danger);">${criticalCount}</strong>
                     </div>
-                    <div style="background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.25); border-radius:10px; padding:10px; text-align:center;">
-                        <span style="font-size:11px; color:var(--accent); font-weight:bold; display:block;">تنبيه (&le; 6 شهور)</span>
-                        <strong style="font-size:20px; color:var(--accent);">${warningCount}</strong>
+                    <div style="background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.25); border-radius:10px; padding:8px; text-align:center;">
+                        <span style="font-size:10px; color:var(--accent); font-weight:bold; display:block;">تنبيه (&le; 6 شهور)</span>
+                        <strong style="font-size:18px; color:var(--accent);">${warningCount}</strong>
                     </div>
-                    <div style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.25); border-radius:10px; padding:10px; text-align:center;">
-                        <span style="font-size:11px; color:var(--secondary); font-weight:bold; display:block;">صالحة ومستقرة (&gt; 6 شهور)</span>
-                        <strong style="font-size:20px; color:var(--secondary);">${goodCount}</strong>
+                    <div style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.25); border-radius:10px; padding:8px; text-align:center;">
+                        <span style="font-size:10px; color:var(--secondary); font-weight:bold; display:block;">صالحة ومستقرة (&gt; 6 شهور)</span>
+                        <strong style="font-size:18px; color:var(--secondary);">${goodCount}</strong>
                     </div>
                 </div>
 
                 <!-- Search & Filter Controls -->
-                <div style="margin-bottom:15px;">
-                    <div class="search-bar" style="margin-bottom:10px;">
+                <div style="margin-bottom:12px;">
+                    <div class="search-bar" style="margin-bottom:8px;">
                         <i class='bx bx-search'></i>
                         <input type="text" id="expiry-monitor-search" placeholder="بحث باسم الدواء أو الموقع..." oninput="window.App.filterExpiryMonitorList(this.value)">
                     </div>
                     <div style="display:flex; gap:6px; overflow-x:auto; padding-bottom:4px;">
-                        <button class="btn-ghost sm-btn active" id="filter-exp-all" onclick="window.App.setExpiryFilter('all')" style="border-radius:20px; font-size:11px; padding:4px 12px;">الكل (${items.length})</button>
-                        <button class="btn-ghost sm-btn" id="filter-exp-critical" onclick="window.App.setExpiryFilter('critical')" style="border-radius:20px; font-size:11px; padding:4px 12px; color:var(--danger);">حرجة (${criticalCount})</button>
-                        <button class="btn-ghost sm-btn" id="filter-exp-warning" onclick="window.App.setExpiryFilter('warning')" style="border-radius:20px; font-size:11px; padding:4px 12px; color:var(--accent);">تنبيه (${warningCount})</button>
-                        <button class="btn-ghost sm-btn" id="filter-exp-good" onclick="window.App.setExpiryFilter('good')" style="border-radius:20px; font-size:11px; padding:4px 12px; color:var(--secondary);">صالحة (${goodCount})</button>
+                        <button class="btn-ghost sm-btn active" id="filter-exp-all" onclick="window.App.setExpiryFilter('all')" style="border-radius:20px; font-size:11px; padding:3px 10px;">الكل (${items.length})</button>
+                        <button class="btn-ghost sm-btn" id="filter-exp-critical" onclick="window.App.setExpiryFilter('critical')" style="border-radius:20px; font-size:11px; padding:3px 10px; color:var(--danger);">حرجة (${criticalCount})</button>
+                        <button class="btn-ghost sm-btn" id="filter-exp-warning" onclick="window.App.setExpiryFilter('warning')" style="border-radius:20px; font-size:11px; padding:3px 10px; color:var(--accent);">تنبيه (${warningCount})</button>
+                        <button class="btn-ghost sm-btn" id="filter-exp-good" onclick="window.App.setExpiryFilter('good')" style="border-radius:20px; font-size:11px; padding:3px 10px; color:var(--secondary);">صالحة (${goodCount})</button>
                     </div>
                 </div>
 
                 <!-- Expiry Items List -->
-                <div id="expiry-monitor-items" style="max-height:360px; overflow-y:auto; display:flex; flex-direction:column; gap:8px;">
+                <div id="expiry-monitor-items" style="max-height:300px; overflow-y:auto; display:flex; flex-direction:column; gap:8px;">
                     ${this.renderExpiryMonitorItemsHtml(items)}
                 </div>
 
@@ -3294,13 +3441,17 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             `);
 
-            // Cache items for quick filtering
             this._cachedExpiryItems = items;
             this._currentExpiryStatusFilter = 'all';
         } catch (err) {
             console.error('Error opening expiry monitor:', err);
             UI.showToast('تعذر فتح شاشة الصلاحية', 'danger');
         }
+    },
+
+    switchExpiryMonitorSource(sourceId) {
+        this._selectedExpirySourceId = sourceId;
+        this.openExpiryMonitorModal();
     },
 
     renderExpiryMonitorItemsHtml(items) {
