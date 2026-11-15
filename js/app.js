@@ -26,7 +26,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.0.1', // Universal Sovereign v18.0.0
+    VERSION: '18.1.0', // Universal Sovereign v18.1.0
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2094,7 +2094,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             container.innerHTML = cats.map(c => {
                 const count = allMeds.filter(m => m.categoryId === c.id).length;
                 return `
-                    <div class="square-card" onclick="window.App.openEditCategoryModal('${c.id}')" title="تعديل التصنيف">
+                    <div class="square-card" onclick="window.App.openCategoryDetailModal('${c.id}')" title="استعراض وإدارة أدوية ${c.nameAR}">
                         <i class='bx ${c.icon || 'bx-category'} square-icon' style="color: ${c.color || 'var(--primary)'}"></i>
                         <h3>${c.nameAR}</h3>
                         <span class="square-meta">${count} صنف دواء</span>
@@ -2112,26 +2112,203 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
         try {
             const locs = await Locations.getAll();
-            const cats = await Categories.getAllSorted();
-            const catMap = new Map(cats.map(c => [c.id, c.nameAR]));
-
             container.innerHTML = locs.map(loc => {
-                const isAll = !loc.allowedCategories || loc.allowedCategories.includes('all');
-                const catNames = isAll 
-                    ? 'كافة التصنيفات' 
-                    : loc.allowedCategories.map(cid => catMap.get(cid) || cid).slice(0, 2).join('، ') + (loc.allowedCategories.length > 2 ? '...' : '');
-
                 return `
-                    <div class="square-card" onclick="window.App.openEditLocationModal('${loc.id}')" title="تعديل مكان التخزين">
+                    <div class="square-card" onclick="window.App.openEditLocationModal('${loc.id}')" title="تعديل ${loc.nameAR}">
                         <i class='bx ${loc.icon || 'bx-map-pin'} square-icon' style="color: ${loc.color || 'var(--primary)'}"></i>
                         <h3>${loc.nameAR}</h3>
-                        <span class="square-meta" style="font-size: 10px; color: var(--primary);">${catNames}</span>
-                        <small style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">${loc.description || ''}</small>
                     </div>
                 `;
             }).join('');
         } catch (err) {
             console.error('Error rendering warehouse locations:', err);
+        }
+    },
+
+    // --- Interactive Category Drill-Down & Management ---
+    async openCategoryDetailModal(catId) {
+        try {
+            const cat = await Categories.getInfo(catId);
+            const allMeds = (await DB.getAll('medicineMaster')) || [];
+            const medsInCat = allMeds.filter(m => m.categoryId === catId);
+
+            UI.showModal(`
+                <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:16px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <i class='bx ${cat.icon || 'bx-category'}' style="font-size:24px; color:${cat.color || 'var(--primary)'}"></i>
+                        <div>
+                            <h2 style="margin:0; font-size:18px;">${cat.nameAR}</h2>
+                            <small class="text-muted">${medsInCat.length} صنف مسجل في هذا القسم</small>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn-primary sm-btn" onclick="window.App.openAddMedicineWithCat('${catId}')" title="إضافة دواء جديد لهذا القسم">
+                            <i class='bx bx-plus'></i> دواء جديد
+                        </button>
+                        <button class="btn-ghost sm-btn" onclick="window.App.openEditCategoryModal('${catId}')" title="تعديل بيانات التصنيف">
+                            <i class='bx bx-edit'></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="category-meds-list" style="max-height:380px; overflow-y:auto; display:flex; flex-direction:column; gap:10px;">
+                    ${medsInCat.map(m => {
+                        const img = Categories.getMedicineImage(m);
+                        return `
+                            <div class="cat-med-item" style="display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:12px;">
+                                <div style="width:40px; height:40px; border-radius:8px; overflow:hidden; flex-shrink:0;">
+                                    <img src="${img}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                                </div>
+                                <div style="flex:1; min-width:0;">
+                                    <h4 style="margin:0; font-size:13px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${m.nameEN || m.nameAR}</h4>
+                                    <span style="font-size:11px; color:var(--text-muted);">${m.nameAR && m.nameAR !== m.nameEN ? m.nameAR : (m.activeIngredient || 'دواء')}</span>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:6px;">
+                                    <button class="btn-ghost sm-btn" onclick="window.App.openMoveCategoryModal('${m.id}', '${catId}')" title="نقل إلى تصنيف آخر" style="font-size:11px; padding:4px 8px; border-radius:6px; border:1px solid var(--border-color);">
+                                        <i class='bx bx-transfer'></i> نقل
+                                    </button>
+                                    <button class="icon-btn" onclick="window.App.openEditMedicine('${m.id}')" title="تعديل الدواء" style="padding:4px;">
+                                        <i class='bx bx-edit-alt' style="font-size:16px;"></i>
+                                    </button>
+                                    <button class="icon-btn text-danger" onclick="window.App.deleteMasterMedicine('${m.id}')" title="حذف الدواء" style="padding:4px;">
+                                        <i class='bx bx-trash' style="font-size:16px; color:var(--danger);"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                    ${medsInCat.length === 0 ? `
+                        <div class="empty-state" style="padding:30px; text-align:center;">
+                            <i class='bx bx-capsule' style="font-size:36px; color:var(--text-muted); opacity:0.5;"></i>
+                            <p class="text-muted mt-10">لا توجد أدوية مسجلة في قسم "${cat.nameAR}" حالياً</p>
+                            <button class="btn-primary sm-btn mt-10" onclick="window.App.openAddMedicineWithCat('${catId}')">
+                                <i class='bx bx-plus'></i> إضافة أول دواء هنا
+                            </button>
+                        </div>
+                    ` : ''}
+                </div>
+
+                <div class="form-actions mt-15">
+                    <button class="btn-ghost w-100" onclick="window.UI.closeModal()">إغلاق</button>
+                </div>
+            `);
+        } catch (err) {
+            console.error('Error opening category detail:', err);
+            UI.showToast('تعذر فتح تفاصيل التصنيف', 'danger');
+        }
+    },
+
+    // --- Move Medicine to Another Category ---
+    async openMoveCategoryModal(medicineId, sourceCatId = null) {
+        try {
+            const med = await DB.get('medicineMaster', medicineId);
+            if (!med) return;
+            const cats = await Categories.getAllSorted();
+            const currentCat = cats.find(c => c.id === med.categoryId);
+
+            UI.showModal(`
+                <div class="modal-header">
+                    <h2>نقل الدواء إلى تصنيف آخر</h2>
+                </div>
+                <div style="background:var(--bg-secondary); padding:12px; border-radius:12px; margin-bottom:15px;">
+                    <h3 style="margin:0; font-size:14px; font-weight:800;">${med.nameEN}</h3>
+                    <p style="margin:4px 0 0 0; font-size:12px; color:var(--text-muted);">
+                        التصنيف الحالي: <strong style="color:var(--primary);">${currentCat ? currentCat.nameAR : med.categoryId}</strong>
+                    </p>
+                </div>
+                <form onsubmit="event.preventDefault(); window.App.saveMoveCategory('${medicineId}', '${sourceCatId || ''}');">
+                    <div class="form-group mb-15">
+                        <label class="form-label">اختر التصنيف الجديد:</label>
+                        <select id="move-target-cat" class="form-select" required>
+                            <option value="">-- حدد التصنيف المستهدف --</option>
+                            ${cats.filter(c => c.id !== med.categoryId).map(c => `
+                                <option value="${c.id}">${c.nameAR} (${c.nameEN || c.id})</option>
+                            `).join('')}
+                        </select>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn-primary">🔄 تأكيد النقل</button>
+                        <button type="button" class="btn-ghost" onclick="${sourceCatId ? `window.App.openCategoryDetailModal('${sourceCatId}')` : 'window.UI.closeModal()'}">إلغاء</button>
+                    </div>
+                </form>
+            `);
+        } catch (err) {
+            console.error('Error opening move modal:', err);
+            UI.showToast('تعذر فتح نافذة النقل', 'danger');
+        }
+    },
+
+    async saveMoveCategory(medicineId, sourceCatId) {
+        const targetCatId = document.getElementById('move-target-cat')?.value;
+        if (!targetCatId) {
+            UI.showToast('يرجى اختيار التصنيف المستهدف', 'warning');
+            return;
+        }
+
+        try {
+            const med = await DB.get('medicineMaster', medicineId);
+            if (!med) return;
+
+            med.categoryId = targetCatId;
+            await DB.put('medicineMaster', med);
+
+            const cats = await Categories.getAllSorted();
+            const newCat = cats.find(c => c.id === targetCatId);
+
+            UI.showToast(`تم نقل ${med.nameEN || med.nameAR} إلى ${newCat?.nameAR || targetCatId} بنجاح ✅`, 'success');
+
+            if (sourceCatId) {
+                this.openCategoryDetailModal(sourceCatId);
+            } else {
+                UI.closeModal();
+                this.renderInventory();
+                this.renderWarehouseCategories();
+            }
+        } catch (err) {
+            console.error('Error saving moved category:', err);
+            UI.showToast('فشل حفظ النقل', 'danger');
+        }
+    },
+
+    // --- Master Medicine Action Menu ---
+    async openMasterMedicineMenu(medicineId) {
+        try {
+            const med = await DB.get('medicineMaster', medicineId);
+            if (!med) return;
+
+            UI.showModal(`
+                <div class="modal-header">
+                    <h2>خيارات: ${med.nameEN || med.nameAR}</h2>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:10px; margin:15px 0;">
+                    <button class="action-card-btn secondary" onclick="window.App.openEditMedicine('${medicineId}')" style="justify-content:flex-start; padding:12px 16px;">
+                        <i class='bx bx-edit-alt' style="font-size:22px; color:var(--primary);"></i>
+                        <div class="action-card-text">
+                            <strong>تعديل بيانات الدواء</strong>
+                            <small>تعديل الاسم، المادة الفعالة، والباركود</small>
+                        </div>
+                    </button>
+                    <button class="action-card-btn secondary" onclick="window.App.openMoveCategoryModal('${medicineId}')" style="justify-content:flex-start; padding:12px 16px;">
+                        <i class='bx bx-transfer' style="font-size:22px; color:var(--secondary);"></i>
+                        <div class="action-card-text">
+                            <strong>نقل إلى تصنيف علاجي آخر</strong>
+                            <small>تغيير قسم الدواء في المستودع</small>
+                        </div>
+                    </button>
+                    <button class="action-card-btn secondary" onclick="window.App.deleteMasterMedicine('${medicineId}')" style="justify-content:flex-start; padding:12px 16px; border-color:rgba(239,68,68,0.3);">
+                        <i class='bx bx-trash' style="font-size:22px; color:var(--danger);"></i>
+                        <div class="action-card-text">
+                            <strong style="color:var(--danger);">حذف الصنف نهائياً</strong>
+                            <small>إزالة الدواء من قاعدة بيانات المستودع</small>
+                        </div>
+                    </button>
+                </div>
+                <div class="form-actions">
+                    <button class="btn-ghost w-100" onclick="window.UI.closeModal()">إلغاء</button>
+                </div>
+            `);
+        } catch (err) {
+            console.error('Error opening med menu:', err);
         }
     },
 
@@ -2803,7 +2980,31 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         }
     },
 
-    // --- Fast Count Modal (Level 5) ---
+    // --- Helper: Dynamic Expiry Status & Visual Badge (Item #2) ---
+    calcExpiryBadge(expiryStr) {
+        if (!expiryStr) return { text: 'غير محدد', color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.12)', icon: 'bx-help-circle', status: 'unknown' };
+        const parts = expiryStr.trim().split('-');
+        const year = parseInt(parts[0], 10);
+        const month = parts[1] ? parseInt(parts[1], 10) : 1;
+        if (isNaN(year)) return { text: 'صيغة غير صحيحة', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.12)', icon: 'bx-error', status: 'critical' };
+
+        const target = new Date(year, month - 1, 1);
+        const now = new Date();
+        const current = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthsDiff = (target.getFullYear() - current.getFullYear()) * 12 + (target.getMonth() - current.getMonth());
+
+        if (monthsDiff <= 0) {
+            return { text: 'منتهي الصلاحية ⛔', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', border: '#ef4444', icon: 'bx-x-circle', status: 'critical' };
+        } else if (monthsDiff <= 3) {
+            return { text: `حرج (${monthsDiff} شهر) 🔴`, color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', border: '#ef4444', icon: 'bx-error-circle', status: 'critical' };
+        } else if (monthsDiff <= 6) {
+            return { text: `تنبيه (${monthsDiff} شهر) 🟡`, color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)', border: '#f59e0b', icon: 'bx-time-five', status: 'warning' };
+        } else {
+            return { text: `صالح (${monthsDiff} شهر) 🟢`, color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)', border: '#10b981', icon: 'bx-check-circle', status: 'good' };
+        }
+    },
+
+    // --- Fast Multi-Batch Count Modal (Level 5) with Suggestions #2 and #4 ---
     async openCountModal(medicineId) {
         const med = await DB.get('medicineMaster', medicineId);
         if (!med) return;
@@ -2813,28 +3014,99 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const existingCount = (session?.counts && session.counts[countKey]) || null;
         const imgUrl = Categories.getMedicineImage(med);
 
+        // Item #4: Auto-suggest / prefill known batches from session or inventory DB
+        let initialBatches = [];
+        if (existingCount && Array.isArray(existingCount.batches) && existingCount.batches.length > 0) {
+            initialBatches = existingCount.batches;
+        } else if (existingCount && existingCount.quantity !== undefined) {
+            initialBatches = [{ quantity: existingCount.quantity, expiryDate: existingCount.expiryDate || '2027-12' }];
+        } else {
+            // Check inventory entries for previously known batches
+            const allInv = (await DB.getAll('inventory')) || [];
+            const prevEntries = allInv.filter(e => e.medicineId === medicineId);
+            if (prevEntries.length > 0) {
+                // Remove duplicates by expiryDate
+                const seenExp = new Set();
+                initialBatches = [];
+                for (const pe of prevEntries) {
+                    const exp = pe.expiryDate || '2027-12';
+                    if (!seenExp.has(exp)) {
+                        seenExp.add(exp);
+                        initialBatches.push({ quantity: pe.quantity || '', expiryDate: exp, isSuggested: true });
+                    }
+                }
+            } else {
+                initialBatches = [{ quantity: '', expiryDate: '2027-12' }];
+            }
+        }
+
+        const renderBatchRowHtml = (batch, index) => {
+            const expBadge = this.calcExpiryBadge(batch.expiryDate || '2027-12');
+            return `
+                <div class="batch-row" style="display:flex; flex-direction:column; gap:8px; padding:12px; background:var(--bg-secondary); border-radius:12px; border:1px solid var(--border-color); position:relative;">
+                    ${batch.isSuggested ? `
+                        <div style="font-size:10px; color:var(--primary); font-weight:bold; display:flex; align-items:center; gap:4px;">
+                            <i class='bx bx-history'></i> دفعة مسجلة سابقاً في النظام (عدّل الكمية الحالية)
+                        </div>
+                    ` : ''}
+                    <div style="display:flex; gap:10px; align-items:flex-end;">
+                        <div style="flex:1;">
+                            <label class="form-label" style="font-size:11px; margin-bottom:4px;">الكمية (العدد):</label>
+                            <input type="number" class="form-input batch-qty-input" min="0" step="1" value="${batch.quantity !== undefined ? batch.quantity : ''}" placeholder="0" style="font-size:18px; font-weight:800; text-align:center; padding:8px;" oninput="window.App.updateModalBatchTotal()" required>
+                        </div>
+                        <div style="flex:1.4;">
+                            <label class="form-label" style="font-size:11px; margin-bottom:4px;">تاريخ الصلاحية:</label>
+                            <input type="text" class="form-input batch-expiry-input" value="${batch.expiryDate || '2027-12'}" placeholder="YYYY-MM (مثال 2027-12)" style="font-size:14px; font-weight:bold; padding:8px; border-color:${expBadge.color};" oninput="window.App.updateBatchExpiryIndicator(this)" required>
+                        </div>
+                        <button type="button" class="icon-btn text-danger batch-del-btn" onclick="window.App.removeBatchRow(this)" title="حذف هذه الدفعة" style="height:42px; width:42px; border-radius:10px; background:var(--surface); border:1px solid var(--border-color); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                            <i class='bx bx-trash' style="font-size:18px; color:var(--danger);"></i>
+                        </button>
+                    </div>
+                    <!-- Item #2: Dynamic Expiry Indicator Badge -->
+                    <div class="batch-expiry-badge-container">
+                        <span class="batch-expiry-badge" style="display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:bold; padding:3px 8px; border-radius:6px; background:${expBadge.bg}; color:${expBadge.color};">
+                            <i class='bx ${expBadge.icon}'></i> ${expBadge.text}
+                        </span>
+                    </div>
+                </div>
+            `;
+        };
+
+        const totalQtyInitial = initialBatches.reduce((s, b) => s + (parseFloat(b.quantity) || 0), 0);
+
         UI.showModal(`
             <div class="modal-header">
-                <h2>تسجيل الجرد الفعلي</h2>
+                <h2>تسجيل الجرد الفعلي (دُفعات وتواريخ متعددة)</h2>
             </div>
+            
             <div style="display:flex; align-items:center; gap:12px; margin-bottom:15px; padding:10px; background:var(--bg-secondary); border-radius:12px;">
-                <div style="width:50px; height:50px; border-radius:8px; overflow:hidden;">
-                    <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover;">
+                <div style="width:48px; height:48px; border-radius:10px; overflow:hidden; flex-shrink:0;">
+                    <img src="${imgUrl}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                 </div>
-                <div>
-                    <h3 style="margin:0; font-size:15px; font-weight:800;">${med.nameEN || med.nameAR}</h3>
-                    <p style="margin:2px 0 0 0; font-size:12px; color:var(--text-muted);">المكان: ${loc?.nameAR || 'المستودع'}</p>
+                <div style="flex:1; min-width:0;">
+                    <h3 style="margin:0; font-size:14px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${med.nameEN || med.nameAR}</h3>
+                    <p style="margin:2px 0 0 0; font-size:11px; color:var(--text-muted);"><i class='bx bx-map-pin'></i> المكان: <strong style="color:var(--text-main);">${loc?.nameAR || 'المستودع'}</strong></p>
                 </div>
             </div>
+
             <form onsubmit="event.preventDefault(); window.App.saveCountFromModal('${medicineId}');">
-                <div class="form-group mb-12">
-                    <label class="form-label">الكمية الفعلية المحصورة:</label>
-                    <input type="number" id="count-qty" class="form-input" style="font-size:22px; font-weight:800; text-align:center;" min="0" step="1" value="${existingCount ? existingCount.quantity : 0}" required autofocus>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <label class="form-label" style="margin:0; font-size:12px; font-weight:bold;">دُفعات الصلاحية والكميات المحصورة:</label>
+                    <button type="button" class="btn-ghost sm-btn" onclick="window.App.addBatchRow()" style="font-size:11px; color:var(--primary); font-weight:bold;">
+                        <i class='bx bx-plus-circle'></i> إضافة دفعة / صلاحية أخرى
+                    </button>
                 </div>
-                <div class="form-group mb-15">
-                    <label class="form-label">تاريخ الصلاحية:</label>
-                    <input type="text" id="count-expiry" class="form-input" placeholder="YYYY-MM (مثال: 2027-12)" value="${existingCount ? existingCount.expiryDate : '2027-12'}" required>
+
+                <div id="batch-rows-container" style="display:flex; flex-direction:column; gap:10px; max-height:280px; overflow-y:auto; margin-bottom:15px; padding:2px;">
+                    ${initialBatches.map((b, idx) => renderBatchRowHtml(b, idx)).join('')}
                 </div>
+
+                <!-- Live Cumulative Total -->
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:rgba(59,130,246,0.08); border-radius:10px; border:1px solid rgba(59,130,246,0.2); margin-bottom:15px;">
+                    <span style="font-size:13px; font-weight:bold; color:var(--text-main);">إجمالي الكمية المحصورة:</span>
+                    <strong id="modal-batch-total-qty" style="font-size:20px; font-weight:800; color:var(--primary);">${totalQtyInitial} وحدة</strong>
+                </div>
+
                 <div class="form-actions">
                     <button type="submit" class="btn-primary">💾 حفظ واعتماد العد</button>
                     <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
@@ -2843,18 +3115,255 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         `);
     },
 
+    addBatchRow() {
+        const container = document.getElementById('batch-rows-container');
+        if (!container) return;
+        const newRow = document.createElement('div');
+        newRow.className = 'batch-row';
+        newRow.style.cssText = 'display:flex; flex-direction:column; gap:8px; padding:12px; background:var(--bg-secondary); border-radius:12px; border:1px solid var(--border-color); position:relative;';
+        
+        const expBadge = this.calcExpiryBadge('2027-12');
+        newRow.innerHTML = `
+            <div style="display:flex; gap:10px; align-items:flex-end;">
+                <div style="flex:1;">
+                    <label class="form-label" style="font-size:11px; margin-bottom:4px;">الكمية (العدد):</label>
+                    <input type="number" class="form-input batch-qty-input" min="0" step="1" value="" placeholder="0" style="font-size:18px; font-weight:800; text-align:center; padding:8px;" oninput="window.App.updateModalBatchTotal()" required autofocus>
+                </div>
+                <div style="flex:1.4;">
+                    <label class="form-label" style="font-size:11px; margin-bottom:4px;">تاريخ الصلاحية:</label>
+                    <input type="text" class="form-input batch-expiry-input" value="2027-12" placeholder="YYYY-MM" style="font-size:14px; font-weight:bold; padding:8px; border-color:${expBadge.color};" oninput="window.App.updateBatchExpiryIndicator(this)" required>
+                </div>
+                <button type="button" class="icon-btn text-danger batch-del-btn" onclick="window.App.removeBatchRow(this)" title="حذف هذه الدفعة" style="height:42px; width:42px; border-radius:10px; background:var(--surface); border:1px solid var(--border-color); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                    <i class='bx bx-trash' style="font-size:18px; color:var(--danger);"></i>
+                </button>
+            </div>
+            <div class="batch-expiry-badge-container">
+                <span class="batch-expiry-badge" style="display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:bold; padding:3px 8px; border-radius:6px; background:${expBadge.bg}; color:${expBadge.color};">
+                    <i class='bx ${expBadge.icon}'></i> ${expBadge.text}
+                </span>
+            </div>
+        `;
+        container.appendChild(newRow);
+        this.updateModalBatchTotal();
+    },
+
+    removeBatchRow(btn) {
+        const rows = document.querySelectorAll('.batch-row');
+        if (rows.length <= 1) {
+            UI.showToast('يجب الاحتفاظ بدفعة واحدة على الأقل', 'warning');
+            return;
+        }
+        const row = btn.closest('.batch-row');
+        if (row) row.remove();
+        this.updateModalBatchTotal();
+    },
+
+    updateBatchExpiryIndicator(input) {
+        const badgeObj = this.calcExpiryBadge(input.value);
+        input.style.borderColor = badgeObj.color;
+        const row = input.closest('.batch-row');
+        if (row) {
+            const badgeContainer = row.querySelector('.batch-expiry-badge-container');
+            if (badgeContainer) {
+                badgeContainer.innerHTML = `
+                    <span class="batch-expiry-badge" style="display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:bold; padding:3px 8px; border-radius:6px; background:${badgeObj.bg}; color:${badgeObj.color};">
+                        <i class='bx ${badgeObj.icon}'></i> ${badgeObj.text}
+                    </span>
+                `;
+            }
+        }
+    },
+
+    updateModalBatchTotal() {
+        const inputs = document.querySelectorAll('.batch-qty-input');
+        let total = 0;
+        inputs.forEach(inp => {
+            total += parseFloat(inp.value) || 0;
+        });
+        const totalEl = document.getElementById('modal-batch-total-qty');
+        if (totalEl) totalEl.textContent = `${total} وحدة`;
+    },
+
     async saveCountFromModal(medicineId) {
-        const qty = document.getElementById('count-qty').value;
-        const expiry = document.getElementById('count-expiry').value.trim();
+        const rows = document.querySelectorAll('.batch-row');
+        const batches = [];
+        rows.forEach(row => {
+            const qty = row.querySelector('.batch-qty-input')?.value;
+            const exp = row.querySelector('.batch-expiry-input')?.value.trim();
+            if (qty !== undefined && qty !== '') {
+                batches.push({
+                    quantity: parseFloat(qty) || 0,
+                    expiryDate: exp || '2027-12'
+                });
+            }
+        });
+
+        if (batches.length === 0) {
+            UI.showToast('يرجى إدخال كمية دفعة واحدة على الأقل', 'warning');
+            return;
+        }
 
         await Audit.recordCount(this.selectedAuditSessionId, this.selectedAuditLocationId, medicineId, {
-            quantity: qty,
-            expiryDate: expiry
+            batches: batches
         });
 
         UI.closeModal();
-        UI.showToast('تم تسجيل الجرد بنجاح ✅', 'success');
+        UI.showToast('تم حفظ واعتماد دُفعات الجرد بنجاح ✅', 'success');
         this.renderAuditView();
+    },
+
+    // --- Dedicated Expiry Monitor (شاشة متابعة الصلاحيات المستقلة) ---
+    async openExpiryMonitorModal() {
+        try {
+            const inventory = (await DB.getAll('inventory')) || [];
+            const masterMeds = (await DB.getAll('medicineMaster')) || [];
+            const masterMap = new Map(masterMeds.map(m => [m.id, m]));
+            const locs = (await Locations.getAll()) || [];
+            const locMap = new Map(locs.map(l => [l.id, l.nameAR]));
+
+            // Flatten & Sort by expiry date ascending
+            const items = inventory.map(item => {
+                const med = masterMap.get(item.medicineId) || { nameEN: 'Unknown', nameAR: 'غير معروف' };
+                const locName = item.location || locMap.get(item.locationId) || 'المستودع الرئيسي';
+                const badge = this.calcExpiryBadge(item.expiryDate);
+                return {
+                    id: item.id,
+                    medicineId: item.medicineId,
+                    nameEN: med.nameEN || med.nameAR,
+                    nameAR: med.nameAR || med.nameEN,
+                    imagePath: med.imagePath,
+                    location: locName,
+                    quantity: item.quantity,
+                    expiryDate: item.expiryDate || '2027-12',
+                    badge: badge
+                };
+            }).sort((a, b) => (a.expiryDate || '').localeCompare(b.expiryDate || ''));
+
+            const criticalCount = items.filter(i => i.badge.status === 'critical').length;
+            const warningCount = items.filter(i => i.badge.status === 'warning').length;
+            const goodCount = items.filter(i => i.badge.status === 'good').length;
+
+            UI.showModal(`
+                <div class="modal-header" style="border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:15px;">
+                    <div>
+                        <h2 style="margin:0; font-size:18px;"><i class='bx bx-calendar-event' style="color:var(--primary);"></i> شاشة متابعة تواريخ الصلاحية الشاملة</h2>
+                        <small class="text-muted">مراقبة تواريخ الصلاحية لجميع الأدوية والمواقع بحسب آخر جرد</small>
+                    </div>
+                </div>
+
+                <!-- KPI Status Bar -->
+                <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:15px;">
+                    <div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.25); border-radius:10px; padding:10px; text-align:center;">
+                        <span style="font-size:11px; color:var(--danger); font-weight:bold; display:block;">حرجة / منتهية (&le; 3 شهور)</span>
+                        <strong style="font-size:20px; color:var(--danger);">${criticalCount}</strong>
+                    </div>
+                    <div style="background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.25); border-radius:10px; padding:10px; text-align:center;">
+                        <span style="font-size:11px; color:var(--accent); font-weight:bold; display:block;">تنبيه (&le; 6 شهور)</span>
+                        <strong style="font-size:20px; color:var(--accent);">${warningCount}</strong>
+                    </div>
+                    <div style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.25); border-radius:10px; padding:10px; text-align:center;">
+                        <span style="font-size:11px; color:var(--secondary); font-weight:bold; display:block;">صالحة ومستقرة (&gt; 6 شهور)</span>
+                        <strong style="font-size:20px; color:var(--secondary);">${goodCount}</strong>
+                    </div>
+                </div>
+
+                <!-- Search & Filter Controls -->
+                <div style="margin-bottom:15px;">
+                    <div class="search-bar" style="margin-bottom:10px;">
+                        <i class='bx bx-search'></i>
+                        <input type="text" id="expiry-monitor-search" placeholder="بحث باسم الدواء أو الموقع..." oninput="window.App.filterExpiryMonitorList(this.value)">
+                    </div>
+                    <div style="display:flex; gap:6px; overflow-x:auto; padding-bottom:4px;">
+                        <button class="btn-ghost sm-btn active" id="filter-exp-all" onclick="window.App.setExpiryFilter('all')" style="border-radius:20px; font-size:11px; padding:4px 12px;">الكل (${items.length})</button>
+                        <button class="btn-ghost sm-btn" id="filter-exp-critical" onclick="window.App.setExpiryFilter('critical')" style="border-radius:20px; font-size:11px; padding:4px 12px; color:var(--danger);">حرجة (${criticalCount})</button>
+                        <button class="btn-ghost sm-btn" id="filter-exp-warning" onclick="window.App.setExpiryFilter('warning')" style="border-radius:20px; font-size:11px; padding:4px 12px; color:var(--accent);">تنبيه (${warningCount})</button>
+                        <button class="btn-ghost sm-btn" id="filter-exp-good" onclick="window.App.setExpiryFilter('good')" style="border-radius:20px; font-size:11px; padding:4px 12px; color:var(--secondary);">صالحة (${goodCount})</button>
+                    </div>
+                </div>
+
+                <!-- Expiry Items List -->
+                <div id="expiry-monitor-items" style="max-height:360px; overflow-y:auto; display:flex; flex-direction:column; gap:8px;">
+                    ${this.renderExpiryMonitorItemsHtml(items)}
+                </div>
+
+                <div class="form-actions mt-15" style="display:flex; gap:10px;">
+                    <button class="btn-primary sm-btn" onclick="window.App.export('expiring')" style="flex:1;">
+                        <i class='bx bx-download'></i> تصدير إكسيل
+                    </button>
+                    <button class="btn-ghost sm-btn" onclick="window.UI.closeModal()" style="flex:1;">إغلاق</button>
+                </div>
+            `);
+
+            // Cache items for quick filtering
+            this._cachedExpiryItems = items;
+            this._currentExpiryStatusFilter = 'all';
+        } catch (err) {
+            console.error('Error opening expiry monitor:', err);
+            UI.showToast('تعذر فتح شاشة الصلاحية', 'danger');
+        }
+    },
+
+    renderExpiryMonitorItemsHtml(items) {
+        if (!items || items.length === 0) {
+            return '<div class="empty-state" style="padding:25px; text-align:center;"><p class="text-muted">لا توجد سجلات تطابق الفلتر الحالي</p></div>';
+        }
+
+        return items.map(item => {
+            const img = item.imagePath ? item.imagePath : 'assets/icons/default-med.png';
+            return `
+                <div class="expiry-monitor-card" style="display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:12px;">
+                    <div style="width:40px; height:40px; border-radius:8px; overflow:hidden; flex-shrink:0;">
+                        <img src="${img}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                    </div>
+                    <div style="flex:1; min-width:0;">
+                        <h4 style="margin:0; font-size:13px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${item.nameEN}</h4>
+                        <div style="display:flex; align-items:center; gap:8px; font-size:11px; color:var(--text-muted); margin-top:2px;">
+                            <span><i class='bx bx-map-pin'></i> ${item.location}</span>
+                            <span>&bull;</span>
+                            <strong style="color:var(--text-main);">${item.quantity} وحدة</strong>
+                        </div>
+                    </div>
+                    <div style="text-align:left; flex-shrink:0;">
+                        <span style="display:block; font-size:12px; font-weight:800; color:var(--text-main);">${item.expiryDate}</span>
+                        <span style="display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:bold; padding:2px 6px; border-radius:6px; background:${item.badge.bg}; color:${item.badge.color}; margin-top:2px;">
+                            <i class='bx ${item.badge.icon}'></i> ${item.badge.text}
+                        </span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    },
+
+    setExpiryFilter(status) {
+        this._currentExpiryStatusFilter = status;
+        ['all', 'critical', 'warning', 'good'].forEach(st => {
+            const btn = document.getElementById(`filter-exp-${st}`);
+            if (btn) {
+                if (st === status) btn.classList.add('active');
+                else btn.classList.remove('active');
+            }
+        });
+        const query = document.getElementById('expiry-monitor-search')?.value || '';
+        this.filterExpiryMonitorList(query);
+    },
+
+    filterExpiryMonitorList(query = '') {
+        if (!this._cachedExpiryItems) return;
+        const q = (query || '').toLowerCase().trim();
+        const status = this._currentExpiryStatusFilter || 'all';
+
+        const filtered = this._cachedExpiryItems.filter(item => {
+            const matchesQuery = !q || (item.nameEN && item.nameEN.toLowerCase().includes(q)) || 
+                                      (item.nameAR && item.nameAR.toLowerCase().includes(q)) || 
+                                      (item.location && item.location.toLowerCase().includes(q));
+            const matchesStatus = status === 'all' || item.badge.status === status;
+            return matchesQuery && matchesStatus;
+        });
+
+        const container = document.getElementById('expiry-monitor-items');
+        if (container) {
+            container.innerHTML = this.renderExpiryMonitorItemsHtml(filtered);
+        }
     }
 });
 
@@ -2966,9 +3475,7 @@ App.showLowStock = function() {
 };
 
 App.showExpiring = function() {
-    this.selectedCategoryId = null;
-    if (window.UI) UI.switchView('view-inventory');
-    this.renderInventory('expiry');
+    this.openExpiryMonitorModal();
 };
 
 App.startAudit = async function() {

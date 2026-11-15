@@ -124,33 +124,44 @@ export const Inventory = {
     renderCard(item, master, isAggregated = true) {
         const m = master || item;
         if (!m) return '';
-        const qty = item.totalQuantity !== undefined ? item.totalQuantity : (item.quantity !== undefined ? item.quantity : 0);
-        const expDate = isAggregated ? (item.earliestExpiry || '2027-12') : (item.expiryDate || '2027-12');
-        const exp = Utils.getExpiryStatus(expDate);
         const imgUrl = window.Categories ? window.Categories.getMedicineImage(m) : 'assets/icons/default-med.png';
         const medId = item.medicineId || item.id || m.id;
         
+        let catName = m.categoryId || 'عام';
+        let catIcon = 'bx-purchase-tag-alt';
+        if (window.Categories && window.Categories.cache) {
+            const cat = window.Categories.cache.find(c => c.id === m.categoryId);
+            if (cat) {
+                catName = cat.nameAR;
+                catIcon = cat.icon || 'bx-category';
+            }
+        }
+        
         return `
-            <div class="inventory-card ${exp.class}" data-med-id="${medId}" style="display:flex; align-items:center; gap:12px; padding:12px 16px; margin-bottom:12px; border-radius:16px; background:var(--surface); border:1px solid var(--border-color); box-shadow:var(--shadow-sm); transition:all 0.2s ease;">
+            <div class="inventory-card master-catalog-card" data-med-id="${medId}" style="display:flex; align-items:center; gap:12px; padding:12px 16px; margin-bottom:12px; border-radius:16px; background:var(--surface); border:1px solid var(--border-color); box-shadow:var(--shadow-sm); transition:all 0.2s ease;">
                 <div class="card-img" style="width:48px; height:48px; border-radius:10px; overflow:hidden; flex-shrink:0; background:rgba(59,130,246,0.08); display:flex; align-items:center; justify-content:center;">
                     <img src="${imgUrl}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                 </div>
                 <div class="card-info" style="flex:1; min-width:0;">
-                    <h3 style="font-size:14px; font-weight:800; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-main);">${m.nameEN || m.nameAR}</h3>
-                    <div class="card-meta" style="display:flex; align-items:center; gap:10px; font-size:11px; color:var(--text-muted);">
-                        <span><i class='bx bx-purchase-tag-alt'></i> ${m.nameAR && m.nameAR !== m.nameEN ? m.nameAR : (m.categoryId || 'عام')}</span>
-                        <span><i class='bx bx-calendar'></i> ${expDate}</span>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <h3 style="font-size:14px; font-weight:800; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-main);">${m.nameEN || m.nameAR}</h3>
+                        ${m.nameAR && m.nameAR !== m.nameEN ? `<span style="font-size:12px; color:var(--text-muted); font-weight:normal;">(${m.nameAR})</span>` : ''}
+                    </div>
+                    <div class="card-meta" style="display:flex; align-items:center; gap:10px; font-size:11px; margin-top:4px;">
+                        <span class="badge-cat" style="background:rgba(59,130,246,0.1); color:var(--primary); padding:2px 8px; border-radius:6px; font-weight:bold; display:inline-flex; align-items:center; gap:4px;">
+                            <i class='bx ${catIcon}'></i> ${catName}
+                        </span>
+                        ${m.activeIngredient ? `<span style="color:var(--text-muted);"><i class='bx bx-dna'></i> ${m.activeIngredient}</span>` : ''}
                     </div>
                 </div>
-                <!-- Interactive Quick Touch Counter (+ / -) -->
-                <div class="card-stock-ctrl" style="display:flex; align-items:center; gap:6px; background:var(--bg-secondary); padding:4px 6px; border-radius:12px;">
-                    <button class="btn-stock-dec" onclick="window.App.adjustStock('${medId}', -1)" title="إنقاص الكمية" style="width:26px; height:26px; border-radius:8px; border:none; background:var(--surface); font-size:15px; font-weight:bold; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,0.1);">-</button>
-                    <span id="stock-val-${medId}" style="min-width:26px; text-align:center; font-weight:800; font-size:13px; color:var(--primary);">${qty}</span>
-                    <button class="btn-stock-inc" onclick="window.App.adjustStock('${medId}', 1)" title="زيادة الكمية" style="width:26px; height:26px; border-radius:8px; border:none; background:var(--primary); color:white; font-size:15px; font-weight:bold; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,0.1);">+</button>
+                <div class="card-actions" style="display:flex; align-items:center; gap:6px;">
+                    <button class="btn-ghost sm-btn" onclick="window.App.openMoveCategoryModal('${medId}')" title="نقل إلى تصنيف آخر" style="font-size:11px; padding:6px 10px; border-radius:8px; border:1px solid var(--border-color); display:flex; align-items:center; gap:4px;">
+                        <i class='bx bx-transfer'></i> <span>نقل</span>
+                    </button>
+                    <button class="icon-btn" onclick="window.App.openMasterMedicineMenu('${medId}')" title="خيارات إضافية" style="flex-shrink:0; opacity:0.8; padding:6px;">
+                        <i class='bx bx-dots-vertical-rounded' style="font-size:18px;"></i>
+                    </button>
                 </div>
-                <button class="icon-btn" onclick="window.App.openEditMedicine('${medId}')" title="تعديل التفاصيل" style="flex-shrink:0; opacity:0.6; padding:6px;">
-                    <i class='bx bx-dots-vertical-rounded' style="font-size:18px;"></i>
-                </button>
             </div>
         `;
     }

@@ -70,7 +70,7 @@
             </div>
             <div class="app-logo">
                 <i class='bx bxs-capsule'></i>
-                <h1>دواء <span style="font-size: 10px; opacity: 0.5">v18.0.1</span></h1>
+                <h1>دواء <span style="font-size: 10px; opacity: 0.5">v18.1.0</span></h1>
                 <span id="network-status" class="network-status-badge online" title="حالة الاتصال بالسحابة">
                     <i class='bx bx-wifi'></i>
                 </span>
@@ -158,6 +158,13 @@
                     <div class="action-card-text">
                         <strong>إدارة المستودع الشاملة</strong>
                         <small>الأدوية، التصنيفات، وأماكن التخزين</small>
+                    </div>
+                </button>
+                <button class="action-card-btn secondary" onclick="window.App.openExpiryMonitorModal();" style="border-color: rgba(245, 158, 11, 0.3);">
+                    <i class='bx bx-calendar-event' style="color: var(--accent);"></i>
+                    <div class="action-card-text">
+                        <strong>متابعة تواريخ الصلاحية</strong>
+                        <small>شاشة مستقلة لمراقبة صلاحية الأدوية والمواقع</small>
                     </div>
                 </button>
             </div>
@@ -280,6 +287,14 @@
                     <div class="setting-info">
                         <h3>بدء جلسة جرد جديدة</h3>
                         <p>إنشاء جرد فردي أو جماعي بالأماكن</p>
+                    </div>
+                </div>
+
+                <div class="setting-card" onclick="window.App.openExpiryMonitorModal()">
+                    <div class="setting-icon bg-info"><i class='bx bx-calendar-event' style="color:var(--accent);"></i></div>
+                    <div class="setting-info">
+                        <h3>شاشة متابعة الصلاحيات</h3>
+                        <p>استعراض وتحليل تواريخ الصلاحية لكافة الأصناف</p>
                     </div>
                 </div>
 

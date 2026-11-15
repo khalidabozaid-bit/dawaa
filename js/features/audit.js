@@ -114,17 +114,25 @@ export const Audit = {
             const loc = await Locations.get(locId);
             const locName = loc ? loc.nameAR : 'المستودع الرئيسي';
 
-            await DB.put('inventory', {
-                id: `inv_audit_${session.id}_${medId}_${locId}`,
-                medicineId: medId,
-                location: locName,
-                locationId: locId,
-                quantity: parseFloat(record.quantity) || 0,
-                expiryDate: record.expiryDate || '2027-12',
-                auditId: session.id,
-                userName: record.userName || session.host,
-                timestamp: record.countedAt || new Date().toISOString()
-            });
+            const batches = (record.batches && record.batches.length > 0) 
+                ? record.batches 
+                : [{ quantity: record.quantity, expiryDate: record.expiryDate }];
+
+            for (let bIndex = 0; bIndex < batches.length; bIndex++) {
+                const b = batches[bIndex];
+                await DB.put('inventory', {
+                    id: `inv_audit_${session.id}_${medId}_${locId}_${bIndex}`,
+                    medicineId: medId,
+                    location: locName,
+                    locationId: locId,
+                    quantity: parseFloat(b.quantity) || 0,
+                    expiryDate: b.expiryDate || '2027-12',
+                    batchIndex: bIndex,
+                    auditId: session.id,
+                    userName: record.userName || session.host,
+                    timestamp: record.countedAt || new Date().toISOString()
+                });
+            }
 
             if (window.App?.userRole === 'admin') {
                 Sync.push(medId);
@@ -135,7 +143,7 @@ export const Audit = {
         return true;
     },
 
-    async recordCount(sessionId, locationId, medicineId, { quantity, expiryDate }) {
+    async recordCount(sessionId, locationId, medicineId, { batches, quantity, expiryDate }) {
         const session = await this.getSession(sessionId);
         if (!session) return false;
 
@@ -145,9 +153,30 @@ export const Audit = {
         if (!session.counts) session.counts = {};
         const key = `${locationId}___${medicineId}`;
 
+        // Normalize batches
+        let cleanBatches = [];
+        if (Array.isArray(batches) && batches.length > 0) {
+            cleanBatches = batches.map(b => ({
+                quantity: parseFloat(b.quantity) || 0,
+                expiryDate: b.expiryDate ? b.expiryDate.trim() : '2027-12'
+            })).filter(b => b.quantity >= 0);
+        } else {
+            cleanBatches = [{
+                quantity: parseFloat(quantity) || 0,
+                expiryDate: expiryDate ? expiryDate.trim() : '2027-12'
+            }];
+        }
+
+        const totalQty = cleanBatches.reduce((sum, b) => sum + b.quantity, 0);
+        
+        // Find earliest expiry date
+        const sortedBatches = [...cleanBatches].sort((a, b) => (a.expiryDate || '').localeCompare(b.expiryDate || ''));
+        const earliestExpiry = sortedBatches[0]?.expiryDate || '2027-12';
+
         session.counts[key] = {
-            quantity: parseFloat(quantity) || 0,
-            expiryDate: expiryDate || '2027-12',
+            quantity: totalQty,
+            expiryDate: earliestExpiry,
+            batches: cleanBatches,
             countedAt: new Date().toISOString(),
             userName: uName
         };
@@ -218,11 +247,21 @@ export const Audit = {
             const countRecord = counts[key];
             const isCounted = !!countRecord;
 
+            let displayExpiry = null;
+            if (isCounted) {
+                if (countRecord.batches && countRecord.batches.length > 1) {
+                    displayExpiry = `${countRecord.expiryDate} (+${countRecord.batches.length - 1} دُفعات)`;
+                } else {
+                    displayExpiry = countRecord.expiryDate;
+                }
+            }
+
             return {
                 ...med,
                 isCounted,
                 countedQty: isCounted ? countRecord.quantity : null,
-                countedExpiry: isCounted ? countRecord.expiryDate : null,
+                countedExpiry: displayExpiry,
+                batches: isCounted ? countRecord.batches : null,
                 countedAt: isCounted ? countRecord.countedAt : null,
                 countedBy: isCounted ? countRecord.userName : null
             };

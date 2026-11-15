@@ -1,21 +1,144 @@
-/* Dark Mode Overrides */
+/* Dark Mode Overrides (v18.1.0) */
+body.dark-mode,
 body.dark-theme {
+    --bg-main: #0b1120;
     --bg-light: #0f172a;
     --card-bg: #1e293b;
-    --text-main: #f1f5f9;
+    --surface: #1e293b;
+    --bg-secondary: #273549;
+    --text-main: #f8fafc;
+    --text-secondary: #cbd5e1;
     --text-muted: #94a3b8;
     --border-color: #334155;
-    --shadow-sm: 0 4px 6px -1px rgba(0,0,0,0.3);
+    --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+    --shadow-premium: 0 20px 25px -5px rgba(0, 0, 0, 0.6);
+    --glass-bg: rgba(15, 23, 42, 0.92);
+    --glass-border: rgba(255, 255, 255, 0.08);
 }
 
+body.dark-mode,
+body.dark-theme {
+    background-color: var(--bg-light);
+    color: var(--text-main);
+}
+
+/* Header & Navigation */
+body.dark-mode .app-header,
 body.dark-theme .app-header {
-    background: rgba(15, 23, 42, 0.8);
+    background: rgba(15, 23, 42, 0.88);
+    border-bottom: 1px solid var(--border-color);
 }
 
+body.dark-mode .bottom-nav,
 body.dark-theme .bottom-nav {
-    background: rgba(15, 23, 42, 0.9);
+    background: rgba(15, 23, 42, 0.95);
+    border-top: 1px solid var(--border-color);
 }
 
+/* Inputs, Selects & Forms */
+body.dark-mode .form-input,
+body.dark-theme .form-input,
+body.dark-mode .form-select,
+body.dark-theme .form-select,
+body.dark-mode .search-bar input,
+body.dark-theme .search-bar input {
+    background: var(--surface);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+}
+
+body.dark-mode .form-input:focus,
+body.dark-theme .form-input:focus,
+body.dark-mode .form-select:focus,
+body.dark-theme .form-select:focus,
+body.dark-mode .search-bar input:focus,
+body.dark-theme .search-bar input:focus {
+    border-color: var(--primary);
+    background: #192231;
+}
+
+body.dark-mode .search-bar,
+body.dark-theme .search-bar {
+    background: var(--surface);
+    border: 1px solid var(--border-color);
+}
+
+/* Cards & Containers */
+body.dark-mode .stat-card,
+body.dark-theme .stat-card,
+body.dark-mode .square-card,
+body.dark-theme .square-card,
+body.dark-mode .report-card,
+body.dark-theme .report-card,
+body.dark-mode .setting-card,
+body.dark-theme .setting-card,
+body.dark-mode .action-card-btn,
+body.dark-theme .action-card-btn,
+body.dark-mode .inventory-card,
+body.dark-theme .inventory-card {
+    background: var(--surface);
+    border-color: var(--border-color);
+    color: var(--text-main);
+}
+
+body.dark-mode .action-card-btn.secondary,
+body.dark-theme .action-card-btn.secondary {
+    background: #192231;
+}
+
+/* Stat Card Colors */
+body.dark-mode .stat-card.total .stat-icon,
 body.dark-theme .stat-card.total .stat-icon { background: #1e3a8a; color: #60a5fa; }
+body.dark-mode .stat-card.low-stock .stat-icon,
 body.dark-theme .stat-card.low-stock .stat-icon { background: #450a0a; color: #f87171; }
+body.dark-mode .stat-card.expiring .stat-icon,
 body.dark-theme .stat-card.expiring .stat-icon { background: #451a03; color: #fbbf24; }
+
+/* Modals */
+body.dark-mode .modal-content,
+body.dark-theme .modal-content {
+    background: var(--bg-light);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+}
+
+/* Segmented Navigation */
+body.dark-mode .segmented-nav,
+body.dark-theme .segmented-nav {
+    background: #131c2e;
+    border: 1px solid var(--border-color);
+}
+
+body.dark-mode .segment-btn,
+body.dark-theme .segment-btn {
+    color: var(--text-muted);
+}
+
+body.dark-mode .segment-btn.active,
+body.dark-theme .segment-btn.active {
+    background: var(--primary);
+    color: #ffffff;
+}
+
+/* Category Chips */
+body.dark-mode .category-chip,
+body.dark-theme .category-chip {
+    background: var(--surface);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+}
+
+body.dark-mode .category-chip.active,
+body.dark-theme .category-chip.active {
+    background: var(--primary);
+    color: #ffffff;
+    border-color: var(--primary);
+}
+
+/* Notification Panel */
+body.dark-mode .notification-panel,
+body.dark-theme .notification-panel {
+    background: var(--bg-light);
+    border: 1px solid var(--border-color);
+}
