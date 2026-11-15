@@ -51,7 +51,7 @@ export const Audit = {
 
     async createSession({ name, type = 'individual', locationIds = [] }) {
         const activeUser = Users.getActive();
-        const uName = activeUser?.name || 'خالد';
+        const uName = activeUser?.name || 'صيدلي';
 
         if (type === 'group' && activeUser?.role !== 'admin' && window.App?.userRole !== 'admin') {
             UI.showToast('صلاحيات المدير مفضلة لإنشاء جرد جماعي للفريق ⚖️', 'info');
@@ -108,70 +108,83 @@ export const Audit = {
 
     async finalizeSession(id) {
         const session = await this.getSession(id);
-        if (!session) return;
+        if (!session) return false;
+        if (session.status === 'finalized') {
+            UI.showToast('هذه الجلسة تم اعتمادها مسبقاً ✅', 'info');
+            return true;
+        }
 
         if (!confirm(`هل أنت متأكد من إنهاء واعتماد "${session.name}"؟ سيتم تحديث رصيد المستودع الفعلي واستبدال الأرصدة القديمة بالكميات المحصورة الدقيقة.`)) {
             return false;
         }
 
-        session.status = 'finalized';
-        session.finalizedAt = new Date().toISOString();
-        await this.saveSession(session);
+        try {
+            // Apply counts to inventory with True Reconciliation (no double-counting!)
+            const counts = session.counts || {};
+            const entries = Object.entries(counts);
+            
+            // 1. Fetch current inventory & locations map to avoid N+1 queries
+            const allExistingInv = (await DB.getAll('inventory')) || [];
+            const allLocations = (await Locations.getAll()) || [];
+            const locMap = new Map(allLocations.map(l => [l.id, l]));
+            const locNameToId = new Map(allLocations.map(l => [l.nameAR, l.id]));
+            const sessionCountedKeys = new Set(Object.keys(counts)); // `${locId}___${medId}`
 
-        // Apply counts to inventory with True Reconciliation (no double-counting!)
-        const counts = session.counts || {};
-        const entries = Object.entries(counts);
-        
-        // 1. Fetch current inventory to reconcile
-        const allExistingInv = (await DB.getAll('inventory')) || [];
-        const sessionCountedKeys = new Set(Object.keys(counts)); // `${locId}___${medId}`
-
-        // 2. Remove obsolete previous records for the counted pairs
-        for (const item of allExistingInv) {
-            const itemLocId = item.locationId || (item.location ? await Locations.findIdByName(item.location) : null);
-            const pairKey = `${itemLocId}___${item.medicineId}`;
-            if (sessionCountedKeys.has(pairKey)) {
-                await DB.delete('inventory', item.id);
+            // 2. Remove obsolete previous records for the counted pairs
+            for (const item of allExistingInv) {
+                const itemLocId = item.locationId || (item.location ? locNameToId.get(item.location) : null);
+                const pairKey = `${itemLocId}___${item.medicineId}`;
+                if (sessionCountedKeys.has(pairKey)) {
+                    await DB.delete('inventory', item.id);
+                }
             }
+
+            // 3. Insert newly counted verified batches (omit zero quantities to keep inventory clean)
+            for (const [key, record] of entries) {
+                const [locId, medId] = key.split('___');
+                const loc = locMap.get(locId);
+                const locName = loc ? loc.nameAR : 'المستودع الرئيسي';
+
+                const batches = (record.batches && record.batches.length > 0) 
+                    ? record.batches 
+                    : [{ quantity: record.quantity, expiryDate: record.expiryDate }];
+
+                for (let bIndex = 0; bIndex < batches.length; bIndex++) {
+                    const b = batches[bIndex];
+                    const bQty = parseFloat(b.quantity) || 0;
+                    if (bQty <= 0) continue; // Clean inventory: 0 quantity means out-of-stock
+
+                    await DB.put('inventory', {
+                        id: `inv_audit_${session.id}_${medId}_${locId}_${bIndex}`,
+                        medicineId: medId,
+                        location: locName,
+                        locationId: locId,
+                        quantity: bQty,
+                        expiryDate: b.expiryDate || null,
+                        batchIndex: bIndex,
+                        auditId: session.id,
+                        userName: record.userName || session.host,
+                        timestamp: record.countedAt || new Date().toISOString()
+                    });
+                }
+            }
+
+            // 4. Mark session finalized after successful reconciliation
+            session.status = 'finalized';
+            session.finalizedAt = new Date().toISOString();
+            await this.saveSession(session);
+
+            if (typeof Sync?.broadcastAuditStatus === 'function') {
+                Sync.broadcastAuditStatus(session);
+            }
+
+            UI.showToast('تم اعتماد وإنهاء الجلسة وتحديث المستودع بنجاح! 🎊', 'success');
+            return true;
+        } catch (err) {
+            console.error('Finalize session failed:', err);
+            UI.showToast('حدث خطأ أثناء اعتماد الجلسة: ' + err.message, 'danger');
+            return false;
         }
-
-        // 3. Insert newly counted verified batches
-        for (const [key, record] of entries) {
-            const [locId, medId] = key.split('___');
-            const loc = await Locations.get(locId);
-            const locName = loc ? loc.nameAR : 'المستودع الرئيسي';
-
-            const batches = (record.batches && record.batches.length > 0) 
-                ? record.batches 
-                : [{ quantity: record.quantity, expiryDate: record.expiryDate }];
-
-            for (let bIndex = 0; bIndex < batches.length; bIndex++) {
-                const b = batches[bIndex];
-                const bQty = parseFloat(b.quantity) || 0;
-                // If single batch with 0 or multiple, store it
-                if (bQty <= 0 && batches.length > 1) continue;
-
-                await DB.put('inventory', {
-                    id: `inv_audit_${session.id}_${medId}_${locId}_${bIndex}`,
-                    medicineId: medId,
-                    location: locName,
-                    locationId: locId,
-                    quantity: bQty,
-                    expiryDate: b.expiryDate || '2027-12',
-                    batchIndex: bIndex,
-                    auditId: session.id,
-                    userName: record.userName || session.host,
-                    timestamp: record.countedAt || new Date().toISOString()
-                });
-            }
-
-            if (window.App?.userRole === 'admin') {
-                Sync.push(medId);
-            }
-        }
-
-        UI.showToast('تم اعتماد وإنهاء الجلسة وتحديث المخزون بنجاح! 🎊', 'success');
-        return true;
     },
 
     async deleteSession(id) {
@@ -213,7 +226,7 @@ export const Audit = {
         if (!session) return false;
 
         const activeUser = Users.getActive();
-        const uName = activeUser?.name || 'خالد';
+        const uName = activeUser?.name || 'صيدلي';
 
         if (!session.counts) session.counts = {};
         const key = `${locationId}___${medicineId}`;

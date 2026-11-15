@@ -134,17 +134,21 @@ export const Categories = {
         }
         const fromDb = await DB.get('categories', id);
         if (fromDb) return fromDb;
-        return { nameAR: this.getCategoryNameAR(id), icon: this.getCategoryIcon(id), color: '#64748b' };
+        return { id: id, nameAR: this.getCategoryNameAR(id), icon: this.getCategoryIcon(id), color: '#64748b' };
     },
 
     async saveCategory(cat) {
         if (!cat.id || cat.id === '') cat.id = Utils.generateId();
         await DB.put('categories', cat);
+        this.cache = null;
+        this._cache = null;
         return cat.id;
     },
 
     async deleteCategory(id) {
         await DB.delete('categories', id);
+        this.cache = null;
+        this._cache = null;
         return true;
     },
 
@@ -158,13 +162,16 @@ export const Categories = {
     },
 
     async searchMaster(query) {
-        const all = await DB.getAll('medicineMaster');
-        const q = query.toLowerCase();
+        if (!query) return [];
+        const q = String(query).trim().toLowerCase();
+        if (!q) return [];
+        const all = (await DB.getAll('medicineMaster')) || [];
         return all
             .filter(m => 
                 (m.nameEN || '').toLowerCase().includes(q) || 
-                (m.nameAR || '').includes(q) ||
-                (m.id || '').toString().includes(q)
+                (m.nameAR || '').toLowerCase().includes(q) ||
+                (m.id || '').toString().includes(q) ||
+                (m.activeIngredient || '').toLowerCase().includes(q)
             )
             .sort((a, b) => (a.nameEN || '').localeCompare(b.nameEN || ''));
     },

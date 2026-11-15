@@ -188,4 +188,4 @@ export const DB = {
     }
 };
 
-window.DB = DB; // For debugging
+// DB encapsulation preserved

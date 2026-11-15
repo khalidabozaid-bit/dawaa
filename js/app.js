@@ -33,7 +33,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.6.1', // Universal Sovereign v18.6.1
+    VERSION: '18.6.2', // Universal Sovereign v18.6.2
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1975,7 +1975,7 @@ App.handleBackup = async function() {
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.6.1'
+            version: '18.6.2'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -4389,14 +4389,16 @@ App.startAudit = async function() {
 };
 
 App.handleAdminUnlock = async function() {
-    const pass = prompt('أدخل كلمة مرور المسؤول (Admin Password):');
-    if (pass === 'admin123' || pass === 'dawaa@2026') {
+    const storedPin = localStorage.getItem('dawaa_admin_pin') || 'dawaa2026';
+    const pass = prompt('أدخل رمز مرور المسؤول (Admin PIN):');
+    if (!pass) return;
+    if (pass === storedPin || pass === 'dawaa@2026') {
         this.userRole = 'admin';
         localStorage.setItem('user_role', 'admin');
         this.updateAdminUI();
         if (window.UI) UI.showToast('تم تفعيل صلاحيات المسؤول بنجاح ✅', 'success');
-    } else if (pass !== null) {
-        if (window.UI) UI.showToast('كلمة مرور خاطئة ❌', 'danger');
+    } else {
+        if (window.UI) UI.showToast('رمز المرور غير صحيح ❌', 'danger');
     }
 };
 
