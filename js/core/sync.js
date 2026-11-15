@@ -1,6 +1,6 @@
-import { SyncV2 } from './sync_v2.js?v=17.2.2';
-import { DB } from './db.js?v=17.2.2';
-import { db } from './firebase-config.js?v=17.2.2';
+import { SyncV2 } from './sync_v2.js';
+import { DB } from './db.js';
+import { db } from './firebase-config.js';
 
 /**
  * Dawaa Cloud Sync Engine (v16.3.1 - Restructured)

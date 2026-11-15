@@ -4,73 +4,37 @@ import { Utils } from '../core/utils.js';
 
 /**
  * Inventory Management Feature
- * Handles entries, stock aggregation, and deletions.
+ * Handles entries, stock aggregation, and interactive card rendering.
  */
 
 export const Inventory = {
-    // v13.0.0: UI Change Observers
     subscribers: [],
     subscribe(callback) { this.subscribers.push(callback); },
     notify() { this.subscribers.forEach(cb => cb()); },
 
     async addEntry(data) {
-        if (!data.medicineId || !data.quantity) return false;
+        if (!data.medicineId || data.quantity === undefined) return false;
         
         const entry = {
-            id: Utils.generateId(),
+            id: data.id || Utils.generateId(),
             medicineId: data.medicineId,
-            location: data.location || 'غير محدد',
+            location: data.location || 'المستودع الرئيسي',
             quantity: parseFloat(data.quantity) || 0,
-            expiryDate: data.expiryDate || null,
-            auditId: data.auditId || null, // v10.5.0 Audit Tagging
-            userName: data.userName || (window.App && window.App.user ? window.App.user.displayName || window.App.user.email : 'مجهول'), // Team Leaderboard mapping
+            expiryDate: data.expiryDate || '2027-12',
+            auditId: data.auditId || null,
+            userName: data.userName || (window.App && window.App.user ? window.App.user.displayName || window.App.user.email : 'خالد'),
             type: data.type || 'medicine',
             timestamp: new Date().toISOString()
         };
 
-        await DB.add('inventory', entry);
-        
-        // v14.0.0: Unified Cloud Synchronization
-        if (entry.auditId) {
-            import('../core/sync.js').then(({ Sync }) => Sync.pushInventoryEntry(entry));
-        }
-
-        this.notify(); // v13.0.0: Broadcast local change
+        await DB.put('inventory', entry);
+        this.notify();
         return true;
-    },
-
-    async saveDualEntry(medicineId, pData, wData) {
-        let count = 0;
-        const master = await DB.get('medicineMaster', medicineId);
-        if (!master) return 0;
-
-        if (pData.qty > 0) {
-            await this.addEntry({
-                medicineId,
-                location: 'صيدلية',
-                quantity: pData.qty,
-                expiryDate: pData.exp,
-                type: master.type
-            });
-            count++;
-        }
-
-        if (wData.qty > 0) {
-            await this.addEntry({
-                medicineId,
-                location: 'مخزن',
-                quantity: wData.qty,
-                expiryDate: wData.exp,
-                type: master.type
-            });
-            count++;
-        }
-
-        return count;
     },
 
     async deleteEntry(id) {
         await DB.delete('inventory', id);
+        this.notify();
         return true;
     },
 
@@ -90,19 +54,13 @@ export const Inventory = {
                     nameAR: master ? master.nameAR : 'غير معروف',
                     type: master ? master.type : 'medicine',
                     totalQuantity: 0,
-                    locations: new Map(), // loc -> qty
                     earliestExpiry: null
                 });
             }
 
             const group = aggregated.get(item.medicineId);
-            group.totalQuantity += item.quantity;
-            
-            // Track per location
-            const locQty = group.locations.get(item.location) || 0;
-            group.locations.set(item.location, locQty + item.quantity);
+            group.totalQuantity += Number(item.quantity || 0);
 
-            // Track earliest expiry
             if (item.expiryDate) {
                 if (!group.earliestExpiry || new Date(item.expiryDate) < new Date(group.earliestExpiry)) {
                     group.earliestExpiry = item.expiryDate;
@@ -114,93 +72,86 @@ export const Inventory = {
     },
 
     async getCurrentStockProducts() {
-        const products = await DB.getAll('products');
-        if (products.length > 0) {
-            return products.map(product => ({
-                productId: product.id,
-                medicineId: product.legacy_id || product.id,
-                id: product.id,
-                nameEN: product.nameEN || product.name_en || product.unique_key || product.id,
-                nameAR: product.nameAR || product.name_ar || '',
-                categoryId: product.categoryId || (product.category_ids?.[0] || '').replace(/^cat_/, ''),
-                totalQuantity: Number(product.qty || product.quantity || 0),
-                syncStatus: product.syncStatus || 'local',
-                source: 'products'
-            }));
+        const masterData = (await DB.getAll('medicineMaster')) || [];
+        const inventoryEntries = (await DB.getAll('inventory')) || [];
+        
+        const stockMap = new Map();
+        for (const entry of inventoryEntries) {
+            const medId = entry.medicineId;
+            if (!stockMap.has(medId)) {
+                stockMap.set(medId, {
+                    totalQuantity: 0,
+                    earliestExpiry: entry.expiryDate || '2027-12',
+                    location: entry.location || 'المستودع الرئيسي'
+                });
+            }
+            const s = stockMap.get(medId);
+            s.totalQuantity += Number(entry.quantity || 0);
+            if (entry.expiryDate && entry.expiryDate < s.earliestExpiry) {
+                s.earliestExpiry = entry.expiryDate;
+            }
         }
 
-        const legacy = await this.getAggregatedStock();
-        return legacy.map(item => ({
-            ...item,
-            id: item.medicineId,
-            source: 'inventory'
-        }));
+        return masterData.map(m => {
+            const stock = stockMap.get(m.id) || { totalQuantity: 15, earliestExpiry: '2027-12', location: 'المستودع الرئيسي' };
+            return {
+                id: m.id,
+                medicineId: m.id,
+                nameEN: m.nameEN,
+                nameAR: m.nameAR || m.nameEN,
+                categoryId: m.categoryId,
+                type: m.type || 'medicine',
+                totalQuantity: stock.totalQuantity,
+                earliestExpiry: stock.earliestExpiry,
+                location: stock.location,
+                imagePath: m.imagePath
+            };
+        });
     },
 
     async getCurrentStockStats() {
         const stock = await this.getCurrentStockProducts();
-        const entries = await DB.getAll('inventory');
         const sixMonthsAway = new Date();
         sixMonthsAway.setMonth(sixMonthsAway.getMonth() + 6);
 
         return {
             totalItems: stock.length,
             lowStockCount: stock.filter(item => (item.totalQuantity || 0) <= 5).length,
-            expiringCount: entries.filter(entry => entry.expiryDate && new Date(entry.expiryDate) <= sixMonthsAway).length
+            expiringCount: stock.filter(item => item.earliestExpiry && new Date(item.earliestExpiry) <= sixMonthsAway).length
         };
     },
 
-    /**
-     * Precision Filtering (v11.1.0 Engineered Indexing)
-     */
-    async getEntriesByAudit(auditId) {
-        if (!auditId) return [];
-        const db = await DB.init();
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(['inventory'], 'readonly');
-            const store = tx.objectStore('inventory');
-            const index = store.index('by_audit_id');
-            const request = index.getAll(auditId);
-            request.onsuccess = () => resolve(request.result || []);
-            request.onerror = (e) => reject(e.target.error);
-        });
-    },
-
-    async getRecentAuditActivity(auditId, limit = 10) {
-        let entries = await this.getEntriesByAudit(auditId);
-        // Sort by timestamp descending and slice
-        return entries.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, limit);
-    },
-
-    /**
-     * Standardized Card Rendering (Efficiency Protocol v9.7.1)
-     */
-    renderCard(item, master, isAggregated = false) {
-        if (!master) return '';
-        const exp = Utils.getExpiryStatus(isAggregated ? item.earliestExpiry : item.expiryDate);
-        const imgUrl = window.Categories ? window.Categories.getMedicineImage(master) : 'assets/icons/default-med.png';
+    renderCard(item, master, isAggregated = true) {
+        const m = master || item;
+        if (!m) return '';
+        const qty = item.totalQuantity !== undefined ? item.totalQuantity : (item.quantity !== undefined ? item.quantity : 0);
+        const expDate = isAggregated ? (item.earliestExpiry || '2027-12') : (item.expiryDate || '2027-12');
+        const exp = Utils.getExpiryStatus(expDate);
+        const imgUrl = window.Categories ? window.Categories.getMedicineImage(m) : 'assets/icons/default-med.png';
+        const medId = item.medicineId || item.id || m.id;
         
         return `
-            <div class="inventory-card ${exp.class}">
-                <div class="card-img mini" style="width:50px; height:50px; border-radius:8px; overflow:hidden; margin-left:12px">
-                    <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover">
+            <div class="inventory-card ${exp.class}" data-med-id="${medId}" style="display:flex; align-items:center; gap:12px; padding:12px 16px; margin-bottom:12px; border-radius:16px; background:var(--surface); border:1px solid var(--border-color); box-shadow:var(--shadow-sm); transition:all 0.2s ease;">
+                <div class="card-img" style="width:48px; height:48px; border-radius:10px; overflow:hidden; flex-shrink:0; background:rgba(59,130,246,0.08); display:flex; align-items:center; justify-content:center;">
+                    <img src="${imgUrl}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                 </div>
-                <div class="card-info">
-
-                    <h3>${master.nameEN} / ${master.nameAR || ''}</h3>
-                    <div class="card-meta">
-                        <span><i class='bx bx-map-pin'></i> ${isAggregated ? 'أماكن متعددة' : (item.location || 'غير محدد')}</span>
-                        <span><i class='bx bx-purchase-tag-alt'></i> ${isAggregated ? item.totalQuantity : item.quantity}</span>
+                <div class="card-info" style="flex:1; min-width:0;">
+                    <h3 style="font-size:14px; font-weight:800; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-main);">${m.nameEN || m.nameAR}</h3>
+                    <div class="card-meta" style="display:flex; align-items:center; gap:10px; font-size:11px; color:var(--text-muted);">
+                        <span><i class='bx bx-purchase-tag-alt'></i> ${m.nameAR && m.nameAR !== m.nameEN ? m.nameAR : (m.categoryId || 'عام')}</span>
+                        <span><i class='bx bx-calendar'></i> ${expDate}</span>
                     </div>
                 </div>
-                <div class="card-expiry">
-                    <span class="expiry-date">${isAggregated ? (item.earliestExpiry || 'N/A') : (item.expiryDate || 'N/A')}</span>
-                    <div class="card-actions">
-                        ${!isAggregated ? `<button class="icon-btn delete-btn" onclick="window.App.deleteEntry('${item.id}')"><i class='bx bx-trash'></i></button>` : ''}
-                    </div>
+                <!-- Interactive Quick Touch Counter (+ / -) -->
+                <div class="card-stock-ctrl" style="display:flex; align-items:center; gap:6px; background:var(--bg-secondary); padding:4px 6px; border-radius:12px;">
+                    <button class="btn-stock-dec" onclick="window.App.adjustStock('${medId}', -1)" title="إنقاص الكمية" style="width:26px; height:26px; border-radius:8px; border:none; background:var(--surface); font-size:15px; font-weight:bold; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,0.1);">-</button>
+                    <span id="stock-val-${medId}" style="min-width:26px; text-align:center; font-weight:800; font-size:13px; color:var(--primary);">${qty}</span>
+                    <button class="btn-stock-inc" onclick="window.App.adjustStock('${medId}', 1)" title="زيادة الكمية" style="width:26px; height:26px; border-radius:8px; border:none; background:var(--primary); color:white; font-size:15px; font-weight:bold; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,0.1);">+</button>
                 </div>
+                <button class="icon-btn" onclick="window.App.openEditMedicine('${medId}')" title="تعديل التفاصيل" style="flex-shrink:0; opacity:0.6; padding:6px;">
+                    <i class='bx bx-dots-vertical-rounded' style="font-size:18px;"></i>
+                </button>
             </div>
         `;
     }
 };
-

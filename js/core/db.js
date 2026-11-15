@@ -81,6 +81,10 @@ export const DB = {
 
     async add(storeName, data) {
         const db = await this.init();
+        if (!db.objectStoreNames.contains(storeName)) {
+            console.warn(`Dawaa DB: Store '${storeName}' does not exist.`);
+            return null;
+        }
         return new Promise((resolve, reject) => {
             const tx = db.transaction([storeName], 'readwrite');
             const store = tx.objectStore(storeName);
@@ -92,6 +96,10 @@ export const DB = {
 
     async put(storeName, data) {
         const db = await this.init();
+        if (!db.objectStoreNames.contains(storeName)) {
+            console.warn(`Dawaa DB: Store '${storeName}' does not exist.`);
+            return null;
+        }
         return new Promise((resolve, reject) => {
             const tx = db.transaction([storeName], 'readwrite');
             const store = tx.objectStore(storeName);
@@ -103,7 +111,7 @@ export const DB = {
 
     async get(storeName, id) {
         const db = await this.init();
-        if (!id) return null;
+        if (!id || !db.objectStoreNames.contains(storeName)) return null;
         return new Promise((resolve, reject) => {
             const tx = db.transaction([storeName], 'readonly');
             const store = tx.objectStore(storeName);
@@ -115,6 +123,10 @@ export const DB = {
 
     async getAll(storeName) {
         const db = await this.init();
+        if (!db.objectStoreNames.contains(storeName)) {
+            console.warn(`Dawaa DB: Store '${storeName}' does not exist.`);
+            return [];
+        }
         return new Promise((resolve, reject) => {
             const tx = db.transaction([storeName], 'readonly');
             const store = tx.objectStore(storeName);
@@ -126,6 +138,7 @@ export const DB = {
 
     async delete(storeName, id) {
         const db = await this.init();
+        if (!db.objectStoreNames.contains(storeName)) return;
         return new Promise((resolve, reject) => {
             const tx = db.transaction([storeName], 'readwrite');
             const store = tx.objectStore(storeName);
@@ -137,6 +150,7 @@ export const DB = {
 
     async clear(storeName) {
         const db = await this.init();
+        if (!db.objectStoreNames.contains(storeName)) return;
         return new Promise((resolve, reject) => {
             const tx = db.transaction([storeName], 'readwrite');
             const store = tx.objectStore(storeName);

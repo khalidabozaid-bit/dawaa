@@ -1,4 +1,4 @@
-# 🛡️ Dawaa Master Protocol (SYSTEM_PROTOCOL v17.2.0) 🛡️
+# 🛡️ Dawaa Master Protocol (SYSTEM_PROTOCOL v17.2.7) 🛡️
 
 This document is the **Source of Truth** for the Dawaa PWA architecture. It serves as a mandatory pre-flight checklist and operational manual for any AI assistant or developer working on the codebase.
 
@@ -71,14 +71,23 @@ The following actions **MUST** trigger a Cloud Push:
 - **Root Cause**: Partial upgrades left query strings and constants out of sync.
 - **Resolution**: Strict single-version consolidation across `sw.js`, `index.html`, `js/app.js` and ES module imports.
 
+### Lesson 05: Modernized 3-View Architecture & Instant Stock Controls (v17.2.3)
+- **Context**: Cluttered navigation (5 confusing tabs), disconnected inventory vs. catalog, and non-interactive item rows.
+- **Resolution**:
+  - Streamlined to 3 clear views: الرئيسية (Dashboard), المستودع (Warehouse), الإعدادات (Settings & Reports), plus floating central Quick Add (+).
+  - Integrated `getCurrentStockProducts()` so catalog medicines are never hidden if inventory table was freshly initialized.
+  - Implemented interactive touch stock counters (`+` / `-`) with immediate IndexedDB update and cloud synchronization.
+  - Wired direct one-click Excel reports (`full`, `expiring`, `low-stock`) using SheetJS.
+
 ---
 
 ## 🎯 5. Tech Debt & Roadmap
 
 - [ ] **Push Notifications**: Implement Firebase Cloud Messaging (FCM).
 - [x] **Offline Guard**: Implemented real-time network status indicator badge & automatic reconnect sync (v17.2.0).
+- [x] **Unified 3-View Warehouse Flow & Interactive Counters**: Completed in v17.2.3.
 - [ ] **Conflict Solver**: Implement smarter "Multi-user edit" resolution.
 
 ---
 **Status**: ACTIVE 🛡️🏗️🛡️🚀🔥
-**Last Updated**: v17.2.0 (Unified Master Protocol)
+**Last Updated**: v17.2.7 (Unified Master Protocol)

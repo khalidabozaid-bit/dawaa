@@ -70,7 +70,7 @@
             </div>
             <div class="app-logo">
                 <i class='bx bxs-capsule'></i>
-                <h1>دواء <span style="font-size: 10px; opacity: 0.5">v17.2.2</span></h1>
+                <h1>دواء <span style="font-size: 10px; opacity: 0.5">v17.2.7</span></h1>
                 <span id="network-status" class="network-status-badge online" title="حالة الاتصال بالسحابة">
                     <i class='bx bx-wifi'></i>
                 </span>
@@ -208,25 +208,25 @@
                 <h3><i class='bx bxs-file-doc'></i> تقارير الجرد (Excel Export)</h3>
             </div>
             <div class="reports-grid mb-25">
-                <div class="report-card" onclick="window.App.renderInventory('detailed')">
+                <div class="report-card" onclick="window.App.export('full')">
                     <div class="report-icon primary"><i class='bx bx-spreadsheet'></i></div>
                     <div class="report-info">
-                        <h3>تقرير المخزون الشامل</h3>
-                        <p>تصدير كافة الأصناف والكميات الحالية</p>
+                        <h3>تقرير المخزون الشامل (Excel)</h3>
+                        <p>تصدير كافة الأصناف والكميات الحالية كملف إكسيل</p>
                     </div>
                 </div>
-                <div class="report-card" onclick="window.App.showExpiring()">
+                <div class="report-card" onclick="window.App.export('expiring')">
                     <div class="report-icon warning"><i class='bx bx-time-five'></i></div>
                     <div class="report-info">
-                        <h3>تقرير تنبيه الصلاحيات</h3>
-                        <p>الأدوية التي تنتهي خلال 6 أشهر</p>
+                        <h3>تقرير تنبيه الصلاحيات (Excel)</h3>
+                        <p>تصدير الأدوية التي تنتهي خلال 6 أشهر</p>
                     </div>
                 </div>
-                <div class="report-card" onclick="window.App.showLowStock()">
+                <div class="report-card" onclick="window.App.export('low-stock')">
                     <div class="report-icon danger"><i class='bx bx-trending-down'></i></div>
                     <div class="report-info">
-                        <h3>تقرير الأرصدة الحرجة</h3>
-                        <p>الأصناف التي رصيدها 5 أو أقل</p>
+                        <h3>تقرير الأرصدة الحرجة (Excel)</h3>
+                        <p>تصدير الأصناف التي رصيدها 5 أو أقل</p>
                     </div>
                 </div>
             </div>
@@ -294,7 +294,7 @@
             </div>
 
             <div class="version-footer mt-20">
-                <p>دواء للمستودعات الذكية - v17.2.2</p>
+                <p>دواء للمستودعات الذكية - v17.2.7</p>
                 <p style="font-size: 11px; opacity: 0.6">نظام حديث ومتكامل لجرد وإدارة الأدوية</p>
             </div>
         </section>
@@ -351,7 +351,7 @@
 
     <!-- App Scripts -->
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/app.js?v=17.2.2"></script>
+    <script type="module" src="js/app.js?v=17.2.7"></script>
     
     <!-- Navigation Logic managed by js/app.js -->
 </body>

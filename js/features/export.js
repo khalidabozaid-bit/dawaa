@@ -1,4 +1,5 @@
 import { DB } from '../core/db.js';
+import { Inventory } from './inventory.js';
 
 /**
  * Excel Export Feature
@@ -9,22 +10,23 @@ export const Exporter = {
     async exportToExcel(type = 'full', options = {}) {
         console.log(`Dawaa Exporter: Starting ${type} export...`);
         
-        let data = await DB.getAll('inventory');
-        const masterData = await DB.getAll('medicineMaster');
-        const masterMap = new Map(masterData.map(m => [m.id, m]));
+        let stockProducts = await Inventory.getCurrentStockProducts();
+        let data = [...stockProducts];
 
         // Filter logic
         if (type === 'expiring') {
             const sixMonthsAway = new Date();
             sixMonthsAway.setMonth(sixMonthsAway.getMonth() + 6);
-            data = data.filter(item => item.expiryDate && new Date(item.expiryDate) <= sixMonthsAway);
+            data = data.filter(item => {
+                const exp = item.earliestExpiry || item.expiryDate;
+                return exp && new Date(exp) <= sixMonthsAway;
+            });
         } else if (type === 'low-stock') {
-            data = data.filter(item => item.quantity <= 5);
+            data = data.filter(item => (item.totalQuantity !== undefined ? item.totalQuantity : item.quantity || 0) <= 5);
         } else if (type === 'custom') {
             data = data.filter(i => {
-                const matchLoc = options.location === 'all' || i.location === options.location;
-                const matchType = options.type === 'all' || i.type === options.type;
-                return matchLoc && matchType;
+                const matchLoc = options.location === 'all' || (i.location === options.location);
+                return matchLoc;
             });
         }
 
@@ -35,15 +37,13 @@ export const Exporter = {
 
         // Transform for Excel
         const worksheetData = data.map(item => {
-            const master = masterMap.get(item.medicineId) || {};
             return {
-                'الأصناف (الاسم)': master.nameEN || 'Unknown',
-                'الاسم بالعربي': master.nameAR || 'غير معروف',
-                'الموقع': item.location,
-                'الكمية الحالية': item.quantity,
-                'تاريخ الصلاحية': item.expiryDate || 'N/A',
-                'التصنيف': master.category || 'N/A',
-                'التاريخ المسجل': item.timestamp ? new Date(item.timestamp).toLocaleDateString('ar-EG') : '-'
+                'اسم الدواء (إنجليزي)': item.nameEN || 'Unknown',
+                'اسم الدواء (عربي)': item.nameAR || '-',
+                'التصنيف': item.categoryId || 'عام',
+                'الكمية المتوفرة': item.totalQuantity !== undefined ? item.totalQuantity : (item.quantity || 0),
+                'تاريخ الصلاحية': item.earliestExpiry || item.expiryDate || 'N/A',
+                'الموقع بالمستودع': (item.entries && item.entries[0] && item.entries[0].location) || item.location || 'المستودع الرئيسي'
             };
         });
 
@@ -57,7 +57,8 @@ export const Exporter = {
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "Inventory");
         
-        const fileName = `Dawaa_Inventory_${type}_${new Date().toLocaleDateString('ar-EG').replace(/\//g, '-')}.xlsx`;
+        const typeArabic = type === 'expiring' ? 'تنبيه_الصلاحيات' : (type === 'low-stock' ? 'الارصدة_الحرجة' : 'المخزون_الشامل');
+        const fileName = `Dawaa_${typeArabic}_${new Date().toISOString().split('T')[0]}.xlsx`;
         XLSX.writeFile(workbook, fileName);
     },
 

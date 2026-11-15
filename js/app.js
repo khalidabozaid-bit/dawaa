@@ -1,14 +1,14 @@
-import { DB } from './core/db.js?v=17.2.2';
-import { UI } from './core/ui.js?v=17.2.2';
-import { Inventory } from './features/inventory.js?v=17.2.2';
-import { Categories } from './features/categories.js?v=17.2.2';
-import { Audit } from './features/audit.js?v=17.2.2';
-import { Exporter } from './features/export.js?v=17.2.2';
-import { Utils } from './core/utils.js?v=17.2.2';
-import { Sync } from './core/sync.js?v=17.2.2';
-import { TaskManager } from './features/tasks.js?v=17.2.2';
-import { auth, db, storage } from './core/firebase-config.js?v=17.2.2';
-import { Recovery } from './recovery.js?v=17.2.2';
+import { DB } from './core/db.js';
+import { UI } from './core/ui.js';
+import { Inventory } from './features/inventory.js';
+import { Categories } from './features/categories.js';
+import { Audit } from './features/audit.js';
+import { Exporter } from './features/export.js';
+import { Utils } from './core/utils.js';
+import { Sync } from './core/sync.js';
+import { TaskManager } from './features/tasks.js';
+import { auth, db, storage } from './core/firebase-config.js';
+import { Recovery } from './recovery.js';
 
 // Immediate Global Bindings to prevent undefined calls during boot
 window.UI = UI;
@@ -23,7 +23,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '17.2.2', // Universal Sovereign v17.2.2
+    VERSION: '17.2.7', // Universal Sovereign v17.2.7
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -63,7 +63,7 @@ const App = {
             updateNetworkUI(true);
             if (window.UI) UI.showToast('تم استعادة الاتصال بالإنترنت 🌐 جاري مزامنة التغييرات المعلقة...', 'success');
             try {
-                const { SyncV2 } = await import('./core/sync_v2.js?v=17.2.0');
+                const { SyncV2 } = await import('./core/sync_v2.js');
                 if (SyncV2 && typeof SyncV2.pushLocalChanges === 'function') {
                     await SyncV2.pushLocalChanges();
                 }
@@ -352,7 +352,7 @@ const App = {
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 // v10.0.1: Cache-Busting Registration to bypass HTTP stickiness
-                navigator.serviceWorker.register('./sw.js?v=17.2.2').then(reg => {
+                navigator.serviceWorker.register('./sw.js').then(reg => {
                     console.log('SW: Sovereign Registered.');
                 }).catch(err => console.error('SW: Registration Error.', err));
             });
@@ -412,7 +412,7 @@ const App = {
 
             this.renderCategoryChips(); // Refresh filters
 
-            let data = await DB.getAll('inventory');
+            let data = await Inventory.getCurrentStockProducts();
             const masterData = await DB.getAll('medicineMaster');
             const masterMap = new Map(masterData.map(m => [m.id, m]));
             
@@ -420,7 +420,7 @@ const App = {
             if (type === 'expiry') {
                 const sixMonths = new Date();
                 sixMonths.setMonth(sixMonths.getMonth() + 6);
-                data = data.filter(i => i.expiryDate && new Date(i.expiryDate) <= sixMonths);
+                data = data.filter(i => (i.earliestExpiry || i.expiryDate) && new Date(i.earliestExpiry || i.expiryDate) <= sixMonths);
             } else if (type === 'low-stock') {
                 data = await Inventory.getCurrentStockProducts();
                 data = data.filter(i => (i.totalQuantity || 0) <= 5);
@@ -430,11 +430,11 @@ const App = {
             if (this.selectedCategoryId) {
                 data = data.filter(i => {
                     const m = masterMap.get(i.medicineId || i.id);
-                    return i.categoryId === this.selectedCategoryId || (m && m.categoryId === this.selectedCategoryId);
+                    return i.categoryId === this.selectedCategoryId;
                 });
             }
 
-            this.renderInventoryList(data, 'inventory-items-list', type === 'low-stock');
+            this.renderInventoryList(data, 'inventory-items-list', true);
         } catch (err) {
             console.error('Inventory Render Error:', err);
         }
@@ -1361,38 +1361,22 @@ const App = {
     // --- Search & Utils ---
 
     async handleGlobalSearch(query) {
-        if (!query) {
-            this.selectedCategoryId = null; // Clear filter on empty search
-            return this.renderInventory();
-        }
-
+        const q = (query || '').trim().toLowerCase();
         try {
-            const inventory = await DB.getAll('inventory');
-            const masterData = await DB.getAll('medicineMaster');
-            const masterMap = new Map(masterData.map(m => [m.id, m]));
-            
-            // 1. Filter Inventory
-            const filteredInventory = inventory.filter(i => {
-                const m = masterMap.get(i.medicineId);
-                return m && (
-                    m.nameEN.toLowerCase().includes(query.toLowerCase()) || 
-                    (m.nameAR && m.nameAR.includes(query)) ||
-                    (m.activeIngredient && m.activeIngredient.toLowerCase().includes(query.toLowerCase()))
+            let data = await Inventory.getCurrentStockProducts();
+            if (q.length > 0) {
+                data = data.filter(m => 
+                    (m.nameEN && m.nameEN.toLowerCase().includes(q)) ||
+                    (m.nameAR && m.nameAR.toLowerCase().includes(q)) ||
+                    (m.categoryId && m.categoryId.toLowerCase().includes(q))
                 );
-            });
-
-            // 2. If results are low, search Master Data (Smart Lookup)
-            let masterResults = [];
-            if (filteredInventory.length < 5) {
-                masterResults = masterData.filter(m => 
-                    m.nameEN.toLowerCase().includes(query.toLowerCase()) || 
-                    (m.nameAR && m.nameAR.includes(query))
-                ).filter(m => !filteredInventory.some(i => i.medicineId === m.id));
+            } else if (this.selectedCategoryId) {
+                data = data.filter(m => m.categoryId === this.selectedCategoryId);
             }
 
-            this.renderSearchResults(filteredInventory, masterResults.slice(0, 5), masterMap);
+            this.renderInventoryList(data, 'inventory-items-list', true);
         } catch (err) {
-            console.error(err);
+            console.error('Search error:', err);
         }
     },
 
@@ -1437,36 +1421,147 @@ const App = {
         }
     },
 
-    openQuickAdd() {
-        UI.showModal(`
-            <div class="modal-header"><h2>جرد سريع</h2></div>
-            <div class="search-bar mb-20">
-                <i class='bx bx-search'></i>
-                <input type="text" placeholder="ابحث باسم الدواء..." oninput="window.App.handleQuickSearch(this.value)">
-            </div>
-            <div id="quick-search-results" class="items-list mini"></div>
-            <button class="btn-ghost mt-20" onclick="window.UI.closeModal()">إلغاء</button>
-        `);
+    async openQuickAdd() {
+        try {
+            const cats = await Categories.getAllSorted();
+            UI.showModal(`
+                <div class="sheet-handle"></div>
+                <div class="modal-header">
+                    <h2><i class='bx bx-plus-circle'></i> إضافة دواء جديد للمستودع</h2>
+                </div>
+                <form id="form-quick-add" onsubmit="event.preventDefault(); window.App.saveQuickAddMedicine();">
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label class="form-label">الاسم بالإنجليزية (مطلوب):</label>
+                        <input type="text" id="qa-name-en" class="form-input" placeholder="مثال: Panadol Extra 500mg" required autofocus>
+                    </div>
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label class="form-label">الاسم بالعربية:</label>
+                        <input type="text" id="qa-name-ar" class="form-input" placeholder="مثال: بنادول إكسترا">
+                    </div>
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label class="form-label">القسم / التصنيف:</label>
+                        <select id="qa-category" class="form-select" required>
+                            <option value="">اختر القسم...</option>
+                            ${cats.map(c => `<option value="${c.id}">${c.nameAR || c.id}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:12px;">
+                        <div class="form-group">
+                            <label class="form-label">الكمية المتوفرة:</label>
+                            <input type="number" id="qa-qty" class="form-input" value="10" min="0" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">تاريخ الصلاحية:</label>
+                            <input type="month" id="qa-expiry" class="form-input" value="2027-12" required>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom:15px;">
+                        <label class="form-label">مكان التخزين / الرف:</label>
+                        <input type="text" id="qa-location" class="form-input" placeholder="مثال: الرف A-1">
+                    </div>
+                    <div class="form-actions" style="display:flex; gap:10px; margin-top:20px;">
+                        <button type="submit" class="btn-primary" style="flex:1;">💾 حفظ الدواء في المستودع</button>
+                        <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+                    </div>
+                </form>
+            `);
+        } catch (err) {
+            console.error('Quick Add Error:', err);
+            UI.showToast('خطأ في فتح النافذة', 'danger');
+        }
     },
 
-    async handleQuickSearch(val) {
-        if (!val) { document.getElementById('quick-search-results').innerHTML = ''; return; }
+    async saveQuickAddMedicine() {
         try {
-            const results = await Categories.searchMaster(val);
-            const container = document.getElementById('quick-search-results');
-            if (!container) return;
-            
-            container.innerHTML = results.slice(0, 5).map(m => `
-                <div class="search-result-item" onclick="window.App.openEntryForm('${m.id}')">
-                    <i class='bx bx-capsule'></i>
-                    <div class="search-info">
-                        <span class="search-name">${m.nameEN}</span>
-                        <span class="search-sub">${m.activeIngredient || ''}</span>
-                    </div>
-                </div>
-            `).join('');
+            const nameEN = document.getElementById('qa-name-en').value.trim();
+            const nameAR = document.getElementById('qa-name-ar').value.trim() || nameEN;
+            const categoryId = document.getElementById('qa-category').value;
+            const qty = Number(document.getElementById('qa-qty').value) || 0;
+            const expiry = document.getElementById('qa-expiry').value || '2027-12';
+            const location = document.getElementById('qa-location').value.trim() || 'المستودع الرئيسي';
+
+            if (!nameEN || !categoryId) {
+                UI.showToast('يرجى ملء الاسم والقسم', 'warning');
+                return;
+            }
+
+            const medId = 'med_' + Date.now();
+            const now = new Date().toISOString();
+
+            await DB.add('medicineMaster', {
+                id: medId,
+                nameEN,
+                nameAR,
+                categoryId,
+                type: 'medicine',
+                imagePath: 'assets/icons/default-med.png',
+                syncStatus: 'local',
+                createdAt: now
+            });
+
+            await DB.add('inventory', {
+                id: 'inv_' + medId,
+                medicineId: medId,
+                quantity: qty,
+                expiryDate: expiry,
+                location,
+                syncStatus: 'local',
+                lastUpdated: now
+            });
+
+            UI.closeModal();
+            UI.showToast(`تمت إضافة «${nameEN}» برصيد ${qty} بنجاح ✨`, 'success');
+
+            await this.renderDashboard();
+            await this.renderInventory('detailed');
+            window.switchView('inventory');
+
+            if (this.userRole === 'admin') {
+                Sync.push(medId);
+            }
         } catch (err) {
-            console.error(err);
+            console.error('Save Quick Add Error:', err);
+            UI.showToast('فشل حفظ الدواء', 'danger');
+        }
+    },
+
+    async adjustStock(medId, delta) {
+        try {
+            let entries = await DB.getAll('inventory');
+            let entry = entries.find(e => e.medicineId === medId);
+            const now = new Date().toISOString();
+            
+            if (entry) {
+                entry.quantity = Math.max(0, (Number(entry.quantity) || 0) + delta);
+                entry.lastUpdated = now;
+                await DB.put('inventory', entry);
+            } else {
+                const newQty = Math.max(0, 15 + delta);
+                entry = {
+                    id: 'inv_' + medId,
+                    medicineId: medId,
+                    quantity: newQty,
+                    expiryDate: '2027-12-31',
+                    location: 'المستودع الرئيسي',
+                    lastUpdated: now
+                };
+                await DB.put('inventory', entry);
+            }
+
+            const countEl = document.getElementById(`stock-val-${medId}`);
+            if (countEl) countEl.textContent = entry.quantity;
+
+            if (this.userRole === 'admin') {
+                Sync.push(medId);
+            }
+
+            const stats = await Inventory.getCurrentStockStats();
+            UI.updateDashboardStats(stats);
+            
+            UI.showToast(delta > 0 ? `الرصيد: ${entry.quantity} ➕` : `الرصيد: ${entry.quantity} ➖`, 'info');
+        } catch (err) {
+            console.error('Adjust stock error:', err);
+            UI.showToast('فشل تعديل الرصيد', 'danger');
         }
     },
 

@@ -132,7 +132,7 @@ export const SyncV2 = {
      */
     async pushLocalChanges() {
         try {
-            const products = await DB.getAll('products');
+            const products = await DB.getAll('medicineMaster');
             const pending = products.filter(product => product.syncStatus === 'pending');
 
             if (pending.length === 0) return { pushed: 0, failed: 0 };
@@ -144,7 +144,7 @@ export const SyncV2 = {
             for (const product of pending) {
                 try {
                     const { syncStatus, ...payload } = product;
-                    await db.collection('products').doc(product.id).set({
+                    await db.collection('medicines').doc(product.id).set({
                         ...payload,
                         syncStatus: 'global_v2',
                         lastUpdatedAt: now
@@ -152,7 +152,7 @@ export const SyncV2 = {
 
                     product.syncStatus = 'global_v2';
                     product.lastSynced = new Date().toISOString();
-                    await DB.put('products', product);
+                    await DB.put('medicineMaster', product);
                     pushed++;
                 } catch (err) {
                     failed++;
