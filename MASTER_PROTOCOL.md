@@ -1,4 +1,4 @@
-# 🛡️ Dawaa Master Protocol (SYSTEM_PROTOCOL v18.2.0) 🛡️
+# 🛡️ Dawaa Master Protocol (SYSTEM_PROTOCOL v18.3.0) 🛡️
 
 This document is the **Source of Truth** for the Dawaa PWA architecture. It serves as a mandatory pre-flight checklist and operational manual for any AI assistant or developer working on the codebase.
 
@@ -119,6 +119,17 @@ The following actions **MUST** trigger a Cloud Push:
   - Warehouse Category Filter: Replaced horizontal chips with full `#category-dropdown-select` containing every category and its medicine count.
   - Expiry Monitor: Added Audit Origin Reference Box showing session name, host, date, and status, with full dropdown support to switch between live stock and past audits.
 
+### Lesson 09: Complete Audit Session Lifecycle (Edit, Delete, Archive, Report) and Strict Audit Independence (v18.3.0)
+- **Context**: User asked where the audit goes after saving, required each audit to be completely independent without inheriting previous session quantities ("مالقيش كميات الي فاتت"), and needed full audit session management: editing sessions, deleting sessions, archiving completed sessions, and inspecting past audit breakdowns.
+- **Resolution**:
+  - Audit Independence: Each audit session is strictly scoped to its own counts. In any new session, medicine counts start blank (0 batches), ensuring true physical auditing.
+  - Audit Destination Transparency: Finalizing an audit updates active inventory stock with actual counted batches and stamps a permanent historical record in `audit_sessions` archive.
+  - Session Management:
+    - Edit Session (`openEditAuditSessionModal`): rename session, switch type (individual/group), and re-assign storage locations.
+    - Archive / Unarchive (`archiveAuditSession` / `unarchiveAuditSession`): move finished sessions to the historical archive or restore them.
+    - Delete Session (`deleteAuditSession`): permanently remove session and its count records with double confirmation.
+    - Session Report & Excel (`openAuditReportModal` / `exportAuditSession`): inspect full item breakdown for any past session with direct Excel export.
+
 ---
 
 ## 🎯 5. Tech Debt & Roadmap
@@ -129,8 +140,9 @@ The following actions **MUST** trigger a Cloud Push:
 - [x] **Hierarchical Audit Workflow & Full Storage Location Management**: Completed in v18.0.1.
 - [x] **Multi-Batch Audit with Auto-Suggest & Color Coding, Dedicated Expiry Monitor, Master Warehouse**: Completed in v18.1.0.
 - [x] **Exterior Batch Pills, Calendar Picker, Category Dropdown, and Audit Reference in Expiry Monitor**: Completed in v18.2.0.
+- [x] **Audit Session CRUD, Archiving, Dedicated Session Reports, and Strict Independence**: Completed in v18.3.0.
 - [ ] **Conflict Solver**: Implement smarter "Multi-user edit" resolution.
 
 ---
 **Status**: ACTIVE 🛡️🏗️🛡️🚀🔥
-**Last Updated**: v18.2.0 (Unified Master Protocol)
+**Last Updated**: v18.3.0 (Unified Master Protocol)

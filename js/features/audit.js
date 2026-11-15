@@ -143,6 +143,40 @@ export const Audit = {
         return true;
     },
 
+    async deleteSession(id) {
+        if (!id) return false;
+        await DB.delete('audit_sessions', id);
+        if (this.currentSessionId === id) this.currentSessionId = null;
+        return true;
+    },
+
+    async archiveSession(id) {
+        const session = await this.getSession(id);
+        if (!session) return false;
+        session.isArchived = true;
+        session.archivedAt = new Date().toISOString();
+        await this.saveSession(session);
+        return true;
+    },
+
+    async unarchiveSession(id) {
+        const session = await this.getSession(id);
+        if (!session) return false;
+        session.isArchived = false;
+        await this.saveSession(session);
+        return true;
+    },
+
+    async updateSession(id, data) {
+        const session = await this.getSession(id);
+        if (!session) return null;
+        if (data.name) session.name = data.name;
+        if (data.type) session.type = data.type;
+        if (data.locationIds && Array.isArray(data.locationIds)) session.locationIds = data.locationIds;
+        await this.saveSession(session);
+        return session;
+    },
+
     async recordCount(sessionId, locationId, medicineId, { batches, quantity, expiryDate }) {
         const session = await this.getSession(sessionId);
         if (!session) return false;

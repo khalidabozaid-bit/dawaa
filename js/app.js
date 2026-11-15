@@ -26,7 +26,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.2.0', // Universal Sovereign v18.2.0
+    VERSION: '18.3.0', // Universal Sovereign v18.3.0
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2604,8 +2604,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
     async renderAuditSessionsLevel(container) {
         const sessions = await Audit.getAllSessions();
-        const activeSessions = sessions.filter(s => s.status !== 'finalized');
-        const closedSessions = sessions.filter(s => s.status === 'finalized');
+        const activeSessions = sessions.filter(s => s.status !== 'finalized' && !s.isArchived);
+        const closedSessions = sessions.filter(s => s.status === 'finalized' || s.isArchived);
 
         container.innerHTML = `
             <div class="view-header">
@@ -2619,15 +2619,15 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             </div>
 
             <!-- Active / On-Hold Sessions -->
-            <div class="section-title mt-15 mb-10">
-                <h3><i class='bx bx-time-five'></i> الجلسات النشطة والمعلقة (${activeSessions.length})</h3>
+            <div class="section-title mt-15 mb-10" style="display:flex; justify-content:space-between; align-items:center;">
+                <h3><i class='bx bx-play-circle'></i> الجلسات الجارية والمعلقة (${activeSessions.length})</h3>
             </div>
             
             ${activeSessions.length === 0 ? `
-                <div class="empty-state mb-20" style="padding: 30px; text-align: center; background: var(--surface); border-radius: 16px; border: 1px dashed var(--border-color);">
-                    <i class='bx bx-clipboard' style="font-size: 40px; color: var(--primary); opacity: 0.6;"></i>
-                    <h3 style="margin: 10px 0 5px 0;">لا توجد جلسة جرد نشطة حالياً</h3>
-                    <p class="text-muted small mb-15">ابدأ جرد فردي سريع أو جرد جماعي للفريق وحدد الأماكن</p>
+                <div class="empty-state mb-20" style="padding: 25px; text-align: center; background: var(--surface); border-radius: 16px; border: 1px dashed var(--border-color);">
+                    <i class='bx bx-clipboard' style="font-size: 38px; color: var(--primary); opacity: 0.6;"></i>
+                    <h3 style="margin: 8px 0 4px 0; font-size: 15px;">لا توجد جلسة جرد جارية حالياً</h3>
+                    <p class="text-muted small mb-12">ابدأ جرد جديد مستقل وحدد الأماكن لبدء العد الميداني النظيف</p>
                     <button class="btn-primary sm-btn" onclick="window.App.openNewAuditModal()">+ بدء جرد جديد الآن</button>
                 </div>
             ` : `
@@ -2649,12 +2649,12 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                                     </div>
                                     <span style="font-size: 11px; color: var(--text-muted);">${new Date(s.startedAt).toLocaleDateString('ar-EG')}</span>
                                 </div>
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; flex-wrap: wrap; gap: 8px;">
                                     <span style="font-size: 12px; font-weight: 700; color: var(--text-muted);">
-                                        <i class='bx bx-check-circle' style="color: var(--success)"></i> تم إحصاء: ${countKeys} عنصر
+                                        <i class='bx bx-check-circle' style="color: var(--secondary)"></i> تم إحصاء: <strong>${countKeys} صنف</strong>
                                     </span>
-                                    <div style="display: flex; gap: 6px;">
-                                        <button class="btn-primary sm-btn" onclick="window.App.openAuditSession('${s.id}')">
+                                    <div style="display: flex; gap: 6px; align-items: center;">
+                                        <button class="btn-primary sm-btn" onclick="window.App.openAuditSession('${s.id}')" title="متابعة العد">
                                             ▶️ متابعة الجرد
                                         </button>
                                         ${!isHold ? `
@@ -2666,8 +2666,17 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                                                 ▶️
                                             </button>
                                         `}
-                                        <button class="btn-ghost sm-btn text-danger" onclick="window.App.finalizeAuditSession('${s.id}')" title="إنهاء واعتماد">
+                                        <button class="btn-ghost sm-btn text-danger" onclick="window.App.finalizeAuditSession('${s.id}')" title="إنهاء واعتماد وتحديث المستودع">
                                             🏁
+                                        </button>
+                                        <button class="icon-btn" onclick="window.App.openEditAuditSessionModal('${s.id}')" title="تعديل بيانات الجلسة" style="padding: 4px;">
+                                            <i class='bx bx-edit-alt' style="font-size: 16px;"></i>
+                                        </button>
+                                        <button class="icon-btn text-warning" onclick="window.App.archiveAuditSession('${s.id}')" title="أرشفة الجلسة" style="padding: 4px;">
+                                            <i class='bx bx-archive-in' style="font-size: 16px; color: var(--accent);"></i>
+                                        </button>
+                                        <button class="icon-btn text-danger" onclick="window.App.deleteAuditSession('${s.id}')" title="حذف الجلسة نهائياً" style="padding: 4px;">
+                                            <i class='bx bx-trash' style="font-size: 16px; color: var(--danger);"></i>
                                         </button>
                                     </div>
                                 </div>
@@ -2677,24 +2686,274 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             `}
 
-            <!-- Closed / Completed Sessions Archive -->
+            <!-- Closed / Completed / Archived Sessions -->
+            <div class="section-title mb-10" style="display:flex; justify-content:space-between; align-items:center;">
+                <h3><i class='bx bx-archive'></i> أرشيف الجلسات المعتمدة والسابقة (${closedSessions.length})</h3>
+            </div>
             ${closedSessions.length > 0 ? `
-                <div class="section-title mb-10">
-                    <h3><i class='bx bx-archive'></i> سجل الجلسات المكتملة (${closedSessions.length})</h3>
-                </div>
-                <div class="sessions-list" style="display: flex; flex-direction: column; gap: 8px;">
-                    ${closedSessions.slice(0, 5).map(s => `
-                        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--bg-secondary); border-radius:12px; font-size:12px;">
-                            <div>
-                                <strong>${s.name}</strong>
-                                <span class="badge bg-soft" style="margin-right:6px;">مكتملة ✅</span>
+                <div class="sessions-list" style="display: flex; flex-direction: column; gap: 10px;">
+                    ${closedSessions.map(s => {
+                        const countKeys = Object.keys(s.counts || {}).length;
+                        const isFinal = s.status === 'finalized';
+                        return `
+                            <div class="card p-12" style="background: var(--surface); border: 1px solid var(--border-color); border-radius: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                                <div>
+                                    <div style="display: flex; align-items: center; gap: 6px;">
+                                        <span class="badge ${isFinal ? 'bg-success' : 'bg-secondary'}" style="font-size: 10px; padding: 2px 6px; border-radius: 4px;">
+                                            ${isFinal ? 'معتمد 🏁' : 'مؤرشف 📦'}
+                                        </span>
+                                        <strong style="font-size: 14px;">${s.name}</strong>
+                                    </div>
+                                    <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px; display: flex; gap: 8px;">
+                                        <span><i class='bx bx-user'></i> ${s.host || 'النظام'}</span>
+                                        <span>&bull;</span>
+                                        <span><i class='bx bx-layer'></i> ${countKeys} صنف مجرود</span>
+                                        <span>&bull;</span>
+                                        <span><i class='bx bx-calendar'></i> ${new Date(s.finalizedAt || s.startedAt).toLocaleDateString('ar-EG')}</span>
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <button class="btn-ghost sm-btn" onclick="window.App.openAuditReportModal('${s.id}')" title="عرض تفاصيل الجرد">
+                                        <i class='bx bx-show'></i> عرض الكشف
+                                    </button>
+                                    <button class="btn-ghost sm-btn" onclick="window.App.exportAuditSession('${s.id}')" title="تصدير كملف إكسيل">
+                                        <i class='bx bx-download'></i> Excel
+                                    </button>
+                                    <button class="icon-btn text-warning" onclick="window.App.unarchiveAuditSession('${s.id}')" title="استعادة للنشط" style="padding: 4px;">
+                                        <i class='bx bx-undo' style="font-size: 16px;"></i>
+                                    </button>
+                                    <button class="icon-btn text-danger" onclick="window.App.deleteAuditSession('${s.id}')" title="حذف نهائياً" style="padding: 4px;">
+                                        <i class='bx bx-trash' style="font-size: 16px; color: var(--danger);"></i>
+                                    </button>
+                                </div>
                             </div>
-                            <span class="text-muted">${new Date(s.finalizedAt || s.startedAt).toLocaleDateString('ar-EG')}</span>
+                        `;
+                    }).join('')}
+                </div>
+            ` : `
+                <p class="text-muted small" style="text-align: center; padding: 15px;">لا توجد جلسات مؤرشفة أو معتمدة سابقة حتى الآن</p>
+            `}
+        `;
+    },
+
+    // --- Session CRUD & Management Handlers ---
+    async openEditAuditSessionModal(sessionId) {
+        try {
+            const session = await Audit.getSession(sessionId);
+            if (!session) return;
+            const allLocs = (await Locations.getAll()) || [];
+            const sessionLocSet = new Set(session.locationIds || []);
+
+            UI.showModal(`
+                <div class="modal-header">
+                    <h2>تعديل جلسة الجرد</h2>
+                </div>
+                <form onsubmit="event.preventDefault(); window.App.saveEditAuditSession('${sessionId}');">
+                    <div class="form-group mb-12">
+                        <label class="form-label">اسم الجلسة:</label>
+                        <input type="text" id="edit-session-name" class="form-input" value="${session.name}" required>
+                    </div>
+                    <div class="form-group mb-12">
+                        <label class="form-label">نوع الجرد:</label>
+                        <select id="edit-session-type" class="form-select">
+                            <option value="individual" ${session.type === 'individual' ? 'selected' : ''}>👤 فردي (Express)</option>
+                            <option value="group" ${session.type === 'group' ? 'selected' : ''}>👥 جماعي (Team / Cloud Sync)</option>
+                        </select>
+                    </div>
+                    <div class="form-group mb-15">
+                        <label class="form-label">الأماكن المشمولة في هذه الجلسة:</label>
+                        <div style="display:flex; flex-direction:column; gap:6px; max-height:160px; overflow-y:auto; padding:4px; border:1px solid var(--border-color); border-radius:8px;">
+                            ${allLocs.map(loc => `
+                                <label style="display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer;">
+                                    <input type="checkbox" class="edit-session-loc-cb" value="${loc.id}" ${sessionLocSet.has(loc.id) ? 'checked' : ''}>
+                                    <span>${loc.nameAR}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn-primary">💾 حفظ التعديلات</button>
+                        <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+                    </div>
+                </form>
+            `);
+        } catch (err) {
+            console.error('Error editing audit session:', err);
+            UI.showToast('تعذر فتح نافذة التعديل', 'danger');
+        }
+    },
+
+    async saveEditAuditSession(sessionId) {
+        const name = document.getElementById('edit-session-name')?.value.trim();
+        const type = document.getElementById('edit-session-type')?.value;
+        const cbs = document.querySelectorAll('.edit-session-loc-cb:checked');
+        const locationIds = Array.from(cbs).map(cb => cb.value);
+
+        if (!name) {
+            UI.showToast('يرجى إدخال اسم الجلسة', 'warning');
+            return;
+        }
+
+        if (locationIds.length === 0) {
+            UI.showToast('يرجى تحديد مكان واحد على الأقل', 'warning');
+            return;
+        }
+
+        await Audit.updateSession(sessionId, { name, type, locationIds });
+        UI.closeModal();
+        UI.showToast('تم تحديث بيانات الجلسة بنجاح ✅', 'success');
+        this.renderAuditView();
+    },
+
+    async deleteAuditSession(sessionId) {
+        const session = await Audit.getSession(sessionId);
+        const sName = session?.name || 'هذه الجلسة';
+
+        if (!confirm(`تحذير: هل أنت متأكد من حذف "${sName}" نهائياً؟\nسيتم مسح كافة سجلات العد المرتبطة بها ولن يمكن استعادتها.`)) {
+            return;
+        }
+
+        await Audit.deleteSession(sessionId);
+        UI.showToast('تم حذف الجلسة وسجلاتها نهائياً 🗑️', 'info');
+        this.renderAuditView();
+    },
+
+    async archiveAuditSession(sessionId) {
+        await Audit.archiveSession(sessionId);
+        UI.showToast('تم نقل الجلسة إلى الأرشيف بنجاح 📦', 'success');
+        this.renderAuditView();
+    },
+
+    async unarchiveAuditSession(sessionId) {
+        await Audit.unarchiveSession(sessionId);
+        UI.showToast('تمت استعادة الجلسة من الأرشيف ↩️', 'success');
+        this.renderAuditView();
+    },
+
+    async openAuditReportModal(sessionId) {
+        try {
+            const session = await Audit.getSession(sessionId);
+            if (!session) return;
+            const masterMeds = (await DB.getAll('medicineMaster')) || [];
+            const masterMap = new Map(masterMeds.map(m => [m.id, m]));
+            const locs = (await Locations.getAll()) || [];
+            const locMap = new Map(locs.map(l => [l.id, l.nameAR]));
+
+            const counts = session.counts || {};
+            const items = [];
+            for (const [key, record] of Object.entries(counts)) {
+                const [locId, medId] = key.split('___');
+                const med = masterMap.get(medId) || { nameEN: 'Unknown', nameAR: 'غير معروف' };
+                const loc = locMap.get(locId) || 'المستودع';
+                const batches = (record.batches && record.batches.length > 0)
+                    ? record.batches
+                    : [{ quantity: record.quantity, expiryDate: record.expiryDate }];
+                for (const b of batches) {
+                    items.push({
+                        medName: med.nameEN || med.nameAR,
+                        medAR: med.nameAR,
+                        location: loc,
+                        quantity: b.quantity,
+                        expiryDate: b.expiryDate || '2027-12',
+                        countedBy: record.userName || session.host
+                    });
+                }
+            }
+
+            const totalQty = items.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0);
+
+            UI.showModal(`
+                <div class="modal-header" style="border-bottom:1px solid var(--border-color); padding-bottom:10px; margin-bottom:12px;">
+                    <div>
+                        <h2 style="margin:0; font-size:16px;">📋 كشف تفاصيل: ${session.name}</h2>
+                        <small class="text-muted">تاريخ الاعتماد: ${new Date(session.finalizedAt || session.startedAt).toLocaleDateString('ar-EG')} | القائم بالجرد: ${session.host || 'خالد'}</small>
+                    </div>
+                </div>
+
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:rgba(59,130,246,0.08); border-radius:8px; margin-bottom:12px;">
+                    <span style="font-size:12px; font-weight:bold;">إجمالي الأصناف: ${Object.keys(counts).length} صنف</span>
+                    <span style="font-size:12px; font-weight:800; color:var(--primary);">مجموع الوحدات: ${totalQty} وحدة</span>
+                </div>
+
+                <div style="max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;">
+                    ${items.map(item => `
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:var(--bg-secondary); border-radius:8px; font-size:12px;">
+                            <div>
+                                <strong style="display:block;">${item.medName}</strong>
+                                <small class="text-muted"><i class='bx bx-map-pin'></i> ${item.location} &bull; الصلاحية: ${item.expiryDate}</small>
+                            </div>
+                            <span class="badge bg-primary text-white" style="font-size:12px; padding:3px 8px; border-radius:6px; font-weight:800;">
+                                ${item.quantity} وحدة
+                            </span>
                         </div>
                     `).join('')}
+                    ${items.length === 0 ? '<p class="text-center p-20 text-muted">لم يتم تسجيل كميات في هذه الجلسة</p>' : ''}
                 </div>
-            ` : ''}
-        `;
+
+                <div class="form-actions mt-15" style="display:flex; gap:8px;">
+                    <button class="btn-primary sm-btn" onclick="window.App.exportAuditSession('${sessionId}')" style="flex:1;">
+                        <i class='bx bx-download'></i> تصدير إكسيل (Excel)
+                    </button>
+                    <button class="btn-ghost sm-btn" onclick="window.UI.closeModal()" style="flex:0.6;">إغلاق</button>
+                </div>
+            `);
+        } catch (err) {
+            console.error('Error opening audit report:', err);
+            UI.showToast('تعذر عرض كشف الجلسة', 'danger');
+        }
+    },
+
+    async exportAuditSession(sessionId) {
+        try {
+            const session = await Audit.getSession(sessionId);
+            if (!session) return;
+            const masterMeds = (await DB.getAll('medicineMaster')) || [];
+            const masterMap = new Map(masterMeds.map(m => [m.id, m]));
+            const locs = (await Locations.getAll()) || [];
+            const locMap = new Map(locs.map(l => [l.id, l.nameAR]));
+
+            const counts = session.counts || {};
+            const exportRows = [];
+
+            for (const [key, record] of Object.entries(counts)) {
+                const [locId, medId] = key.split('___');
+                const med = masterMap.get(medId) || { nameEN: 'Unknown', nameAR: 'غير معروف' };
+                const loc = locMap.get(locId) || 'المستودع';
+                const batches = (record.batches && record.batches.length > 0)
+                    ? record.batches
+                    : [{ quantity: record.quantity, expiryDate: record.expiryDate }];
+
+                for (const b of batches) {
+                    exportRows.push({
+                        'اسم الدواء (EN)': med.nameEN || '',
+                        'اسم الدواء (AR)': med.nameAR || '',
+                        'مكان التخزين': loc,
+                        'الكمية المحصورة': b.quantity,
+                        'تاريخ الصلاحية': b.expiryDate,
+                        'المسؤول عن العد': record.userName || session.host,
+                        'تاريخ التسجيل': new Date(record.countedAt || session.startedAt).toLocaleString('ar-EG')
+                    });
+                }
+            }
+
+            if (exportRows.length === 0) {
+                UI.showToast('لا توجد بيانات لتصديرها في هذه الجلسة', 'warning');
+                return;
+            }
+
+            if (window.XLSX) {
+                const ws = XLSX.utils.json_to_sheet(exportRows);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "تقرير الجرد");
+                XLSX.writeFile(wb, `جرد_${session.name.replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '_')}.xlsx`);
+                UI.showToast('تم تصدير ملف الإكسيل بنجاح ✅', 'success');
+            } else {
+                UI.showToast('مكتبة تصدير Excel غير متوفرة', 'danger');
+            }
+        } catch (err) {
+            console.error('Export session error:', err);
+            UI.showToast('فشل تصدير الإكسيل', 'danger');
+        }
     },
 
     async renderAuditLocationsLevel(container, session) {
@@ -2846,8 +3105,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                             ? med.batches.map(b => {
                                 const badge = window.App.calcExpiryBadge(b.expiryDate);
                                 return `
-                                    <span class="batch-exterior-pill" style="display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:bold; padding:2px 6px; border-radius:6px; background:${badge.bg}; color:${badge.color}; border:1px solid ${badge.color}40; margin:1px 0;">
-                                        <i class='bx ${badge.icon}' style="font-size:11px;"></i>
+                                    <span class="batch-exterior-pill" style="display:inline-flex; align-items:center; justify-content:center; gap:2px; font-size:9px; font-weight:bold; padding:1px 5px; border-radius:4px; background:${badge.bg}; color:${badge.color}; border:1px solid ${badge.color}33; white-space:nowrap;">
+                                        <i class='bx ${badge.icon}' style="font-size:10px;"></i>
                                         <span>${b.quantity} &times; ${b.expiryDate}</span>
                                     </span>
                                 `;
@@ -2859,14 +3118,14 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                                 <span class="badge-done">
                                     <i class='bx bx-check'></i> تم
                                 </span>
-                                <div style="width: 44px; height: 44px; border-radius: 8px; overflow: hidden; margin-bottom: 6px;">
+                                <div style="width: 34px; height: 34px; border-radius: 6px; overflow: hidden; margin-bottom: 3px; flex-shrink: 0;">
                                     <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover;">
                                 </div>
-                                <h3>${med.nameEN || med.nameAR}</h3>
-                                <div class="counted-qty-tag" style="font-size:12px; font-weight:800; background:rgba(16,185,129,0.15); color:var(--secondary); padding:2px 8px; border-radius:6px; margin:4px 0;">
+                                <h3 style="font-size: 11px; font-weight: 800; margin: 0 0 3px 0; line-height: 1.2; word-break: break-word;">${med.nameEN || med.nameAR}</h3>
+                                <div class="counted-qty-tag" style="font-size: 11px; font-weight: 800; background: rgba(16,185,129,0.15); color: var(--secondary); padding: 2px 8px; border-radius: 6px; margin: 2px 0;">
                                     إجمالي: ${med.countedQty}
                                 </div>
-                                <div class="card-batches-breakdown" style="display:flex; flex-direction:column; gap:2px; width:100%; margin-top:4px;">
+                                <div class="card-batches-breakdown" style="display: flex; flex-direction: column; gap: 2px; width: 100%; margin-top: 2px;">
                                     ${batchesHtml}
                                 </div>
                             </div>
@@ -2874,11 +3133,11 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     } else {
                         return `
                             <div class="square-card" onclick="window.App.openCountModal('${med.id}')" title="انقر لتسجيل العد">
-                                <div style="width: 44px; height: 44px; border-radius: 8px; overflow: hidden; margin-bottom: 6px; background: rgba(59,130,246,0.06); display:flex; align-items:center; justify-content:center;">
+                                <div style="width: 34px; height: 34px; border-radius: 6px; overflow: hidden; margin-bottom: 4px; background: rgba(59,130,246,0.06); display:flex; align-items:center; justify-content:center; flex-shrink: 0;">
                                     <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover;">
                                 </div>
-                                <h3>${med.nameEN || med.nameAR}</h3>
-                                <span class="square-meta" style="color: var(--primary);">بانتظار العد ⏳</span>
+                                <h3 style="font-size: 11px; font-weight: 800; margin: 0 0 4px 0; line-height: 1.2; word-break: break-word;">${med.nameEN || med.nameAR}</h3>
+                                <span class="square-meta" style="color: var(--primary); font-size: 10px; margin-top: auto;">بانتظار العد ⏳</span>
                             </div>
                         `;
                     }
