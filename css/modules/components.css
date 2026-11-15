@@ -1169,3 +1169,35 @@
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.5; transform: scale(1.15); }
 }
+
+
+/* --- Egyptian Drug Catalog Auto-Suggestions (v18.6.0) --- */
+.catalog-suggestions-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 9999;
+    background: var(--surface);
+    border: 1.5px solid var(--primary);
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+    max-height: 220px;
+    overflow-y: auto;
+    margin-top: 4px;
+}
+.catalog-suggestion-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+.catalog-suggestion-item:last-child {
+    border-bottom: none;
+}
+.catalog-suggestion-item:hover {
+    background: rgba(59, 130, 246, 0.08);
+}

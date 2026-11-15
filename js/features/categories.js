@@ -15,13 +15,12 @@ export const Categories = {
         try {
             console.log('Dawaa Categories: Checking for initial data...');
             
-            // Seed Categories if empty
-            const existingCats = await DB.getAll('categories');
-            if (existingCats.length === 0) {
-                console.log('Dawaa Categories: Seeding default categories...');
-                for (const key in CATEGORY_MAP) {
-                    const cat = CATEGORY_MAP[key];
-                    await DB.add('categories', {
+            // Ensure default categories are present
+            for (const key in CATEGORY_MAP) {
+                const cat = CATEGORY_MAP[key];
+                const existing = await DB.get('categories', key);
+                if (!existing) {
+                    await DB.put('categories', {
                         id: key,
                         nameAR: cat.ar,
                         icon: cat.icon,
@@ -86,25 +85,27 @@ export const Categories = {
             const found = cache.find(c => c.id === catId);
             if (found && found.nameAR) return found.nameAR;
         }
-        // Common translations mapping
+        // Common translations mapping - 8 Simplified Core Categories
         const aliases = {
             'Antibiotics': 'مضادات حيوية',
-            'NSAID': 'مسكنات وآلام',
-            'Analgesics': 'مسكنات وخافض حرارة',
-            'Anti-Flu': 'أدوية البرد والإنفلونزا',
-            'Laryng.': 'أذن وحنجرة وجهاز تنفسي',
-            'Local Prep': 'كريمات ودهانات',
-            'GIT Prep': 'أدوية المعدة والجهاز الهضمي',
-            'Gastro': 'أدوية الجهاز الهضمي والقولون',
-            'Respiratory': 'جهاز تنفسي',
-            'Eye-Ear-Nose': 'قطرات عيون وأذن',
-            'Eye-Ear': 'قطرات ومراهم عيون وأذن',
-            'Injections': 'حقن وأمبولات',
-            'Consumables': 'مستلزمات طبية',
-            'Emergency': 'أدوية ومستلزمات الطوارئ',
-            'Serum': 'محاليل وأمصال تعويضية',
-            'Dermatology': 'مراهم وجلدية',
-            'Antihistamines': 'مضادات الحساسية والربو'
+            'Analgesics': 'مسكنات وحرارة',
+            'NSAID': 'مسكنات وحرارة',
+            'Respiratory': 'برد وصدر وحساسية',
+            'Anti-Flu': 'برد وصدر وحساسية',
+            'Laryng.': 'برد وصدر وحساسية',
+            'Antihistamines': 'برد وصدر وحساسية',
+            'Gastro': 'معدة وجهاز هضمي',
+            'GIT Prep': 'معدة وجهاز هضمي',
+            'Chronic': 'أمراض مزمنة',
+            'Injections': 'حقن ومحاليل وأمصال',
+            'Serum': 'حقن ومحاليل وأمصال',
+            'Emergency': 'حقن ومحاليل وأمصال',
+            'Topical': 'مراهم وقطرات',
+            'Local Prep': 'مراهم وقطرات',
+            'Dermatology': 'مراهم وقطرات',
+            'Eye-Ear-Nose': 'مراهم وقطرات',
+            'Eye-Ear': 'مراهم وقطرات',
+            'Consumables': 'مستلزمات وغيار طبي'
         };
         return aliases[catId] || catId;
     },

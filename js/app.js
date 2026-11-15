@@ -5,7 +5,9 @@ import { Categories } from './features/categories.js';
 import { Locations } from './features/locations.js';
 import { Audit } from './features/audit.js';
 import { Users } from './features/users.js';
+import { EgyptianDrugs } from './core/egyptian_drugs.js';
 window.Users = Users;
+window.EgyptianDrugs = EgyptianDrugs;
 import { Exporter } from './features/export.js';
 import { Utils } from './core/utils.js';
 import { Sync } from './core/sync.js';
@@ -31,7 +33,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.5.0', // Universal Sovereign v18.5.0
+    VERSION: '18.6.0', // Universal Sovereign v18.6.0
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -940,9 +942,13 @@ const App = {
                         <input type="file" id="m-file" accept="image/*" style="display:none" onchange="window.App.handleImagePreview(this, 'm-img-preview')">
                     </div>
 
-                    <div class="form-group">
-                        <label class="form-label">الاسم بالإنجليزية:</label>
-                        <input type="text" id="m-name-en" class="form-input" placeholder="e.g. Panadol Extra" required>
+                    <div class="form-group" style="position:relative;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <label class="form-label" style="margin:0;">الاسم بالإنجليزية (أو ابحث في الكتالوج المصري):</label>
+                            <span style="font-size:10px; color:var(--primary); font-weight:bold;">🇪🇬 اقتراح ذكي فوري</span>
+                        </div>
+                        <input type="text" id="m-name-en" class="form-input" placeholder="اكتب أول حرفين مثل: Panadol أو بنادول أو سرنجة..." required autocomplete="off" oninput="window.App.handleDrugCatalogSearch(this.value, 'm')">
+                        <div id="m-catalog-suggestions" class="catalog-suggestions-dropdown" style="display:none;"></div>
                     </div>
                     <div class="form-group">
                         <label class="form-label">الاسم بالعربية:</label>
@@ -1514,9 +1520,13 @@ const App = {
                     <h2><i class='bx bx-plus-circle'></i> إضافة دواء جديد للمستودع</h2>
                 </div>
                 <form id="form-quick-add" onsubmit="event.preventDefault(); window.App.saveQuickAddMedicine();">
-                    <div class="form-group" style="margin-bottom:12px;">
-                        <label class="form-label">الاسم بالإنجليزية (مطلوب):</label>
-                        <input type="text" id="qa-name-en" class="form-input" placeholder="مثال: Panadol Extra 500mg" required autofocus>
+                    <div class="form-group" style="margin-bottom:12px; position:relative;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <label class="form-label" style="margin:0;">الاسم بالإنجليزية (أو ابحث في الكتالوج المصري):</label>
+                            <span style="font-size:10px; color:var(--primary); font-weight:bold;">🇪🇬 اقتراح ذكي فوري</span>
+                        </div>
+                        <input type="text" id="qa-name-en" class="form-input" placeholder="اكتب أول حرفين مثل: Panadol أو بنادول أو سرنجة..." required autofocus autocomplete="off" oninput="window.App.handleDrugCatalogSearch(this.value, 'qa')">
+                        <div id="qa-catalog-suggestions" class="catalog-suggestions-dropdown" style="display:none;"></div>
                     </div>
                     <div class="form-group" style="margin-bottom:12px;">
                         <label class="form-label">الاسم بالعربية:</label>
@@ -1553,6 +1563,92 @@ const App = {
             console.error('Quick Add Error:', err);
             UI.showToast('خطأ في فتح النافذة', 'danger');
         }
+    },
+
+    // --- Egyptian Drug Catalog Auto-Complete (v18.6.0) ---
+    handleDrugCatalogSearch(query, prefix = 'qa') {
+        const container = document.getElementById(`${prefix}-catalog-suggestions`);
+        if (!container) return;
+
+        if (!query || query.trim().length < 2) {
+            container.style.display = 'none';
+            container.innerHTML = '';
+            return;
+        }
+
+        const results = EgyptianDrugs.search(query, 6);
+        if (results.length === 0) {
+            container.style.display = 'none';
+            container.innerHTML = '';
+            return;
+        }
+
+        container.style.display = 'block';
+        container.innerHTML = results.map((item, idx) => {
+            const catName = Categories.getCategoryNameAR(item.categoryId);
+            return `
+                <div class="catalog-suggestion-item" onclick="window.App.selectDrugFromCatalog(${idx}, '${prefix}')">
+                    <div style="flex:1; min-width:0;">
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <strong style="font-size:13px; color:var(--text-main);">${item.nameEN}</strong>
+                            <span style="font-size:11px; color:var(--text-muted);">(${item.nameAR})</span>
+                        </div>
+                        ${item.active ? `<small style="display:block; font-size:11px; color:var(--text-muted); margin-top:2px;">💊 ${item.active}</small>` : ''}
+                    </div>
+                    <span class="badge" style="background:rgba(59,130,246,0.1); color:var(--primary); font-size:10px; padding:2px 6px; border-radius:4px; white-space:nowrap;">
+                        ${catName}
+                    </span>
+                </div>
+            `;
+        }).join('');
+
+        this._activeCatalogResults = results;
+    },
+
+    selectDrugFromCatalog(index, prefix) {
+        if (!this._activeCatalogResults || !this._activeCatalogResults[index]) return;
+        const item = this._activeCatalogResults[index];
+
+        const container = document.getElementById(`${prefix}-catalog-suggestions`);
+        if (container) container.style.display = 'none';
+
+        if (prefix === 'qa') {
+            const nameEnEl = document.getElementById('qa-name-en');
+            const nameArEl = document.getElementById('qa-name-ar');
+            const catEl = document.getElementById('qa-category');
+
+            if (nameEnEl) nameEnEl.value = item.nameEN;
+            if (nameArEl) nameArEl.value = item.nameAR;
+            if (catEl) {
+                catEl.value = item.categoryId;
+                if (!catEl.value) {
+                    Array.from(catEl.options).forEach(opt => {
+                        if (opt.value.toLowerCase() === item.categoryId.toLowerCase()) catEl.value = opt.value;
+                    });
+                }
+            }
+        } else if (prefix === 'm') {
+            const nameEnEl = document.getElementById('m-name-en');
+            const nameArEl = document.getElementById('m-name-ar');
+            const activeEl = document.getElementById('m-active');
+            const catEl = document.getElementById('m-category');
+            const typeEl = document.getElementById('m-type');
+
+            if (nameEnEl) nameEnEl.value = item.nameEN;
+            if (nameArEl) nameArEl.value = item.nameAR;
+            if (activeEl) activeEl.value = item.active || '';
+            if (catEl) {
+                catEl.value = item.categoryId;
+                if (!catEl.value) {
+                    Array.from(catEl.options).forEach(opt => {
+                        if (opt.value.toLowerCase() === item.categoryId.toLowerCase()) catEl.value = opt.value;
+                    });
+                }
+            }
+            if (typeEl && item.type) typeEl.value = item.type;
+        }
+
+        UI.showToast(`✨ تم إدراج (${item.nameAR}) بنجاح`, 'success');
     },
 
     async saveQuickAddMedicine() {

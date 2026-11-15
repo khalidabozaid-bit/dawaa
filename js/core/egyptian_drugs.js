@@ -1,0 +1,201 @@
+// js/core/egyptian_drugs.js
+/**
+ * Egyptian Pharmaceutical & Medical Supplies Master Catalog
+ * High-frequency Egyptian market drugs, active ingredients, dosage forms and consumables.
+ */
+
+export const EGYPTIAN_DRUGS_CATALOG = [
+    // --- 1. مضادات حيوية (Antibiotics) ---
+    { nameEN: "Augmentin 1 GM Tab", nameAR: "أوجمنتين 1 جم أقراص", active: "Amoxicillin + Clavulanic acid", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Augmentin 625 mg Tab", nameAR: "أوجمنتين 625 مجم أقراص", active: "Amoxicillin + Clavulanic acid", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Augmentin 312 mg Susp", nameAR: "أوجمنتين 312 شراب معلق", active: "Amoxicillin + Clavulanic acid", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Hibiotic 1 GM Tab", nameAR: "هاي بيوتيك 1 جم أقراص", active: "Amoxicillin + Clavulanic acid", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Hibiotic 625 mg Tab", nameAR: "هاي بيوتيك 625 مجم أقراص", active: "Amoxicillin + Clavulanic acid", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Curam 1 GM Tab", nameAR: "كيورام 1 جم أقراص", active: "Amoxicillin + Clavulanic acid", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Flumox 500 mg Cap", nameAR: "فلوموكس 500 مجم كبسول", active: "Amoxicillin + Flucloxacillin", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Flumox 1 GM Tab", nameAR: "فلوموكس 1 جم أقراص", active: "Amoxicillin + Flucloxacillin", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Ciprofar 500 mg Tab", nameAR: "سيبروفار 500 مجم أقراص", active: "Ciprofloxacin", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Ciprofar 750 mg Tab", nameAR: "سيبروفار 750 مجم أقراص", active: "Ciprofloxacin", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Ciprocin 500 mg Tab", nameAR: "سيبروسين 500 مجم أقراص", active: "Ciprofloxacin", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Zithromax 500 mg Tab", nameAR: "زيزروماكس 500 مجم أقراص", active: "Azithromycin", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Xithrone 500 mg Tab", nameAR: "زيثرون 500 مجم أقراص", active: "Azithromycin", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Dalacin C 300 mg Cap", nameAR: "دالاسين سي 300 مجم كبسول", active: "Clindamycin", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Unictam 375 mg Tab", nameAR: "يونيكتام 375 مجم أقراص", active: "Sultamicillin", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Cefotax 1 GM Vial", nameAR: "سيفوتاكس 1 جم فيال حقن", active: "Cefotaxime", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Ceftriaxone 1 GM Vial", nameAR: "سيفترياكسون 1 جم فيال حقن", active: "Ceftriaxone", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Cefobid 1 GM Vial", nameAR: "سيفوبيد 1 جم فيال حقن", active: "Cefoperazone", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Flagyl 500 mg Tab", nameAR: "فلاجيل 500 مجم أقراص", active: "Metronidazole", categoryId: "Antibiotics", type: "medicine" },
+    { nameEN: "Amrizole 500 mg Tab", nameAR: "أمريزول 500 مجم أقراص", active: "Metronidazole", categoryId: "Antibiotics", type: "medicine" },
+
+    // --- 2. مسكنات وحرارة (Analgesics) ---
+    { nameEN: "Panadol Advance 500 mg", nameAR: "بنادول أدفانس أزرق", active: "Paracetamol 500mg", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Panadol Extra", nameAR: "بنادول إكسترا أحمر", active: "Paracetamol + Caffeine", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Panadol Joint 665 mg", nameAR: "بنادول جوينت للعظام والمفاصل", active: "Paracetamol 665mg", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Panadol Night", nameAR: "بنادول نايت مسكن ومنوم", active: "Paracetamol + Diphenhydramine", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Cetafen Tab", nameAR: "سيتافين أقراص مسكن", active: "Paracetamol + Ibuprofen", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Brufen 400 mg Tab", nameAR: "بروفين 400 مجم أقراص", active: "Ibuprofen 400mg", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Brufen 600 mg Tab", nameAR: "بروفين 600 مجم أقراص", active: "Ibuprofen 600mg", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Ketofan 50 mg Cap", nameAR: "كيتوفان 50 مجم كبسول", active: "Ketoprofen", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Ketofan 75 mg Amp", nameAR: "كيتوفان 75 مجم أمبول حقن", active: "Ketoprofen", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Cataflam 50 mg Tab", nameAR: "كاتافلام 50 مجم أقراص", active: "Diclofenac potassium", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Cataflam 75 mg Amp", nameAR: "كاتافلام 75 مجم أمبول", active: "Diclofenac potassium", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Voltaren 75 mg Amp", nameAR: "فولتارين 75 مجم أمبول حقن", active: "Diclofenac sodium", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Voltaren 100 mg SR", nameAR: "فولتارين 100 مجم أقراص ممتد المفعول", active: "Diclofenac sodium", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Ketolac 30 mg Amp", nameAR: "كيتولاك 30 مجم أمبول مسكن قوي", active: "Ketorolac tromethamine", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Ketolac 10 mg Tab", nameAR: "كيتولاك 10 مجم أقراص", active: "Ketorolac tromethamine", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Feldene 20 mg Cap", nameAR: "فيلدين 20 مجم كبسول", active: "Piroxicam", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Myofen Cap", nameAR: "مايوفين كبسول باسط عضلات ومسكن", active: "Chlorzoxazone + Ibuprofen", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Dimra Tab", nameAR: "ديمرا أقراص باسط عضلات ومسكن", active: "Diclofenac + Methocarbamol", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Cetal 500 mg Tab", nameAR: "سيتال 500 مجم أقراص خافض حرارة", active: "Paracetamol", categoryId: "Analgesics", type: "medicine" },
+    { nameEN: "Cetal Drops 15 ml", nameAR: "سيتال نقط فم للأطفال والرضع", active: "Paracetamol", categoryId: "Analgesics", type: "medicine" },
+
+    // --- 3. برد وصدر وحساسية (Respiratory) ---
+    { nameEN: "Congestal Tab", nameAR: "كونجستال أقراص نزلات البرد", active: "Paracetamol + Pseudoephedrine + Chlorpheniramine", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "123 Tab", nameAR: "وان تو ثري أقراص نزلات البرد", active: "Paracetamol + Pseudoephedrine + Chlorpheniramine", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Comtrex Cold & Flu", nameAR: "كومتركس أقراص نزلات البرد والجيوب", active: "Paracetamol + Pseudoephedrine + Brompheniramine", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Flustop Tab", nameAR: "فلوستوب أقراص برد ورشح", active: "Paracetamol + Pseudoephedrine", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Night and Day Tab", nameAR: "نايت أند داي أقراص برد نهاري وليلي", active: "Paracetamol + Pseudoephedrine", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Telfast 120 mg Tab", nameAR: "تلفاست 120 مجم أقراص حساسية", active: "Fexofenadine", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Telfast 180 mg Tab", nameAR: "تلفاست 180 مجم أقراص حساسية", active: "Fexofenadine", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Zyrtec 10 mg Tab", nameAR: "زيرتك 10 مجم أقراص حساسية", active: "Cetirizine", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Claritin 10 mg Tab", nameAR: "كلاريتين 10 مجم أقراص حساسية", active: "Loratadine", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Tavegyl Tab", nameAR: "تافيجيل أقراص حساسية وحكة", active: "Clemastine", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Ventolin Inhaler 100 mcg", nameAR: "فنتولين بخاخ صدر موسع شعب", active: "Salbutamol", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Farcolin Drops 15 ml", nameAR: "فاركولين نقط جلسات استنشاق نبيولايزر", active: "Salbutamol", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Atrovent Solution 20 ml", nameAR: "أتروفنت نقط جلسات استنشاق", active: "Ipratropium bromide", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Pulmicort 0.5 mg Respules", nameAR: "بالميكورت أمبولات جلسات استنشاق", active: "Budesonide", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Bronchicum Elixir 100 ml", nameAR: "برونشيكوم شراب كحة وطارد بلغم", active: "Thyme extract + Primula", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Prospan Syrup 100 ml", nameAR: "بروسبان شراب كحة بالأعشاب الطبيعية", active: "Ivy leaf extract", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Mucosol 375 mg Cap", nameAR: "ميوكوسول 375 مجم كبسول طارد بلغم", active: "Carbocisteine", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Bisolvon 8 mg Tab", nameAR: "بيسلفون 8 مجم أقراص مذيب بلغم", active: "Bromhexine", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Otrivin Adult 0.1% Drops", nameAR: "أوتريفين نقط أنف للكبار لاحتقان الأنف", active: "Xylometazoline 0.1%", categoryId: "Respiratory", type: "medicine" },
+    { nameEN: "Otrivin Pediatric 0.05%", nameAR: "أوتريفين نقط أنف للأطفال", active: "Xylometazoline 0.05%", categoryId: "Respiratory", type: "medicine" },
+
+    // --- 4. معدة وجهاز هضمي (Gastro) ---
+    { nameEN: "Controloc 40 mg Tab", nameAR: "كنترولوك 40 مجم أقراص حموضة ومعدة", active: "Pantoprazole", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Controloc 40 mg IV Vial", nameAR: "كنترولوك 40 مجم حقن وريدي حموضة ونزيف", active: "Pantoprazole", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Nexium 40 mg Tab", nameAR: "نكسيوم 40 مجم أقراص حموضة وارتجاع", active: "Esomeprazole", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Nexium 20 mg Tab", nameAR: "نكسيوم 20 مجم أقراص حموضة", active: "Esomeprazole", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Antodine 40 mg Tab", nameAR: "أنتودين 40 مجم أقراص حموضة وقرحة", active: "Famotidine", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Antodine 20 mg Amp", nameAR: "أنتودين 20 مجم أمبول حقن وريدي", active: "Famotidine", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Antinal Cap", nameAR: "أنتينال كبسول مطهر معوي وإسهال", active: "Nifuroxazide", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Antinal Susp 60 ml", nameAR: "أنتينال شراب مطهر معوي للأطفال", active: "Nifuroxazide", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Spasmo-Digestin Tab", nameAR: "سبازمو ديجستين مهضم ومهدئ تقلصات", active: "Papain + Sanzyme + Dicyclomine", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Colona Tab", nameAR: "كولونا أقراص للقولون العصبي والتقلصات", active: "Mebeverine + Sulpiride", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Duspatalin Retard 200 mg", nameAR: "دوسباتالين 200 مجم كبسول للقولون", active: "Mebeverine", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Visceralgine Amp", nameAR: "فيسرالجين أمبول مهدئ مغص وتقلصات", active: "Tiemonium methylsulphate", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Visceralgine Tab", nameAR: "فيسرالجين أقراص للتقلصات والمغص", active: "Tiemonium methylsulphate", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Primperan 10 mg Amp", nameAR: "برمبران 10 مجم أمبول للقيء والغثيان", active: "Metoclopramide", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Motinorm 10 mg Tab", nameAR: "موتينورم 10 مجم أقراص حركة المعدة والقيء", active: "Domperidone", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Gast-Reg 200 mg Tab", nameAR: "جاست ريج 200 مجم منظم لحركة الجهاز الهضمي", active: "Trimebutine", categoryId: "Gastro", type: "medicine" },
+    { nameEN: "Lactulose Syrup 200 ml", nameAR: "لاكتيلوز شراب ملين للإمساك والكبد", active: "Lactulose", categoryId: "Gastro", type: "medicine" },
+
+    // --- 5. أمراض مزمنة (Chronic) ---
+    { nameEN: "Concor 5 mg Tab", nameAR: "كونكور 5 مجم أقراص ضغط وقلب", active: "Bisoprolol", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Concor 2.5 mg Tab", nameAR: "كونكور 2.5 مجم أقراص ضغط", active: "Bisoprolol", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Concor 5 Plus", nameAR: "كونكور 5 بلس ضغط ومدر بول", active: "Bisoprolol + Hydrochlorothiazide", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Capoten 25 mg Tab", nameAR: "كابوتن 25 مجم أقراص ضغط طوارئ", active: "Captopril", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Capoten 50 mg Tab", nameAR: "كابوتن 50 مجم أقراص ضغط", active: "Captopril", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Norvasc 5 mg Tab", nameAR: "نورفاسك 5 مجم أقراص ضغط", active: "Amlodipine", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Exforge 5/160 mg", nameAR: "إكسفوردج 5/160 مجم أقراص ضغط", active: "Amlodipine + Valsartan", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Natrilix SR 1.5 mg", nameAR: "ناتريلكس إس آر مدر بول للضغط", active: "Indapamide", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Lasix 40 mg Tab", nameAR: "لازكس 40 مجم أقراص مدر بول سريع", active: "Furosemide", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Lasix 20 mg Amp", nameAR: "لازكس 20 مجم أمبول مدر بول سريع", active: "Furosemide", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Aldactone 25 mg Tab", nameAR: "ألداكتون 25 مجم أقراص مدر بول", active: "Spironolactone", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Amaryl 1 mg Tab", nameAR: "أماريل 1 مجم أقراص سكر", active: "Glimepiride", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Amaryl 2 mg Tab", nameAR: "أماريل 2 مجم أقراص سكر", active: "Glimepiride", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Amaryl 3 mg Tab", nameAR: "أماريل 3 مجم أقراص سكر", active: "Glimepiride", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Glucophage 500 mg", nameAR: "جلوكوفاج 500 مجم أقراص سكر", active: "Metformin", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Glucophage 1000 mg", nameAR: "جلوكوفاج 1000 مجم أقراص سكر", active: "Metformin", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Januvia 100 mg Tab", nameAR: "جانوڤيا 100 مجم أقراص سكر حديثة", active: "Sitagliptin", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Janumet 50/1000 mg", nameAR: "جانوميت 50/1000 مجم أقراص سكر مركب", active: "Sitagliptin + Metformin", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Lipitor 20 mg Tab", nameAR: "ليبيتور 20 مجم أقراص كوليسترول ودهون", active: "Atorvastatin", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Ator 20 mg Tab", nameAR: "أتور 20 مجم أقراص كوليسترول ودهون", active: "Atorvastatin", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Crestor 10 mg Tab", nameAR: "كريستور 10 مجم أقراص كوليسترول", active: "Rosuvastatin", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Aspocid 75 mg Chewable", nameAR: "أسبوسيد 75 مجم أقراص مضغ سيولة", active: "Acetylsalicylic acid", categoryId: "Chronic", type: "medicine" },
+    { nameEN: "Plavix 75 mg Tab", nameAR: "بلافيكس 75 مجم أقراص سيولة وجلطات", active: "Clopidogrel", categoryId: "Chronic", type: "medicine" },
+
+    // --- 6. حقن ومحاليل وأمصال (Injections) ---
+    { nameEN: "Normal Saline 0.9% 500 ml", nameAR: "محلول ملح 0.9% 500 مل وريدي", active: "Sodium Chloride 0.9%", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Glucose 5% 500 ml", nameAR: "محلول جلوكوز 5% 500 مل وريدي", active: "Dextrose 5%", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Glucose 10% 500 ml", nameAR: "محلول جلوكوز 10% 500 مل وريدي", active: "Dextrose 10%", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Glucose 25% 500 ml", nameAR: "محلول جلوكوز 25% مركز وريدي للغيبوبة", active: "Dextrose 25%", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Ringer Solution 500 ml", nameAR: "محلول رينجر تعويضي 500 مل", active: "Electrolytes", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Ringer Lactate 500 ml", nameAR: "محلول رينجر لاكتات 500 مل", active: "Electrolytes + Lactate", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Mixtard 30 HM 100 IU", nameAR: "أنسولين ميكستارد 30 ثلاجة", active: "Human Insulin 30/70", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Lantus SoloStar Pen", nameAR: "أنسولين لانتوس قلم ممتد المفعول ثلاجة", active: "Insulin Glargine", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Clexane 40 mg Syringe", nameAR: "كليكسان 40 سرنجة جاهزة للحقن سيولة", active: "Enoxaparin sodium 40mg", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Clexane 60 mg Syringe", nameAR: "كليكسان 60 سرنجة جاهزة للحقن سيولة", active: "Enoxaparin sodium 60mg", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Decadron 8 mg Amp", nameAR: "ديكادرون 8 مجم أمبول كورتيزون طوارئ", active: "Dexamethasone", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Dexamethasone 8 mg Amp", nameAR: "ديكساميثازون 8 مجم أمبول", active: "Dexamethasone", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Solu-Cortef 100 mg Vial", nameAR: "سولو كورتيف 100 مجم فيال كورتيزون سريع", active: "Hydrocortisone", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Epinephrine 1 mg Amp", nameAR: "أدرينالين أمبول طوارئ وإنعاش", active: "Epinephrine 1mg/ml", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Atropine Sulfate 1 mg Amp", nameAR: "أتروبين أمبول طوارئ وضربات القلب", active: "Atropine sulfate", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Voluven 6% 500 ml", nameAR: "فولوفين بديل بلازما طوارئ النزيف", active: "Hydroxyethyl starch", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Tetanus Antitoxin 1500 IU", nameAR: "مصل تيتانوس ثلاجة 1500 وحدة", active: "Antitetanus Immunoglobulin", categoryId: "Injections", type: "medicine" },
+    { nameEN: "Neurobion Ampoules", nameAR: "نيوروبيون أمبول فيتامين ب للأعصاب", active: "Vitamin B1 + B6 + B12", categoryId: "Injections", type: "medicine" },
+
+    // --- 7. مراهم وقطرات (Topical) ---
+    { nameEN: "Fucidin Cream 20 g", nameAR: "فيوسيدين كريم مضاد حيوي جلدي", active: "Fusidic acid 2%", categoryId: "Topical", type: "medicine" },
+    { nameEN: "Fucicort Cream 20 g", nameAR: "فيوسيكورت كريم مضاد حيوي وكورتيزون", active: "Fusidic acid + Betamethasone", categoryId: "Topical", type: "medicine" },
+    { nameEN: "Betaderm Cream 15 g", nameAR: "بيتاديرم كريم للالتهابات والحساسية", active: "Betamethasone 0.1%", categoryId: "Topical", type: "medicine" },
+    { nameEN: "Mebo Ointment 30 g", nameAR: "ميبو مرهم حروق وجروح طبيعي", active: "Beta-sitosterol", categoryId: "Topical", type: "medicine" },
+    { nameEN: "Daktarin Oral Gel 40 g", nameAR: "داكتارين جل فطريات الفم واللسان", active: "Miconazole 2%", categoryId: "Topical", type: "medicine" },
+    { nameEN: "Kenacomb Ointment 15 g", nameAR: "كيناكومب مرهم التهابات وتسلخات", active: "Triamcinolone + Neomycin + Nystatin", categoryId: "Topical", type: "medicine" },
+    { nameEN: "Tobradex Eye Drops 5 ml", nameAR: "توبرادكس قطرة عين مضاد والتهاب", active: "Tobramycin + Dexamethasone", categoryId: "Topical", type: "medicine" },
+    { nameEN: "Tobrex Eye Drops 5 ml", nameAR: "توبريكس قطرة عين مضاد حيوي", active: "Tobramycin 0.3%", categoryId: "Topical", type: "medicine" },
+    { nameEN: "Tears Naturale II Drops", nameAR: "تيرز ناتشورال قطرة مرطبة لجفاف العين", active: "Dextran + Hydroxypropyl methylcellulose", categoryId: "Topical", type: "medicine" },
+    { nameEN: "Systane Ultra Eye Drops", nameAR: "سيستان ألترا قطرة جفاف وترطيب العين", active: "Polyethylene glycol", categoryId: "Topical", type: "medicine" },
+    { nameEN: "Otal Ear Drops 10 ml", nameAR: "أوتال قطرة أذن مسكن ومضاد للالتهاب", active: "Framycetin + Gramicidin + Dexamethasone", categoryId: "Topical", type: "medicine" },
+    { nameEN: "Viotic Ear Drops 10 ml", nameAR: "فيوتك قطرة أذن مسكن ومطهر", active: "Fludrocortisone + Neomycin", categoryId: "Topical", type: "medicine" },
+    { nameEN: "Prisoline Eye Drops", nameAR: "بريزولين قطرة عين للحساسية والاحمرار", active: "Naphazoline + Antazoline", categoryId: "Topical", type: "medicine" },
+    { nameEN: "Betadine Antiseptic 120 ml", nameAR: "بيتادين محلول مطهر للجروح 120 مل", active: "Povidone-iodine 10%", categoryId: "Topical", type: "medicine" },
+    { nameEN: "Betadine Surgical Scrub", nameAR: "بيتادين رغوي جراحي معقم للجلد", active: "Povidone-iodine 7.5%", categoryId: "Topical", type: "medicine" },
+
+    // --- 8. مستلزمات وغيار طبي (Consumables) ---
+    { nameEN: "Syringe 3 ml Sterile (Box 100)", nameAR: "سرنجات 3 سم معقمة (علبة 100)", active: "مستلزمات حقن معقمة سن أزرق", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Syringe 5 ml Sterile (Box 100)", nameAR: "سرنجات 5 سم معقمة (علبة 100)", active: "مستلزمات حقن معقمة سن أخضر", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Syringe 10 ml Sterile", nameAR: "سرنجات 10 سم معقمة", active: "مستلزمات حقن وغسيل", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Syringe 20 ml Sterile", nameAR: "سرنجات 20 سم معقمة", active: "مستلزمات حقن وسحب وتغذية", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Feeding Syringe 50 ml", nameAR: "سرنجة 50 سم قسطرة وتغذية رايل", active: "مستلزمات تغذية رايل", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Insulin Syringe 100 U (Box 100)", nameAR: "سرنجات أنسولين 100 وحدة (علبة 100)", active: "مستلزمات أنسولين سن رفيع", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "IV Cannula Gauge 18 (Green)", nameAR: "كانيولا وريدية مقاس 18 خضراء", active: "كانيولات وريدية ونقل دم", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "IV Cannula Gauge 20 (Pink)", nameAR: "كانيولا وريدية مقاس 20 وردية للبالغين", active: "كانيولات وريدية", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "IV Cannula Gauge 22 (Blue)", nameAR: "كانيولا وريدية مقاس 22 زرقاء للأوردة الدقيقة", active: "كانيولات وريدية", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "IV Cannula Gauge 24 (Yellow)", nameAR: "كانيولا وريدية مقاس 24 صفراء أطفال وحديثي ولادة", active: "كانيولات وريدية أطفال", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "IV Infusion Giving Set", nameAR: "جهاز وريد معقم بمفلتر لنقل المحاليل", active: "مستلزمات محاليل وريدية", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Blood Transfusion Giving Set", nameAR: "جهاز نقل دم معقم بفلتر ترويق", active: "مستلزمات نقل دم ومشتقاته", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "3-Way Stopcock Sterile", nameAR: "وصلة وريدية ثلاثية معقمة (3-Way)", active: "مستلزمات محاليل وحقن وريدي", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Sterile Gauze Swabs 10x10 cm", nameAR: "شاش طبي معقم باكت 10×10 سم", active: "مستلزمات غيار وجروح", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Gauze Roll Bandage 10 cm", nameAR: "رول شاش طبي ملفوف 10 سم × 5 م", active: "مستلزمات غيار وتضميد", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Medical Absorbent Cotton 500 g", nameAR: "قطن طبي ممتص 500 جم لفة", active: "مستلزمات غيار طبي", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Adhesive Plaster Tape 5 cm", nameAR: "بلاستر طبي لاصق قماش 5 سم عريض", active: "مستلزمات تثبيت وغيار", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Micropore Paper Tape 1 inch", nameAR: "بلاستر طبي ورقي حساس ميكروبور 1 بوصة", active: "مستلزمات تثبيت كانيولات", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Elastic Crepe Bandage 10 cm", nameAR: "رباط ضاغط طبي مرن 10 سم", active: "مستلزمات عظام والتواء وكسور", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Elastic Crepe Bandage 15 cm", nameAR: "رباط ضاغط طبي مرن 15 سم عريض", active: "مستلزمات عظام ومفاصل", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Examination Gloves Latex (Box 100)", nameAR: "جوانتيات فحص لاتكس طبية (علبة 100)", active: "مكافحة عدوى ووقاية", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Surgical Sterile Gloves Size 7.5", nameAR: "جوانتي جراحي معقم كيس مزدوج 7.5", active: "مكافحة عدوى وعمليات", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Ethyl Alcohol 70% Spray 500 ml", nameAR: "كحول إيثيلي 70% بخاخ مطهر 500 مل", active: "مطهرات ومعقمات أيدي وأسطح", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Oxygen Face Mask Adult", nameAR: "ماسك أكسجين بالبالغين مع خرطوم توصيل", active: "مستلزمات تنفس وأكسجين", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Nasal Oxygen Cannula", nameAR: "نظارة أكسجين أنفية مرنة مع خرطوم", active: "مستلزمات تنفس وأكسجين", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Foley Catheter 2-Way Size 16", nameAR: "قسطرة بولية فولي سيليكون مقاس 16", active: "مستلزمات قساطر بولية", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Urine Drainage Bag 2000 ml", nameAR: "كيس جمع بول 2000 مل بصمام مانع للارتداد", active: "مستلزمات مسالك وقساطر", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Ryle Feeding Tube Size 16", nameAR: "أنبوبة رايل تغذية معدة مقاس 16", active: "مستلزمات تغذية وقساطر", categoryId: "Consumables", type: "consumable" },
+    { nameEN: "Accu-Chek Instant Test Strips 50", nameAR: "شرائط قياس سكر أكيو تشيك إنستانت (علبة 50)", active: "مستلزمات تشخيص سكر", categoryId: "Consumables", type: "consumable" }
+];
+
+export const EgyptianDrugs = {
+    getAll() {
+        return EGYPTIAN_DRUGS_CATALOG;
+    },
+
+    search(query, limit = 8) {
+        if (!query || !query.trim()) return [];
+        const q = query.trim().toLowerCase();
+        return EGYPTIAN_DRUGS_CATALOG.filter(item => {
+            return (item.nameEN && item.nameEN.toLowerCase().includes(q)) ||
+                   (item.nameAR && item.nameAR.toLowerCase().includes(q)) ||
+                   (item.active && item.active.toLowerCase().includes(q));
+        }).slice(0, limit);
+    }
+};

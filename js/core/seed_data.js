@@ -1,15 +1,13 @@
 // js/core/seed_data.js
 export const CATEGORY_MAP = {
-    'Antibiotics': { ar: 'مضادات حيوية', icon: 'bx-dna', color: '#3b82f6', prefix: 'A' },
-    'NSAID': { ar: 'مسكنات وآلام', icon: 'bx-plus-medical', color: '#ef4444', prefix: 'B' },
-    'Anti-Flu': { ar: 'أدوية البرد', icon: 'bx-wind', color: '#06b6d4', prefix: 'C' },
-    'Laryng.': { ar: 'أذن وحنجرة', icon: 'bx-microphone-off', color: '#8b5cf6', prefix: 'D' },
-    'Local Prep': { ar: 'كريمات ودهانات', icon: 'bx-spray-can', color: '#10b981', prefix: 'E' },
-    'GIT Prep': { ar: 'أدوية المعدة', icon: 'bx-dish', color: '#f59e0b', prefix: 'F' },
-    'Respiratory': { ar: 'جهاز تنفسي', icon: 'bx-mask', color: '#6366f1', prefix: 'G' },
-    'Eye-Ear-Nose': { ar: 'قطرات عيون وأذن', icon: 'bx-bullseye', color: '#ec4899', prefix: 'H' },
-    'Injections': { ar: 'حقن', icon: 'bx-injection', color: '#f43f5e', prefix: 'I' },
-    'Consumables': { ar: 'مستلزمات طبية', icon: 'bx-package', color: '#64748b', prefix: 'J' }
+    'Antibiotics': { ar: 'مضادات حيوية', icon: 'bx-shield', color: '#3b82f6', prefix: 'A' },
+    'Analgesics': { ar: 'مسكنات وحرارة', icon: 'bx-plus-medical', color: '#ef4444', prefix: 'B' },
+    'Respiratory': { ar: 'برد وصدر وحساسية', icon: 'bx-wind', color: '#06b6d4', prefix: 'C' },
+    'Gastro': { ar: 'معدة وجهاز هضمي', icon: 'bx-dish', color: '#f59e0b', prefix: 'D' },
+    'Chronic': { ar: 'أمراض مزمنة', icon: 'bx-pulse', color: '#8b5cf6', prefix: 'E' },
+    'Injections': { ar: 'حقن ومحاليل وأمصال', icon: 'bx-injection', color: '#ec4899', prefix: 'F' },
+    'Topical': { ar: 'مراهم وقطرات', icon: 'bx-spray-can', color: '#10b981', prefix: 'G' },
+    'Consumables': { ar: 'مستلزمات وغيار طبي', icon: 'bx-first-aid', color: '#64748b', prefix: 'H' }
 };
 
 export const SEED_MEDICINES = [

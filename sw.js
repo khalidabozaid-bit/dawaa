@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'dawaa-cache-v18.5.0';
+const CACHE_NAME = 'dawaa-cache-v18.6.0';
 const IMAGE_CACHE_NAME = 'dawaa-images-v1'; // Dedicated store for medicine visual assets
 const MAX_IMAGES = 100; // Limit to avoid device storage bloat
 
@@ -27,6 +27,7 @@ const ASSETS_TO_CACHE = [
   './js/features/export.js',
   './js/app.js',
   './js/core/seed_data.js',
+  './js/core/egyptian_drugs.js',
   'https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@400;500;600;700;800&display=swap',
   'https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css',
   'https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js'
