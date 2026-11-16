@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.8.0)
+ * Dawaa App Orchestrator (v18.8.1)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.8.0', // Pro Image & Camera Suite v18.8.0
+    VERSION: '18.8.1', // Camera Barcode Scanner & Image Lightbox Suite v18.8.1
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -986,8 +986,8 @@ const App = {
 
                 <!-- Hero Section: Image + Names + Category (Master Catalog Info) -->
                 <div style="display:flex; gap:16px; align-items:flex-start; margin-bottom:18px; border-bottom:1px solid var(--border-color); padding-bottom:16px;">
-                    <div style="width:84px; height:84px; border-radius:18px; overflow:hidden; flex-shrink:0; background:rgba(59,130,246,0.08); border:1.5px solid var(--border-color); box-shadow:0 4px 12px rgba(0,0,0,0.08); display:flex; align-items:center; justify-content:center;">
-                        <img src="${imgSrc}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                    <div style="width:84px; height:84px; border-radius:18px; overflow:hidden; flex-shrink:0; background:rgba(59,130,246,0.08); border:1.5px solid var(--border-color); box-shadow:0 4px 12px rgba(0,0,0,0.08); display:flex; align-items:center; justify-content:center; cursor:pointer;" onclick="window.App.openImageLightbox('${imgSrc}', '${safePrimary}')" title="انقر لتكبير وعرض الصورة بدقة عالية 🔍">
+                        <img src="${imgSrc}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                     </div>
                     <div style="flex:1; min-width:0;">
                         <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:6px; flex-wrap:wrap;">
@@ -1186,8 +1186,18 @@ const App = {
                             <input type="text" id="m-active" class="form-input" placeholder="Paracetamol">
                         </div>
                         <div class="form-group">
-                            <label class="form-label">الباركود (اختياري):</label>
-                            <input type="text" id="m-barcode" class="form-input" placeholder="الباركود إن وجد">
+                            <label class="form-label" style="display:flex; justify-content:space-between; align-items:center;">
+                                <span>الباركود:</span>
+                                <button type="button" class="btn-ghost sm-btn" onclick="window.App.startBarcodeScanner('m-barcode')" style="font-size:10px; color:var(--primary); padding:1px 6px; border:1px solid var(--border-color); border-radius:6px; cursor:pointer;">
+                                    <i class='bx bx-camera'></i> 📷 مسح
+                                </button>
+                            </label>
+                            <div style="position:relative;">
+                                <input type="text" id="m-barcode" class="form-input" placeholder="الباركود إن وجد" style="padding-left:32px;">
+                                <button type="button" class="btn-ghost" onclick="window.App.startBarcodeScanner('m-barcode')" title="مسح بالكاميرا" style="position:absolute; left:4px; top:50%; transform:translateY(-50%); padding:4px; color:var(--primary); cursor:pointer; border:none; background:transparent;">
+                                    <i class='bx bx-barcode-reader' style="font-size:18px;"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -1295,8 +1305,18 @@ const App = {
                             <input type="text" id="e-active" class="form-input" value="${Utils.escapeHTML(med.activeIngredient || '')}">
                         </div>
                         <div class="form-group">
-                            <label class="form-label">الباركود:</label>
-                            <input type="text" id="e-barcode" class="form-input" value="${Utils.escapeHTML(med.barcode || med.id || '')}">
+                            <label class="form-label" style="display:flex; justify-content:space-between; align-items:center;">
+                                <span>الباركود:</span>
+                                <button type="button" class="btn-ghost sm-btn" onclick="window.App.startBarcodeScanner('e-barcode')" style="font-size:10px; color:var(--primary); padding:1px 6px; border:1px solid var(--border-color); border-radius:6px; cursor:pointer;">
+                                    <i class='bx bx-camera'></i> 📷 مسح
+                                </button>
+                            </label>
+                            <div style="position:relative;">
+                                <input type="text" id="e-barcode" class="form-input" value="${Utils.escapeHTML(med.barcode || med.id || '')}" style="padding-left:32px;">
+                                <button type="button" class="btn-ghost" onclick="window.App.startBarcodeScanner('e-barcode')" title="مسح بالكاميرا" style="position:absolute; left:4px; top:50%; transform:translateY(-50%); padding:4px; color:var(--primary); cursor:pointer; border:none; background:transparent;">
+                                    <i class='bx bx-barcode-reader' style="font-size:18px;"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -1413,6 +1433,139 @@ const App = {
             badge.innerHTML = `<i class='bx bx-trash'></i> تم اختيار الأيقونة الافتراضية`;
         }
         UI.showToast('تمت إزالة الصورة واختيار الأيقونة الافتراضية', 'info');
+    },
+
+    /**
+     * High-Resolution Image Lightbox (v18.8.1)
+     */
+    openImageLightbox(imageUrl, title = 'صورة الدواء') {
+        if (!imageUrl || imageUrl.includes('default-med.png')) return;
+        const overlay = document.createElement('div');
+        overlay.className = 'lightbox-overlay';
+        overlay.style.cssText = `
+            position: fixed; inset: 0; z-index: 99999;
+            background: rgba(0,0,0,0.88); backdrop-filter: blur(8px);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 20px; animation: fadeIn 0.2s ease; direction: rtl;
+        `;
+        overlay.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; width:100%; max-width:440px; margin-bottom:12px; color:white;">
+                <h3 style="margin:0; font-size:16px; font-weight:800; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">
+                    <i class='bx bx-image-alt' style="color:var(--primary);"></i> ${title}
+                </h3>
+                <button type="button" style="background:rgba(255,255,255,0.15); border:none; color:white; font-size:22px; width:36px; height:36px; border-radius:50%; cursor:pointer; line-height:1;" onclick="this.closest('.lightbox-overlay').remove()">✕</button>
+            </div>
+            <div style="max-width:92vw; max-height:75vh; overflow:hidden; border-radius:18px; box-shadow:0 16px 48px rgba(0,0,0,0.6); background:#0f172a; border:2px solid rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:center;">
+                <img src="${imageUrl}" style="max-width:100%; max-height:75vh; object-fit:contain; display:block;" onerror="this.src='assets/icons/default-med.png'">
+            </div>
+            <button type="button" class="btn-primary sm-btn" style="margin-top:16px; background:rgba(255,255,255,0.2); border:1px solid rgba(255,255,255,0.3); color:white; border-radius:10px; padding:8px 20px; font-weight:700; cursor:pointer;" onclick="this.closest('.lightbox-overlay').remove()">إغلاق المعاينة</button>
+        `;
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) overlay.remove();
+        });
+        document.body.appendChild(overlay);
+    },
+
+    /**
+     * Native Camera Barcode Scanner (v18.8.1)
+     */
+    async startBarcodeScanner(targetInputId) {
+        const hasBarcodeDetector = typeof window !== 'undefined' && 'BarcodeDetector' in window;
+        
+        const overlay = document.createElement('div');
+        overlay.id = 'barcode-scanner-overlay';
+        overlay.style.cssText = `
+            position: fixed; inset: 0; z-index: 99999;
+            background: rgba(0,0,0,0.92);
+            display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+            padding: 24px 16px; color: white; direction: rtl;
+        `;
+
+        overlay.innerHTML = `
+            <div style="width:100%; display:flex; justify-content:space-between; align-items:center; max-width:400px;">
+                <h3 style="margin:0; font-size:16px; font-weight:800; display:flex; align-items:center; gap:8px;">
+                    <i class='bx bx-barcode-reader' style="color:var(--primary); font-size:24px;"></i>
+                    ماسح الباركود المباشر
+                </h3>
+                <button type="button" id="close-scanner-btn" style="background:rgba(255,255,255,0.15); border:none; color:white; font-size:22px; width:36px; height:36px; border-radius:50%; cursor:pointer;">✕</button>
+            </div>
+
+            <div style="position:relative; width:100%; max-width:340px; height:240px; border-radius:18px; overflow:hidden; background:#000; box-shadow:0 8px 32px rgba(0,0,0,0.5); border:2px solid rgba(59,130,246,0.6);">
+                <video id="scanner-video" playsinline style="width:100%; height:100%; object-fit:cover;"></video>
+                <div style="position:absolute; inset:25px 20px; border:2px dashed #3b82f6; border-radius:12px; pointer-events:none; display:flex; align-items:center; justify-content:center;">
+                    <div style="width:100%; height:2px; background:rgba(239,68,68,0.9); box-shadow:0 0 10px #ef4444; animation:scanline 1.6s infinite alternate;"></div>
+                </div>
+            </div>
+
+            <div style="text-align:center; max-width:320px;">
+                <p style="font-size:13px; color:#cbd5e1; margin:0 0 12px 0;">وجّه الكاميرا نحو الباركود المطبوع على علبة الدواء</p>
+                <button type="button" id="manual-cancel-btn" style="padding:10px 24px; background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.25); color:white; border-radius:12px; font-weight:700; cursor:pointer;">إلغاء</button>
+            </div>
+            <style>
+                @keyframes scanline { 0% { transform: translateY(-75px); } 100% { transform: translateY(75px); } }
+            </style>
+        `;
+
+        document.body.appendChild(overlay);
+
+        let stream = null;
+        let animationFrameId = null;
+
+        const cleanup = () => {
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            if (stream) {
+                stream.getTracks().forEach(t => t.stop());
+            }
+            overlay.remove();
+        };
+
+        overlay.querySelector('#close-scanner-btn').onclick = cleanup;
+        overlay.querySelector('#manual-cancel-btn').onclick = cleanup;
+
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+            });
+            const video = overlay.querySelector('#scanner-video');
+            video.srcObject = stream;
+            await video.play();
+
+            if (hasBarcodeDetector) {
+                const detector = new window.BarcodeDetector({
+                    formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code', 'upc_a', 'upc_e']
+                });
+
+                const scanLoop = async () => {
+                    if (!overlay.parentNode) return;
+                    try {
+                        const barcodes = await detector.detect(video);
+                        if (barcodes && barcodes.length > 0) {
+                            const rawValue = barcodes[0].rawValue;
+                            if (rawValue) {
+                                if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
+                                const input = document.getElementById(targetInputId);
+                                if (input) {
+                                    input.value = rawValue;
+                                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                                UI.showToast(`تم مسح الباركود بنجاح: ${rawValue} 🎯`, 'success');
+                                cleanup();
+                                return;
+                            }
+                        }
+                    } catch (detectErr) {}
+                    animationFrameId = requestAnimationFrame(scanLoop);
+                };
+                scanLoop();
+            } else {
+                UI.showToast('متصفحك لا يدعم الكشف التلقائي المباشر للباركود. يرجى إدخال الرقم يدوياً.', 'info');
+            }
+        } catch (err) {
+            console.warn('Camera stream error:', err);
+            UI.showToast('تعذر فتح الكاميرا: يرجى التأكد من منح الإذن للمتصفح 📷', 'warning');
+            cleanup();
+        }
     },
 
     async saveMasterMedicine() {

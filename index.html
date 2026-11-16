@@ -207,9 +207,12 @@
             <!-- Section 1: Medicines Management -->
             <div id="wh-meds-section">
                 <div class="section-actions mb-15" style="display: flex; gap: 10px; align-items: center;">
-                    <div class="search-bar" style="flex: 1; min-width: 0; margin: 0;">
+                    <div class="search-bar" style="flex: 1; min-width: 0; margin: 0; position: relative;">
                         <i class='bx bx-search'></i>
-                        <input type="text" id="global-search" placeholder="بحث فوري بالاسم عربي أو إنجليزي أو الباركود...">
+                        <input type="text" id="global-search" placeholder="بحث فوري بالاسم أو الباركود..." style="padding-left: 36px;">
+                        <button type="button" class="btn-ghost" onclick="window.App.startBarcodeScanner('global-search')" title="مسح باركود بالكاميرا" style="position: absolute; left: 8px; color: var(--primary); padding: 4px; border: none; background: transparent; cursor: pointer;">
+                            <i class='bx bx-barcode-reader' style="font-size: 20px;"></i>
+                        </button>
                     </div>
                     <button class="btn-primary sm-btn" onclick="window.App.openQuickAdd()" title="إضافة دواء جديد" style="white-space: nowrap; flex-shrink: 0; width: auto;">
                         <i class='bx bx-plus'></i> دواء جديد
@@ -422,7 +425,7 @@
 
     <!-- App Scripts -->
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/app.js?v=18.8.0"></script>
+    <script type="module" src="js/app.js?v=18.8.1"></script>
     
     <!-- Navigation Logic managed by js/app.js -->
 </body>
