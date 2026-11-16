@@ -1,13 +1,14 @@
 // js/core/seed_data.js
 export const CATEGORY_MAP = {
-    'Antibiotics': { ar: 'مضادات حيوية', icon: 'bx-shield', color: '#3b82f6', prefix: 'A' },
-    'Analgesics': { ar: 'مسكنات وحرارة', icon: 'bx-plus-medical', color: '#ef4444', prefix: 'B' },
-    'Respiratory': { ar: 'برد وصدر وحساسية', icon: 'bx-wind', color: '#06b6d4', prefix: 'C' },
-    'Gastro': { ar: 'معدة وجهاز هضمي', icon: 'bx-dish', color: '#f59e0b', prefix: 'D' },
-    'Chronic': { ar: 'أمراض مزمنة', icon: 'bx-pulse', color: '#8b5cf6', prefix: 'E' },
-    'Injections': { ar: 'حقن ومحاليل وأمصال', icon: 'bx-injection', color: '#ec4899', prefix: 'F' },
-    'Topical': { ar: 'مراهم وقطرات', icon: 'bx-spray-can', color: '#10b981', prefix: 'G' },
-    'Consumables': { ar: 'مستلزمات وغيار طبي', icon: 'bx-first-aid', color: '#64748b', prefix: 'H' }
+    'Antibiotics': { ar: 'مضادات حيوية', en: 'Antibiotics', icon: 'bx-shield', color: '#3b82f6', prefix: 'A' },
+    'Analgesics': { ar: 'مسكنات وحرارة', en: 'Analgesics', icon: 'bx-plus-medical', color: '#ef4444', prefix: 'B' },
+    'Respiratory': { ar: 'برد وصدر وحساسية', en: 'Respiratory', icon: 'bx-wind', color: '#06b6d4', prefix: 'C' },
+    'Gastro': { ar: 'معدة وجهاز هضمي', en: 'Gastro', icon: 'bx-dish', color: '#f59e0b', prefix: 'D' },
+    'Chronic': { ar: 'أمراض مزمنة', en: 'Chronic', icon: 'bx-pulse', color: '#8b5cf6', prefix: 'E' },
+    'Injections': { ar: 'حقن ومحاليل وأمصال', en: 'Injections', icon: 'bx-injection', color: '#ec4899', prefix: 'F' },
+    'Topical': { ar: 'مراهم وقطرات', en: 'Topical', icon: 'bx-spray-can', color: '#10b981', prefix: 'G' },
+    'Consumables': { ar: 'مستلزمات وغيار طبي', en: 'Consumables', icon: 'bx-first-aid', color: '#64748b', prefix: 'H' },
+    'uncategorized': { ar: 'أدوية غير مصنفة', en: 'Uncategorized', icon: 'bx-help-circle', color: '#94a3b8', prefix: 'U' }
 };
 
 export const SEED_MEDICINES = [

@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.7.3)
+ * Dawaa App Orchestrator (v18.7.4)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.7.3', // Universal Sovereign v18.7.3
+    VERSION: '18.7.4', // Universal Sovereign v18.7.4
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -443,6 +443,19 @@ const App = {
         }
     },
 
+    async cleanCategories() {
+        try {
+            UI.showToast('جاري تنظيف وتوحيد التصنيفات ونقل الأدوية القديمة... 🧹', 'info');
+            const res = await Categories.cleanupAndMigrate();
+            await this.refreshAllViews();
+            const count = res?.migratedCount || 0;
+            UI.showToast(`تم تنظيف التصنيفات بنجاح! تم نقل وتحديث ${count} دواء ✅`, 'success');
+        } catch (err) {
+            console.error('Error cleaning categories:', err);
+            UI.showToast('فشل تنظيف التصنيفات: ' + err.message, 'danger');
+        }
+    },
+
     async triggerCloudSync() {
         if (typeof Sync !== 'undefined' && Sync.pullAll) {
             await Sync.pullAll();
@@ -511,9 +524,16 @@ const App = {
 
             // 2. Secondary Filtering by Category
             if (this.selectedCategoryId) {
+                const sel = this.selectedCategoryId;
+                const allCurrentCats = await Categories.getAllSorted();
+                const validCatIds = new Set(allCurrentCats.filter(c => c.id !== 'uncategorized').map(c => c.id));
                 data = data.filter(i => {
                     const m = masterMap.get(i.medicineId || i.id);
-                    return i.categoryId === this.selectedCategoryId;
+                    const cat = (m && m.categoryId) || i.categoryId;
+                    if (sel === 'uncategorized') {
+                        return !cat || cat === 'uncategorized' || !validCatIds.has(cat);
+                    }
+                    return cat === sel;
                 });
             }
 
@@ -1895,17 +1915,18 @@ const App = {
                 <div class="items-list mini">
                     ${cats.map(c => {
                         const count = allMeds.filter(m => m.categoryId === c.id).length;
+                        const isSystem = c.isSystem || c.id === 'uncategorized';
                         return `
                             <div class="cat-manage-item">
-                                <div class="cat-info" onclick="window.App.openEditCategoryModal('${c.id}')" style="cursor:pointer">
+                                <div class="cat-info" onclick="${c.id === 'uncategorized' ? `window.App.openCategoryDetailModal('${c.id}')` : `window.App.openEditCategoryModal('${c.id}')`}" style="cursor:pointer">
                                     <i class='bx ${c.icon}' style="color: ${c.color}; font-size: 24px;"></i>
                                     <div style="display:flex; flex-direction:column">
                                         <span style="font-weight:800">${c.nameAR}</span>
-                                        <span class="text-muted" style="font-size:10px">${count} صنف عثر عليه</span>
+                                        <span class="text-muted" style="font-size:10px">${count} صنف مسجل</span>
                                     </div>
                                 </div>
                                 <div class="cat-actions">
-                                    <button class="icon-btn" onclick="window.App.deleteCategoryConfirm('${c.id}')" title="حذف القسم"><i class='bx bx-trash' style="color:var(--danger)"></i></button>
+                                    ${!isSystem ? `<button class="icon-btn" onclick="window.App.deleteCategoryConfirm('${c.id}')" title="حذف القسم"><i class='bx bx-trash' style="color:var(--danger)"></i></button>` : '<span style="font-size:11px; color:var(--text-muted); padding:4px 8px;">أساسي</span>'}
                                 </div>
                             </div>
                         `;
@@ -1935,16 +1956,23 @@ const App = {
     },
 
     async executeDeleteCategory(catId, action) {
+        if (catId === 'uncategorized') {
+            UI.showToast('لا يمكن حذف قسم "أدوية غير مصنفة"', 'warning');
+            return;
+        }
         try {
             const meds = await Categories.getMedicinesByCategoryId(catId);
             
             if (action === 'move') {
-                // Ensure 'Uncategorized' exists or use a default
                 for (const med of meds) {
                     med.categoryId = 'uncategorized';
+                    med.lastUpdated = new Date().toISOString();
                     await DB.put('medicineMaster', med);
+                    if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+                        window.Sync.push(med.id).catch(() => {});
+                    }
                 }
-                UI.showToast(`تم نقل ${meds.length} دواء لـ "غير مصنف"`, 'info');
+                UI.showToast(`تم نقل ${meds.length} دواء لـ "أدوية غير مصنفة"`, 'info');
             } else if (action === 'delete_all') {
                 for (const med of meds) {
                     await DB.delete('medicineMaster', med.id);
@@ -1999,7 +2027,7 @@ App.handleBackup = async function() {
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.7.3'
+            version: '18.7.4'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -2304,7 +2332,13 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             const cats = await Categories.getAllSorted();
             const allMeds = (await DB.getAll('medicineMaster')) || [];
 
-            container.innerHTML = cats.map(c => {
+            const validCatIds = new Set(cats.filter(c => c.id !== 'uncategorized').map(c => c.id));
+            const uncatMeds = allMeds.filter(m => !m.categoryId || m.categoryId === 'uncategorized' || !validCatIds.has(m.categoryId));
+            const uncatCount = uncatMeds.length;
+
+            const regularCats = cats.filter(c => c.id !== 'uncategorized');
+
+            let html = regularCats.map(c => {
                 const count = allMeds.filter(m => m.categoryId === c.id).length;
                 return `
                     <div class="square-card" onclick="window.App.openCategoryDetailModal('${c.id}')" title="استعراض وإدارة أدوية ${c.nameAR}">
@@ -2314,6 +2348,17 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     </div>
                 `;
             }).join('');
+
+            // Always display the 'أدوية غير مصنفة' card
+            html += `
+                <div class="square-card uncategorized-card" onclick="window.App.openCategoryDetailModal('uncategorized')" title="استعراض الأدوية غير المصنفة" style="${uncatCount > 0 ? 'border: 1px dashed var(--warning); background: rgba(245, 158, 11, 0.05);' : 'opacity: 0.85;'}">
+                    <i class='bx bx-help-circle square-icon' style="color: ${uncatCount > 0 ? 'var(--warning)' : '#94a3b8'}"></i>
+                    <h3>أدوية غير مصنفة</h3>
+                    <span class="square-meta" style="${uncatCount > 0 ? 'color: var(--warning); font-weight: bold;' : ''}">${uncatCount} صنف دواء</span>
+                </div>
+            `;
+
+            container.innerHTML = html;
         } catch (err) {
             console.error('Error rendering warehouse categories:', err);
         }
@@ -2343,8 +2388,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         try {
             this._activeCategoryModalId = catId;
             const cat = await Categories.getInfo(catId);
-            const allMeds = (await DB.getAll('medicineMaster')) || [];
-            const medsInCat = allMeds.filter(m => m.categoryId === catId);
+            const medsInCat = await Categories.getMedicinesByCategoryId(catId);
+            const isUncategorized = (catId === 'uncategorized');
 
             UI.showModal(`
                 <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:16px;">
@@ -2359,9 +2404,11 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         <button class="btn-primary sm-btn" onclick="window.App.openAddMedicineWithCat('${catId}')" title="إضافة دواء جديد لهذا القسم">
                             <i class='bx bx-plus'></i> دواء جديد
                         </button>
-                        <button class="btn-ghost sm-btn" onclick="window.App.openEditCategoryModal('${catId}')" title="تعديل بيانات التصنيف">
-                            <i class='bx bx-edit'></i>
-                        </button>
+                        ${!isUncategorized ? `
+                            <button class="btn-ghost sm-btn" onclick="window.App.openEditCategoryModal('${catId}')" title="تعديل بيانات التصنيف">
+                                <i class='bx bx-edit'></i>
+                            </button>
+                        ` : ''}
                     </div>
                 </div>
 
@@ -2706,6 +2753,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     },
 
     async openEditCategoryModal(id) {
+        if (id === 'uncategorized') {
+            UI.showToast('قسم "أدوية غير مصنفة" هو قسم نظام افتراضي ولا يمكن تعديله', 'info');
+            return;
+        }
         const cat = await Categories.getInfo(id);
         UI.showModal(`
             <div class="sheet-handle"></div>
@@ -2780,6 +2831,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     },
 
     async deleteCategoryConfirm(id) {
+        if (id === 'uncategorized') {
+            UI.showToast('لا يمكن حذف قسم "أدوية غير مصنفة" لأنه تصنيف أساسي في النظام', 'warning');
+            return;
+        }
         if (!confirm('حذف هذا القسم؟ لن يتم حذف الأدوية التابعة له بل ستحتاج لإعادة تصنيفها.')) return;
         await Categories.deleteCategory(id);
         UI.closeModal();

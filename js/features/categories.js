@@ -4,18 +4,79 @@ import { CATEGORY_MAP, SEED_MEDICINES } from '../core/seed_data.js';
 import { Utils } from '../core/utils.js';
 
 /**
- * Categories & Master Data Feature (v6.6.1 - Pure Architecture)
- * Simple categorization and medicine registry. No migration/forcing logic.
+ * Categories & Master Data Feature (v18.7.4 - Clean Logic & Uncategorized Support)
+ * Robust categorization, legacy migration, and uncategorized medicine management.
  */
 
 export const Categories = {
-    // --- Category Management ---
+    // --- Legacy / Alias Mapping Dictionary ---
+    LEGACY_CATEGORY_MAP: {
+        // NSAID -> Analgesics
+        'nsaid': 'Analgesics',
+        'مسكنات وآلام': 'Analgesics',
+        'مسكنات': 'Analgesics',
+        'مسكنات وحرارة': 'Analgesics',
+
+        // Anti-Flu, Laryng., Antihistamines, Flu -> Respiratory
+        'anti-flu': 'Respiratory',
+        'antiflu': 'Respiratory',
+        'laryng.': 'Respiratory',
+        'laryng': 'Respiratory',
+        'antihistamines': 'Respiratory',
+        'flu': 'Respiratory',
+        'أدوية البرد': 'Respiratory',
+        'أذن وحنجرة': 'Respiratory',
+        'جهاز تنفسي': 'Respiratory',
+        'برد وصدر وحساسية': 'Respiratory',
+
+        // GIT Prep -> Gastro
+        'git prep': 'Gastro',
+        'gitprep': 'Gastro',
+        'git': 'Gastro',
+        'أدوية المعدة': 'Gastro',
+        'معدة وجهاز هضمي': 'Gastro',
+
+        // Topical, Local Prep, Dermatology, Eye-Ear-Nose, Eye-Ear -> Topical
+        'local prep': 'Topical',
+        'localprep': 'Topical',
+        'dermatology': 'Topical',
+        'eye-ear-nose': 'Topical',
+        'eye-ear': 'Topical',
+        'كريمات ودهانات': 'Topical',
+        'قطرات عيون وأذن': 'Topical',
+        'مراهم وقطرات': 'Topical',
+
+        // Serum, Emergency -> Injections
+        'serum': 'Injections',
+        'emergency': 'Injections',
+        'حقن': 'Injections',
+        'حقن ومحاليل وأمصال': 'Injections',
+
+        // Antibiotics aliases
+        'antibiotic': 'Antibiotics',
+        'antimicrobial': 'Antibiotics',
+        'antimicrobials': 'Antibiotics',
+        'مضادات حيوية': 'Antibiotics',
+        'مضادات حيوية وميكروبية': 'Antibiotics',
+
+        // Consumables aliases
+        'consumable': 'Consumables',
+        'supplies': 'Consumables',
+        'مستلزمات طبية': 'Consumables',
+        'مستلزمات وغيار طبي': 'Consumables',
+
+        // Chronic aliases
+        'أمراض مزمنة': 'Chronic',
+        'chronic': 'Chronic'
+    },
+
+    // --- Category Management & Seeding ---
 
     async seedInitialData() {
         try {
             console.log('Dawaa Categories: Checking for initial data...');
             
-            // Ensure default categories are present
+            // Ensure canonical categories are present in categories store
             for (const key in CATEGORY_MAP) {
                 const cat = CATEGORY_MAP[key];
                 const existing = await DB.get('categories', key);
@@ -23,11 +84,15 @@ export const Categories = {
                     await DB.put('categories', {
                         id: key,
                         nameAR: cat.ar,
+                        nameEN: cat.en || key,
                         icon: cat.icon,
                         color: cat.color,
                         prefix: cat.prefix || 'Z',
                         isSystem: true
                     });
+                } else if (!existing.nameEN) {
+                    existing.nameEN = cat.en || key;
+                    await DB.put('categories', existing);
                 }
             }
 
@@ -41,7 +106,7 @@ export const Categories = {
                         nameEN: med.nameEN,
                         nameAR: med.nameAR || med.nameEN,
                         activeIngredient: med.activeIngredient || '',
-                        categoryId: med.categoryId,
+                        categoryId: med.categoryId || 'uncategorized',
                         type: med.type || 'medicine',
                         imagePath: med.imagePath,
                         lastUpdated: new Date().toISOString()
@@ -49,10 +114,129 @@ export const Categories = {
                 }
             }
 
+            // Always run cleanup and legacy migration
+            await this.cleanupAndMigrate();
+
             // Pre-populate category cache
             await this.getAllSorted();
         } catch (err) {
             console.error('Dawaa Categories: Seed Error:', err);
+        }
+    },
+
+    /**
+     * Cleanup and Legacy Migration (v18.7.4)
+     * Harmonizes category IDs, migrates medicines from old schemes, and supports 'uncategorized'.
+     */
+    async cleanupAndMigrate() {
+        try {
+            console.log('Dawaa Categories: Starting cleanup and legacy migration...');
+            
+            // 1. Ensure canonical categories + 'uncategorized' exist
+            for (const key in CATEGORY_MAP) {
+                const cat = CATEGORY_MAP[key];
+                const existing = await DB.get('categories', key);
+                if (!existing) {
+                    await DB.put('categories', {
+                        id: key,
+                        nameAR: cat.ar,
+                        nameEN: cat.en || key,
+                        icon: cat.icon,
+                        color: cat.color,
+                        prefix: cat.prefix || 'Z',
+                        isSystem: true
+                    });
+                }
+            }
+
+            // Always ensure 'uncategorized' exists
+            const uncatExisting = await DB.get('categories', 'uncategorized');
+            if (!uncatExisting) {
+                await DB.put('categories', {
+                    id: 'uncategorized',
+                    nameAR: 'أدوية غير مصنفة',
+                    nameEN: 'Uncategorized',
+                    icon: 'bx-help-circle',
+                    color: '#94a3b8',
+                    prefix: 'U',
+                    isSystem: true
+                });
+            }
+
+            // 2. Fetch all registered categories and medicines
+            const allCats = (await DB.getAll('categories')) || [];
+            const allMeds = (await DB.getAll('medicineMaster')) || [];
+            const registeredCatIds = new Set(allCats.map(c => c.id));
+            registeredCatIds.add('uncategorized');
+
+            let migratedCount = 0;
+
+            // 3. Migrate medicines with legacy, alias, or orphan categoryId
+            for (const med of allMeds) {
+                let currentCat = (med.categoryId || '').trim();
+                let targetCat = null;
+
+                if (!currentCat || currentCat === 'undefined' || currentCat === 'null') {
+                    targetCat = 'uncategorized';
+                } else {
+                    const lowerCat = currentCat.toLowerCase();
+                    if (this.LEGACY_CATEGORY_MAP[lowerCat]) {
+                        targetCat = this.LEGACY_CATEGORY_MAP[lowerCat];
+                    } else if (!registeredCatIds.has(currentCat)) {
+                        // Check if currentCat matches any category's nameAR
+                        const matchByName = allCats.find(c => c.nameAR && c.nameAR.trim() === currentCat);
+                        if (matchByName) {
+                            targetCat = matchByName.id;
+                        } else {
+                            // Truly unknown or orphan category ID -> assign to Uncategorized!
+                            targetCat = 'uncategorized';
+                        }
+                    }
+                }
+
+                if (targetCat && targetCat !== currentCat) {
+                    console.log(`Dawaa Migration: Migrating med [${med.id}] "${med.nameEN || med.nameAR}" from '${currentCat}' -> '${targetCat}'`);
+                    med.categoryId = targetCat;
+                    med.lastUpdated = new Date().toISOString();
+                    await DB.put('medicineMaster', med);
+                    migratedCount++;
+
+                    // Push update to cloud if Sync is ready
+                    if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+                        window.Sync.push(med.id).catch(() => {});
+                    }
+                }
+            }
+
+            // 4. Clean up obsolete legacy categories from 'categories' store
+            // (e.g. 'NSAID', 'Anti-Flu', 'Laryng.', 'GIT Prep', 'Local Prep', 'Eye-Ear-Nose')
+            const obsoleteIds = ['nsaid', 'anti-flu', 'laryng.', 'git prep', 'local prep', 'eye-ear-nose'];
+            const freshMeds = (await DB.getAll('medicineMaster')) || [];
+            
+            for (const cat of allCats) {
+                if (cat.id && obsoleteIds.includes(cat.id.toLowerCase())) {
+                    // Check if any medicines are still referencing this legacy category
+                    const stillUsed = freshMeds.some(m => m.categoryId === cat.id);
+                    if (!stillUsed) {
+                        console.log(`Dawaa Migration: Removing obsolete empty category '${cat.id}'`);
+                        await DB.delete('categories', cat.id);
+                        if (typeof window.Sync !== 'undefined' && window.Sync.deleteCategory) {
+                            window.Sync.deleteCategory(cat.id).catch(() => {});
+                        }
+                    }
+                }
+            }
+
+            // Reset in-memory cache
+            this.cache = null;
+            this._cache = null;
+            await this.getAllSorted();
+
+            console.log(`Dawaa Categories: Cleanup and migration complete. Migrated ${migratedCount} medicines.`);
+            return { migratedCount };
+        } catch (err) {
+            console.error('Dawaa Categories: Cleanup/Migration error:', err);
+            return { migratedCount: 0, error: err };
         }
     },
 
@@ -69,14 +253,19 @@ export const Categories = {
     },
 
     async getAllSorted() {
-        const cats = await DB.getAll('categories');
+        const cats = (await DB.getAll('categories')) || [];
         this.cache = cats;
         this._cache = cats;
-        return cats.sort((a, b) => (a.nameAR || '').localeCompare(b.nameAR || ''));
+        // Sort alphabetically by Arabic name, keeping 'uncategorized' consistently at the end
+        return cats.sort((a, b) => {
+            if (a.id === 'uncategorized') return 1;
+            if (b.id === 'uncategorized') return -1;
+            return (a.nameAR || '').localeCompare(b.nameAR || '');
+        });
     },
 
     getCategoryNameAR(catId) {
-        if (!catId) return 'عام';
+        if (!catId || catId === 'uncategorized') return 'أدوية غير مصنفة';
         const cache = this.cache || this._cache;
         if (cache) {
             const found = cache.find(c => c.id === catId);
@@ -85,33 +274,16 @@ export const Categories = {
         if (CATEGORY_MAP[catId] && CATEGORY_MAP[catId].ar) {
             return CATEGORY_MAP[catId].ar;
         }
-        // Common translations mapping - 8 Simplified Core Categories
-        const aliases = {
-            'Antibiotics': 'مضادات حيوية',
-            'Analgesics': 'مسكنات وحرارة',
-            'NSAID': 'مسكنات وحرارة',
-            'Respiratory': 'برد وصدر وحساسية',
-            'Anti-Flu': 'برد وصدر وحساسية',
-            'Laryng.': 'برد وصدر وحساسية',
-            'Antihistamines': 'برد وصدر وحساسية',
-            'Gastro': 'معدة وجهاز هضمي',
-            'GIT Prep': 'معدة وجهاز هضمي',
-            'Chronic': 'أمراض مزمنة',
-            'Injections': 'حقن ومحاليل وأمصال',
-            'Serum': 'حقن ومحاليل وأمصال',
-            'Emergency': 'حقن ومحاليل وأمصال',
-            'Topical': 'مراهم وقطرات',
-            'Local Prep': 'مراهم وقطرات',
-            'Dermatology': 'مراهم وقطرات',
-            'Eye-Ear-Nose': 'مراهم وقطرات',
-            'Eye-Ear': 'مراهم وقطرات',
-            'Consumables': 'مستلزمات وغيار طبي'
-        };
-        return aliases[catId] || catId;
+        const lower = String(catId).toLowerCase();
+        if (this.LEGACY_CATEGORY_MAP && this.LEGACY_CATEGORY_MAP[lower]) {
+            const canonicalKey = this.LEGACY_CATEGORY_MAP[lower];
+            if (CATEGORY_MAP[canonicalKey]) return CATEGORY_MAP[canonicalKey].ar;
+        }
+        return catId;
     },
 
     getCategoryIcon(catId) {
-        if (!catId) return 'bx-category';
+        if (!catId || catId === 'uncategorized') return 'bx-help-circle';
         const cache = this.cache || this._cache;
         if (cache) {
             const found = cache.find(c => c.id === catId);
@@ -120,11 +292,25 @@ export const Categories = {
         if (CATEGORY_MAP[catId] && CATEGORY_MAP[catId].icon) {
             return CATEGORY_MAP[catId].icon;
         }
+        const lower = String(catId).toLowerCase();
+        if (this.LEGACY_CATEGORY_MAP && this.LEGACY_CATEGORY_MAP[lower]) {
+            const canonicalKey = this.LEGACY_CATEGORY_MAP[lower];
+            if (CATEGORY_MAP[canonicalKey]) return CATEGORY_MAP[canonicalKey].icon;
+        }
         return 'bx-purchase-tag-alt';
     },
 
     async getInfo(id) {
-        if (!id) return { id: '', nameAR: 'عام', nameEN: 'General', icon: 'bx-category', color: '#64748b' };
+        if (!id || id === 'uncategorized') {
+            return { 
+                id: 'uncategorized', 
+                nameAR: 'أدوية غير مصنفة', 
+                nameEN: 'Uncategorized', 
+                icon: 'bx-help-circle', 
+                color: '#94a3b8',
+                isSystem: true 
+            };
+        }
         // Check database first so user edits take precedence over default map!
         try {
             const fromDb = await DB.get('categories', id);
@@ -132,9 +318,10 @@ export const Categories = {
                 return {
                     id: fromDb.id,
                     nameAR: fromDb.nameAR || (CATEGORY_MAP[id] && CATEGORY_MAP[id].ar) || id,
-                    nameEN: fromDb.nameEN || id,
+                    nameEN: fromDb.nameEN || (CATEGORY_MAP[id] && CATEGORY_MAP[id].en) || id,
                     icon: fromDb.icon || (CATEGORY_MAP[id] && CATEGORY_MAP[id].icon) || 'bx-category',
-                    color: fromDb.color || (CATEGORY_MAP[id] && CATEGORY_MAP[id].color) || '#3b82f6'
+                    color: fromDb.color || (CATEGORY_MAP[id] && CATEGORY_MAP[id].color) || '#3b82f6',
+                    isSystem: fromDb.isSystem || false
                 };
             }
         } catch (e) {
@@ -145,12 +332,20 @@ export const Categories = {
             return {
                 id: id,
                 nameAR: CATEGORY_MAP[id].ar,
-                nameEN: id,
+                nameEN: CATEGORY_MAP[id].en || id,
                 icon: CATEGORY_MAP[id].icon,
-                color: CATEGORY_MAP[id].color
+                color: CATEGORY_MAP[id].color,
+                isSystem: true
             };
         }
-        return { id: id, nameAR: this.getCategoryNameAR(id), nameEN: id, icon: this.getCategoryIcon(id), color: '#64748b' };
+        return { 
+            id: id, 
+            nameAR: this.getCategoryNameAR(id), 
+            nameEN: id, 
+            icon: this.getCategoryIcon(id), 
+            color: '#64748b',
+            isSystem: false 
+        };
     },
 
     async saveCategory(cat) {
@@ -170,6 +365,7 @@ export const Categories = {
     },
 
     async deleteCategory(id) {
+        if (id === 'uncategorized') return false; // Protected system category
         await DB.delete('categories', id);
         this.cache = null;
         this._cache = null;
@@ -184,10 +380,20 @@ export const Categories = {
         return true;
     },
 
-    // --- Search & Retrieval (v6.6.2 Sorted) ---
+    // --- Search & Retrieval ---
 
     async getMedicinesByCategoryId(catId) {
-        if (!catId) return [];
+        const all = (await DB.getAll('medicineMaster')) || [];
+        
+        // Uncategorized handling: fetch all meds with null/empty/'uncategorized' OR unmapped category IDs
+        if (!catId || catId === 'uncategorized') {
+            const validCats = await DB.getAll('categories');
+            const validIds = new Set(validCats.filter(c => c.id !== 'uncategorized').map(c => c.id));
+            return all
+                .filter(m => !m.categoryId || m.categoryId === 'uncategorized' || !validIds.has(m.categoryId))
+                .sort((a, b) => (a.nameEN || '').localeCompare(b.nameEN || ''));
+        }
+
         try {
             if (DB.getAllByIndex) {
                 const indexed = await DB.getAllByIndex('medicineMaster', 'by_category_id', catId);
@@ -196,7 +402,7 @@ export const Categories = {
                 }
             }
         } catch (e) {}
-        const all = await DB.getAll('medicineMaster');
+
         return all
             .filter(m => m.categoryId === catId)
             .sort((a, b) => (a.nameEN || '').localeCompare(b.nameEN || ''));
@@ -231,6 +437,7 @@ export const Categories = {
 
     async saveMedicine(med) {
         if (!med.id) med.id = await this.generateNextId();
+        if (!med.categoryId) med.categoryId = 'uncategorized';
         if (!med.lastUpdated) med.lastUpdated = new Date().toISOString();
         await DB.put('medicineMaster', med);
         return med.id;
@@ -240,13 +447,10 @@ export const Categories = {
         if (!med) return 'assets/icons/default-med.png';
         const img = med.imagePath || med.image || med.imageUrl || med.photo;
         if (!img || img === '' || img === 'null' || img === 'undefined') {
-            return 'assets/icons/default-med.png'; // Fallback to default icon
+            return 'assets/icons/default-med.png';
         }
-        
-        // Return whatever image is stored (Base64 data:image, Cloud URL, Local asset path, Blob)
         return img;
     },
-
 
     async deleteMedicine(id) {
         await DB.delete('medicineMaster', id);
