@@ -30,6 +30,20 @@
 
 .btn-primary:active { transform: scale(0.98); }
 
+.sm-btn {
+    width: auto !important;
+    height: 46px;
+    padding: 0 16px;
+    font-size: 13px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 .btn-ghost {
     background: transparent;
     border: none;
