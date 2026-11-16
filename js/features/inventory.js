@@ -181,7 +181,7 @@ export const Inventory = {
         return `
             <div class="inventory-card master-catalog-card" data-med-id="${medId}" style="display:flex; align-items:center; gap:12px; padding:12px 16px; margin-bottom:10px; border-radius:16px; background:var(--surface); border:1px solid var(--border-color); box-shadow:var(--shadow-sm); transition:all 0.2s ease;">
                 <div class="card-img" onclick="window.App.openMedicineDetails('${medId}')" style="cursor:pointer; width:48px; height:48px; border-radius:12px; overflow:hidden; flex-shrink:0; background:rgba(59,130,246,0.08); display:flex; align-items:center; justify-content:center;">
-                    <img src="${imgUrl}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                    <img src="${imgUrl}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                 </div>
                 <div class="card-info" onclick="window.App.openMedicineDetails('${medId}')" style="flex:1; min-width:0; cursor:pointer;">
                     <div style="display:flex; flex-direction:column; gap:2px;">

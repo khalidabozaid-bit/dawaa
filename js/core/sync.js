@@ -117,6 +117,9 @@ export const Sync = {
 
             console.log('Sync: Full cloud state synchronization complete ✅');
             if (window.App?.refreshAllViews) window.App.refreshAllViews();
+            
+            // Process any offline background image uploads
+            this.processPendingImageQueue().catch(() => {});
 
         } catch (err) {
             console.error('Sync Pull Failed:', err);
@@ -740,6 +743,76 @@ export const Sync = {
         } catch (err) {
             console.error('PullAll Error:', err);
             UI.showToast(`تعذر سحب البيانات: ${err.message || 'خطأ في الاتصال'}`, 'danger');
+        }
+    },
+
+    /**
+     * Offline Background Image Upload Queue (v18.8.0)
+     * Automatically captures and queues images while offline, drains when online.
+     */
+    enqueuePendingImage(medId, dataUrl) {
+        if (!medId || !dataUrl || !dataUrl.startsWith('data:image')) return;
+        try {
+            const queueKey = 'dawaa_pending_image_queue';
+            let queue = JSON.parse(localStorage.getItem(queueKey) || '[]');
+            queue = queue.filter(item => item.medId !== medId);
+            queue.push({ medId, dataUrl, timestamp: Date.now() });
+            localStorage.setItem(queueKey, JSON.stringify(queue));
+            console.log(`Sync: Enqueued image for medicine ${medId} to offline queue ⏳`);
+        } catch (e) {
+            console.warn('Error enqueuing image:', e);
+        }
+    },
+
+    async processPendingImageQueue() {
+        if (!navigator.onLine) return;
+        const queueKey = 'dawaa_pending_image_queue';
+        let queue = [];
+        try {
+            queue = JSON.parse(localStorage.getItem(queueKey) || '[]');
+        } catch (e) {
+            return;
+        }
+        if (!Array.isArray(queue) || queue.length === 0) return;
+
+        console.log(`Sync: Processing ${queue.length} pending offline images... ☁️`);
+        const remaining = [];
+        let successCount = 0;
+
+        for (const item of queue) {
+            try {
+                if (typeof window.App?.uploadImage === 'function') {
+                    const res = await fetch(item.dataUrl);
+                    const blob = await res.blob();
+                    const cloudUrl = await window.App.uploadImage(blob, item.medId);
+                    if (cloudUrl) {
+                        const med = await DB.get('medicineMaster', item.medId);
+                        if (med) {
+                            med.imagePath = cloudUrl;
+                            await DB.put('medicineMaster', med);
+                            await this.push(item.medId);
+                            successCount++;
+                        }
+                    } else {
+                        remaining.push(item);
+                    }
+                }
+            } catch (err) {
+                console.warn(`Sync: Failed to upload pending image for ${item.medId}:`, err);
+                remaining.push(item);
+            }
+        }
+
+        try {
+            localStorage.setItem(queueKey, JSON.stringify(remaining));
+        } catch (e) {}
+
+        if (successCount > 0) {
+            console.log(`Sync: Successfully synced ${successCount} offline images to cloud! ✨`);
+            if (typeof UI !== 'undefined' && UI.showToast) {
+                UI.showToast(`تمت مزامنة ${successCount} صورة معلقة في السحابة بنجاح ✨`, 'success');
+            }
+            if (window.App?.refreshAllViews) window.App.refreshAllViews();
         }
     }
 };

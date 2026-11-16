@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.7.9)
+ * Dawaa App Orchestrator (v18.8.0)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.7.9', // High-Speed Image Engine v18.7.9
+    VERSION: '18.8.0', // Pro Image & Camera Suite v18.8.0
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -55,19 +55,26 @@ const App = {
                 return null;
             }
 
-            // Ensure we upload a compressed lightweight JPEG blob (max 800px, ~40KB)
+            // Ensure we upload a compressed lightweight WebP/JPEG blob (max 600px square, ~20KB)
             let uploadBlob = fileOrBlob;
+            let mimeType = 'image/webp';
             if (fileOrBlob instanceof File && typeof Utils !== 'undefined' && Utils.compressImage) {
                 try {
-                    const comp = await Utils.compressImage(fileOrBlob, 800, 0.75);
-                    if (comp?.blob) uploadBlob = comp.blob;
+                    const comp = await Utils.compressImage(fileOrBlob, { maxDimension: 600, quality: 0.8, cropSquare: true });
+                    if (comp?.blob) {
+                        uploadBlob = comp.blob;
+                        mimeType = comp.format === 'WebP' ? 'image/webp' : 'image/jpeg';
+                    }
                 } catch (ce) {
                     console.warn('Pre-upload compression fallback:', ce);
                 }
+            } else if (fileOrBlob?.type) {
+                mimeType = fileOrBlob.type;
             }
 
-            const storageRef = stor.ref(`medicine_images/${medId}_${Date.now()}.jpg`);
-            const metadata = { contentType: 'image/jpeg', cacheControl: 'public,max-age=2592000' };
+            const ext = mimeType === 'image/webp' ? 'webp' : 'jpg';
+            const storageRef = stor.ref(`medicine_images/${medId}_${Date.now()}.${ext}`);
+            const metadata = { contentType: mimeType, cacheControl: 'public,max-age=31536000' };
             const snapshot = await storageRef.put(uploadBlob, metadata);
             return await snapshot.ref.getDownloadURL();
         } catch (err) {
@@ -77,7 +84,25 @@ const App = {
     },
 
     /**
-     * Offline Guard & Network Monitor (v17.2.0)
+     * Cloud Storage Garbage Collector (v18.8.0)
+     */
+    async deleteStorageImage(imageUrl) {
+        if (!imageUrl || typeof imageUrl !== 'string' || !imageUrl.includes('firebasestorage.googleapis.com')) return;
+        try {
+            const stor = (typeof window.storage !== 'undefined' ? window.storage : null) || 
+                         (typeof storage !== 'undefined' ? storage : null) || 
+                         (window.firebase?.storage ? window.firebase.storage() : null);
+            if (!stor || typeof stor.refFromURL !== 'function') return;
+            const ref = stor.refFromURL(imageUrl);
+            await ref.delete();
+            console.log('Storage GC: Cleaned up orphaned cloud image:', imageUrl);
+        } catch (e) {
+            console.warn('Storage GC notice:', e.message);
+        }
+    },
+
+    /**
+     * Offline Guard & Network Monitor (v18.8.0)
      */
     initNetworkMonitor() {
         const updateNetworkUI = (isOnline) => {
@@ -93,6 +118,9 @@ const App = {
             updateNetworkUI(true);
             if (window.UI) UI.showToast('تم استعادة الاتصال بالإنترنت 🌐 جاري مزامنة التغييرات المعلقة...', 'success');
             try {
+                if (typeof window.Sync?.processPendingImageQueue === 'function') {
+                    window.Sync.processPendingImageQueue().catch(() => {});
+                }
                 const { SyncV2 } = await import('./core/sync_v2.js');
                 if (SyncV2 && typeof SyncV2.pushLocalChanges === 'function') {
                     await SyncV2.pushLocalChanges();
@@ -716,7 +744,7 @@ const App = {
                         </span>
                         
                         <div class="card-img" style="overflow:hidden">
-                            <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover">
+                            <img src="${imgUrl}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover">
                         </div>
                         <div class="card-info">
                             <h3>
@@ -804,7 +832,7 @@ const App = {
                             <div class="med-card-btn">
                                 <div class="med-card-main" onclick="window.App.openMedicineDetails('${m.id}')">
                                     <div class="med-image">
-                                        <img src="${imgSrc}" onerror="this.src='assets/icons/default-med.png'">
+                                        <img src="${imgSrc}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';">
                                     </div>
                                     <div class="med-info-overlay">
                                         <h4>${m.nameEN} <span class="med-id-badge">#${m.id}</span></h4>
@@ -1120,9 +1148,22 @@ const App = {
                 <div class="modal-header"><h2><i class='bx bx-plus-circle'></i> إضافة دواء جديد للمستودع</h2></div>
                 <form id="form-master-med" onsubmit="event.preventDefault(); window.App.saveMasterMedicine();">
                     <div class="image-upload-wrap">
-                        <div class="image-preview" id="m-img-preview"><i class='bx bx-camera'></i></div>
-                        <label for="m-file" class="btn-upload-label">اختر صورة الدواء</label>
-                        <input type="file" id="m-file" accept="image/*" style="display:none" onchange="window.App.handleImagePreview(this, 'm-img-preview')">
+                        <div class="image-upload-top">
+                            <div class="image-preview" id="m-img-preview"><i class='bx bx-camera'></i></div>
+                            <div class="image-upload-actions">
+                                <div class="img-btn-row">
+                                    <button type="button" class="btn-img-action primary" onclick="document.getElementById('m-file-camera').click()">
+                                        <i class='bx bx-camera'></i> 📸 تصوير بالكاميرا
+                                    </button>
+                                    <button type="button" class="btn-img-action secondary" onclick="document.getElementById('m-file-gallery').click()">
+                                        <i class='bx bx-image-add'></i> 🖼️ من المعرض
+                                    </button>
+                                </div>
+                                <div id="m-img-badge" style="display:none;" class="img-status-badge"></div>
+                            </div>
+                        </div>
+                        <input type="file" id="m-file-camera" accept="image/*" capture="environment" style="display:none" onchange="window.App.handleImagePreview(this, 'm-img-preview', 'm-img-badge')">
+                        <input type="file" id="m-file-gallery" accept="image/*" style="display:none" onchange="window.App.handleImagePreview(this, 'm-img-preview', 'm-img-badge')">
                     </div>
 
                     <div class="form-group" style="position:relative; margin-bottom:12px;">
@@ -1215,11 +1256,27 @@ const App = {
                 <div class="modal-header"><h2>تعديل صنف المستودع ✏️</h2></div>
                 <form id="form-edit-med" onsubmit="event.preventDefault(); window.App.updateMasterMedicine('${id}');">
                     <div class="image-upload-wrap">
-                        <div class="image-preview" id="e-img-preview">
-                            <img src="${currentImg}" onerror="this.src='assets/icons/default-med.png'">
+                        <div class="image-upload-top">
+                            <div class="image-preview" id="e-img-preview">
+                                <img src="${currentImg}" onerror="this.src='assets/icons/default-med.png'">
+                            </div>
+                            <div class="image-upload-actions">
+                                <div class="img-btn-row">
+                                    <button type="button" class="btn-img-action primary" onclick="document.getElementById('e-file-camera').click()">
+                                        <i class='bx bx-camera'></i> 📸 تصوير بالكاميرا
+                                    </button>
+                                    <button type="button" class="btn-img-action secondary" onclick="document.getElementById('e-file-gallery').click()">
+                                        <i class='bx bx-image-add'></i> 🖼️ من المعرض
+                                    </button>
+                                    <button type="button" class="btn-img-action danger" onclick="window.App.removeMedicineImage('e')">
+                                        <i class='bx bx-trash'></i> إزالة
+                                    </button>
+                                </div>
+                                <div id="e-img-badge" style="display:none;" class="img-status-badge"></div>
+                            </div>
                         </div>
-                        <label for="e-file" class="btn-upload-label">تغيير الصورة</label>
-                        <input type="file" id="e-file" accept="image/*" style="display:none" onchange="window.App.handleImagePreview(this, 'e-img-preview')">
+                        <input type="file" id="e-file-camera" accept="image/*" capture="environment" style="display:none" onchange="window.App.handleImagePreview(this, 'e-img-preview', 'e-img-badge')">
+                        <input type="file" id="e-file-gallery" accept="image/*" style="display:none" onchange="window.App.handleImagePreview(this, 'e-img-preview', 'e-img-badge')">
                     </div>
 
                     <div class="form-group mb-12">
@@ -1296,32 +1353,66 @@ const App = {
         }
     },
 
-    async handleImagePreview(input, previewId) {
+    async handleImagePreview(input, previewId, badgeId) {
         if (!input.files || !input.files[0]) return;
         const file = input.files[0];
         const container = document.getElementById(previewId);
+        const badge = badgeId ? document.getElementById(badgeId) : null;
+
         if (container) {
-            container.innerHTML = `<i class='bx bx-loader-alt bx-spin' style='font-size:24px; color:var(--primary);'></i>`;
+            container.innerHTML = `<i class='bx bx-loader-alt bx-spin' style='font-size:32px; color:var(--primary);'></i>`;
         }
 
         try {
+            // High-speed Smart 1:1 Center-Square Crop & WebP compression (~15-25KB, <20ms)
             const result = (typeof Utils !== 'undefined' && Utils.compressImage)
-                ? await Utils.compressImage(file, 800, 0.75)
-                : { blob: file, dataUrl: await Utils.fileToBase64(file) };
+                ? await Utils.compressImage(file, { maxDimension: 600, quality: 0.8, cropSquare: true })
+                : { blob: file, dataUrl: await Utils.fileToBase64(file), sizeKB: Math.round(file.size / 1024), format: 'RAW' };
 
-            input._compressedBlob = result.blob;
-            input._compressedDataUrl = result.dataUrl;
+            window.App._activeImageData = {
+                blob: result.blob,
+                dataUrl: result.dataUrl,
+                sizeKB: result.sizeKB,
+                format: result.format,
+                removed: false
+            };
 
             if (container) {
                 container.innerHTML = `<img src="${result.dataUrl}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;">`;
+            }
+
+            if (badge) {
+                badge.style.display = 'inline-flex';
+                badge.style.background = '#ecfdf5';
+                badge.style.color = '#059669';
+                badge.style.borderColor = '#a7f3d0';
+                badge.innerHTML = `<i class='bx bx-check-shield'></i> تم القص والضغط الذكي: ${result.sizeKB} KB (${result.format}) ⚡`;
             }
         } catch (err) {
             console.warn('Image preview compression fallback:', err);
             if (container && typeof Utils !== 'undefined' && Utils.fileToBase64) {
                 const fallbackUrl = await Utils.fileToBase64(file);
+                window.App._activeImageData = { blob: file, dataUrl: fallbackUrl, sizeKB: Math.round(file.size / 1024), format: 'RAW', removed: false };
                 container.innerHTML = `<img src="${fallbackUrl}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;">`;
             }
         }
+    },
+
+    removeMedicineImage(prefix = 'm') {
+        window.App._activeImageData = { removed: true, dataUrl: 'assets/icons/default-med.png', blob: null };
+        const container = document.getElementById(`${prefix}-img-preview`);
+        const badge = document.getElementById(`${prefix}-img-badge`);
+        if (container) {
+            container.innerHTML = `<i class='bx bx-capsule' style='font-size:36px; color:var(--text-muted);'></i>`;
+        }
+        if (badge) {
+            badge.style.display = 'inline-flex';
+            badge.style.background = '#fef2f2';
+            badge.style.color = '#ef4444';
+            badge.style.borderColor = '#fca5a5';
+            badge.innerHTML = `<i class='bx bx-trash'></i> تم اختيار الأيقونة الافتراضية`;
+        }
+        UI.showToast('تمت إزالة الصورة واختيار الأيقونة الافتراضية', 'info');
     },
 
     async saveMasterMedicine() {
@@ -1343,24 +1434,19 @@ const App = {
                 return UI.showToast('يرجى ملء اسم الدواء واختيار القسم', 'warning');
             }
 
-            const fileInput = document.getElementById('m-file');
-            let imgData = '';
+            let imgData = 'assets/icons/default-med.png';
             let fileBlob = null;
 
-            if (fileInput && fileInput.files && fileInput.files[0]) {
-                const rawFile = fileInput.files[0];
-                if (fileInput._compressedDataUrl && fileInput._compressedBlob) {
-                    imgData = fileInput._compressedDataUrl;
-                    fileBlob = fileInput._compressedBlob;
-                } else if (typeof Utils !== 'undefined' && Utils.compressImage) {
-                    const comp = await Utils.compressImage(rawFile, 800, 0.75);
-                    imgData = comp.dataUrl;
-                    fileBlob = comp.blob;
-                } else {
-                    imgData = await Utils.fileToBase64(rawFile);
-                    fileBlob = rawFile;
+            if (this._activeImageData) {
+                if (this._activeImageData.removed) {
+                    imgData = 'assets/icons/default-med.png';
+                    fileBlob = null;
+                } else if (this._activeImageData.dataUrl) {
+                    imgData = this._activeImageData.dataUrl;
+                    fileBlob = this._activeImageData.blob;
                 }
             }
+            this._activeImageData = null;
 
             const medId = barcode || (await Categories.generateNextId()) || ('med_' + Date.now());
             const now = new Date().toISOString();
@@ -1374,7 +1460,7 @@ const App = {
                 barcode: barcode || medId,
                 type,
                 allowedLocations: selectedLocIds.length > 0 ? selectedLocIds : null,
-                imagePath: imgData || 'assets/icons/default-med.png',
+                imagePath: imgData,
                 syncStatus: 'local',
                 createdAt: now
             };
@@ -1398,7 +1484,7 @@ const App = {
 
             await this.refreshAllViews(sourceCat);
 
-            // Fast Cloud Sync & Image Upload
+            // Fast Cloud Sync & Image Upload with Offline Queue Fallback
             if (shouldSync) {
                 if (fileBlob && typeof this.uploadImage === 'function') {
                     this.uploadImage(fileBlob, medId).then(async (url) => {
@@ -1410,8 +1496,15 @@ const App = {
                                 if (typeof Sync !== 'undefined' && Sync.push) await Sync.push(medId);
                                 await this.refreshAllViews(sourceCat);
                             }
+                        } else if (imgData?.startsWith('data:image') && typeof Sync !== 'undefined' && Sync.enqueuePendingImage) {
+                            Sync.enqueuePendingImage(medId, imgData);
                         }
-                    }).catch(e => console.warn('Cloud image upload warning:', e));
+                    }).catch(e => {
+                        console.warn('Cloud image upload warning, queued for offline sync:', e);
+                        if (imgData?.startsWith('data:image') && typeof Sync !== 'undefined' && Sync.enqueuePendingImage) {
+                            Sync.enqueuePendingImage(medId, imgData);
+                        }
+                    });
                 }
                 if (typeof Sync !== 'undefined' && Sync.push) {
                     await Sync.push(medId);
@@ -1428,25 +1521,29 @@ const App = {
 
     async updateMasterMedicine(id) {
         try {
-            const fileInput = document.getElementById('e-file');
             const med = await DB.get('medicineMaster', id);
+            let imgData = med.imagePath || 'assets/icons/default-med.png';
             let fileBlob = null;
-            
-            let imgData = med.imagePath;
-            if (fileInput && fileInput.files && fileInput.files[0]) {
-                const rawFile = fileInput.files[0];
-                if (fileInput._compressedDataUrl && fileInput._compressedBlob) {
-                    imgData = fileInput._compressedDataUrl;
-                    fileBlob = fileInput._compressedBlob;
-                } else if (typeof Utils !== 'undefined' && Utils.compressImage) {
-                    const comp = await Utils.compressImage(rawFile, 800, 0.75);
-                    imgData = comp.dataUrl;
-                    fileBlob = comp.blob;
-                } else {
-                    imgData = await Utils.fileToBase64(rawFile);
-                    fileBlob = rawFile;
+            let imageChanged = false;
+
+            if (this._activeImageData) {
+                imageChanged = true;
+                if (this._activeImageData.removed) {
+                    imgData = 'assets/icons/default-med.png';
+                    fileBlob = null;
+                    if (med.imagePath && typeof this.deleteStorageImage === 'function') {
+                        this.deleteStorageImage(med.imagePath).catch(() => {});
+                    }
+                } else if (this._activeImageData.dataUrl) {
+                    imgData = this._activeImageData.dataUrl;
+                    fileBlob = this._activeImageData.blob;
+                    // Delete old storage image if replacing with a new one
+                    if (med.imagePath && typeof this.deleteStorageImage === 'function') {
+                        this.deleteStorageImage(med.imagePath).catch(() => {});
+                    }
                 }
             }
+            this._activeImageData = null;
 
             const selectedLocIds = [];
             document.querySelectorAll('input[name="e-locations"]:checked').forEach(cb => {
@@ -1472,11 +1569,11 @@ const App = {
             UI.showToast('تم تحديث بيانات الدواء بنجاح ✨', 'success');
             await this.refreshAllViews(updated.categoryId);
 
-            // Cloud Upload & Sync
+            // Cloud Upload & Sync with Offline Queue
             const shouldSyncEdit = document.getElementById('e-sync')?.checked ?? true;
             if (shouldSyncEdit) {
-                if (fileBlob && typeof this.uploadImage === 'function') {
-                    UI.showToast('جاري تحديث الصورة في السحابة... ☁️', 'info');
+                if (imageChanged && fileBlob && typeof this.uploadImage === 'function') {
+                    UI.showToast('جاري رفع وتحديث الصورة في السحابة... ☁️', 'info');
                     this.uploadImage(fileBlob, id).then(async (url) => {
                         if (url) {
                             const m = await DB.get('medicineMaster', id);
@@ -1487,8 +1584,15 @@ const App = {
                                 await this.refreshAllViews(m.categoryId);
                                 UI.showToast('تم تحديث الصورة السحابية بنجاح ✨', 'success');
                             }
+                        } else if (imgData?.startsWith('data:image') && typeof Sync !== 'undefined' && Sync.enqueuePendingImage) {
+                            Sync.enqueuePendingImage(id, imgData);
                         }
-                    }).catch(e => console.warn('Cloud image upload warning:', e));
+                    }).catch(e => {
+                        console.warn('Cloud image upload warning, queued:', e);
+                        if (imgData?.startsWith('data:image') && typeof Sync !== 'undefined' && Sync.enqueuePendingImage) {
+                            Sync.enqueuePendingImage(id, imgData);
+                        }
+                    });
                 }
                 if (typeof Sync !== 'undefined' && Sync.push) {
                     await Sync.push(id);
@@ -2500,7 +2604,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         return `
                             <div class="cat-med-item" style="display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:12px;">
                                 <div style="width:40px; height:40px; border-radius:8px; overflow:hidden; flex-shrink:0;">
-                                    <img src="${img}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                                    <img src="${img}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                                 </div>
                                 <div style="flex:1; min-width:0;">
                                     <h4 style="margin:0; font-size:13px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${m.nameEN || m.nameAR}</h4>
@@ -3897,7 +4001,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         <i class='bx bx-check'></i> تم
                     </span>
                     <div style="width: 38px; height: 38px; border-radius: 8px; overflow: hidden; margin-bottom: 4px; flex-shrink: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <img src="${imgUrl}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                        <img src="${imgUrl}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                     </div>
                     <h3 style="font-size: 11.5px; font-weight: 800; margin: 0 0 2px 0; line-height: 1.25; word-break: break-word;">${safePrimary}</h3>
                     ${safeSecondary ? `<div style="font-size: 10px; color: var(--text-muted); margin-bottom: 2px; line-height: 1.2; word-break: break-word;">${safeSecondary}</div>` : ''}
@@ -3917,7 +4021,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             return `
                 <div class="square-card" onclick="window.App.openCountModal('${med.id}')" title="انقر لتسجيل العد" style="cursor:pointer;">
                     <div style="width: 38px; height: 38px; border-radius: 8px; overflow: hidden; margin-bottom: 4px; background: rgba(59,130,246,0.06); display:flex; align-items:center; justify-content:center; flex-shrink: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
-                        <img src="${imgUrl}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                        <img src="${imgUrl}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                     </div>
                     <h3 style="font-size: 11.5px; font-weight: 800; margin: 0 0 2px 0; line-height: 1.25; word-break: break-word;">${safePrimary}</h3>
                     ${safeSecondary ? `<div style="font-size: 10px; color: var(--text-muted); margin-bottom: 2px; line-height: 1.2; word-break: break-word;">${safeSecondary}</div>` : ''}
@@ -4275,7 +4379,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             
             <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; padding:10px; background:var(--bg-secondary); border-radius:12px;">
                 <div style="width:46px; height:46px; border-radius:10px; overflow:hidden; flex-shrink:0;">
-                    <img src="${imgUrl}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                    <img src="${imgUrl}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                 </div>
                 <div style="flex:1; min-width:0;">
                     <h3 style="margin:0; font-size:14px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${med.nameEN || med.nameAR}</h3>

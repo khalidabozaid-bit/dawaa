@@ -472,6 +472,13 @@ export const Categories = {
     },
 
     async deleteMedicine(id) {
+        try {
+            const med = await DB.get('medicineMaster', id);
+            if (med?.imagePath && typeof window.App?.deleteStorageImage === 'function') {
+                window.App.deleteStorageImage(med.imagePath).catch(() => {});
+            }
+        } catch (e) {}
+
         await DB.delete('medicineMaster', id);
         // Also cleanup inventory for this medicine
         const inv = await DB.getAll('inventory');
