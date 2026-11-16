@@ -1769,23 +1769,6 @@ const App = {
         return this.deleteCategoryConfirm(catId);
     },
 
-            UI.showModal(`
-                <div class="modal-header"><h2>حذف قسم: ${cat.nameAR}</h2></div>
-                <div class="info-card warning mb-20">
-                    <i class='bx bx-error'></i>
-                    <p>هذا القسم يحتوي على <strong>${meds.length}</strong> دواء مسجل. ماذا تريد أن تفعل بالأدوية؟</p>
-                </div>
-                <div style="display:flex; flex-direction:column; gap:12px">
-                    <button class="btn-primary" onclick="window.App.executeDeleteCategory('${catId}', 'move')">📦 نقل الأدوية لـ "غير مصنف" ثم الحذف</button>
-                    <button class="btn-secondary" style="background:#fee2e2; color:#ef4444" onclick="window.App.executeDeleteCategory('${catId}', 'delete_all')">🗑️ حذف القسم بكل ما فيه نهائياً</button>
-                    <button class="btn-ghost" onclick="window.App.openManageCategories()">إلغاء</button>
-                </div>
-            `);
-        } catch (err) {
-            UI.showToast('خطأ في معالجة الحذف', 'danger');
-        }
-    },
-
     async executeDeleteCategory(catId, action) {
         try {
             const meds = await Categories.getMedicinesByCategoryId(catId);
