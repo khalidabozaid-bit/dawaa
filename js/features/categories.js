@@ -208,17 +208,20 @@ export const Categories = {
                 }
             }
 
-            // 4. Clean up obsolete legacy categories from 'categories' store
-            // (e.g. 'NSAID', 'Anti-Flu', 'Laryng.', 'GIT Prep', 'Local Prep', 'Eye-Ear-Nose')
+            // 4. Clean up obsolete legacy categories and empty ghost categories from 'categories' store
+            // (e.g. 'NSAID', 'Anti-Flu', 'Laryng.', 'GIT Prep', 'Local Prep', 'Eye-Ear-Nose', and old 'cat_*')
             const obsoleteIds = ['nsaid', 'anti-flu', 'laryng.', 'git prep', 'local prep', 'eye-ear-nose'];
             const freshMeds = (await DB.getAll('medicineMaster')) || [];
             
             for (const cat of allCats) {
-                if (cat.id && obsoleteIds.includes(cat.id.toLowerCase())) {
-                    // Check if any medicines are still referencing this legacy category
+                const lowerId = (cat.id || '').toLowerCase();
+                const isObsoleteId = obsoleteIds.includes(lowerId);
+                const isGhostCat = lowerId.startsWith('cat_') || !cat.nameAR || cat.nameAR === 'undefined';
+                if (cat.id && cat.id !== 'uncategorized' && (isObsoleteId || isGhostCat)) {
+                    // Check if any medicines are still referencing this category
                     const stillUsed = freshMeds.some(m => m.categoryId === cat.id);
                     if (!stillUsed) {
-                        console.log(`Dawaa Migration: Removing obsolete empty category '${cat.id}'`);
+                        console.log(`Dawaa Migration: Removing obsolete/ghost empty category '${cat.id}'`);
                         await DB.delete('categories', cat.id);
                         if (typeof window.Sync !== 'undefined' && window.Sync.deleteCategory) {
                             window.Sync.deleteCategory(cat.id).catch(() => {});
