@@ -13,7 +13,6 @@ import { Utils } from './core/utils.js';
 import { Sync } from './core/sync.js';
 import { TaskManager } from './features/tasks.js';
 import { auth, db, storage } from './core/firebase-config.js';
-import { Recovery } from './recovery.js';
 
 // Immediate Global Bindings to prevent undefined calls during boot
 window.UI = UI;
@@ -28,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v17.2.0 - Sovereign Reset)
+ * Dawaa App Orchestrator (v18.6.4)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.6.3', // Universal Sovereign v18.6.3
+    VERSION: '18.6.4', // Universal Sovereign v18.6.4
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -255,45 +254,11 @@ const App = {
     },
 
     /**
-     * The Double-Tap Update Protocol (v9.8.5)
+     * Update check delegated to primary App.checkUpdate engine
      */
     async checkUpdate() {
-        const btn = document.querySelector('.setting-card[onclick*="checkUpdate"]');
-        const statusText = document.getElementById('update-status-text');
-        const title = btn?.querySelector('h3');
-
-        // Check if we are in Step 2 (Update Found)
-        if (this.swRegistration && this.swRegistration.waiting) {
-            UI.showToast('جاري تثبيت التحديث... يرجى الانتظار 🔄', 'info');
-            this.applyUpdate();
-            return;
-        }
-
-        // Step 1: Check for Updates
-        if (statusText) statusText.textContent = 'جاري البحث عن إصدارات جديدة... 🔍';
-        if (title) title.textContent = 'جاري الفحص...';
-        
-        try {
-            if (this.swRegistration) {
-                await this.swRegistration.update();
-                
-                // Allow some time for SW to detect
-                setTimeout(() => {
-                    if (this.swRegistration.waiting) {
-                        if (statusText) statusText.textContent = 'تم العثور على إصدار جديد! اضغط مرة أخرى للتثبيت ⚡';
-                        if (title) title.textContent = 'تثبيت التحديث الآن';
-                        if (btn) btn.classList.add('info-accent'); // Highlight
-                        UI.showToast('يوجد تحديث جاهز للتثبيت ✨', 'success');
-                    } else {
-                        if (statusText) statusText.textContent = 'أنت تستخدم أحدث إصدار من دواء ✅';
-                        if (title) title.textContent = 'النظام محدث';
-                        UI.showToast('نظامك محدث بالكامل ✅', 'success');
-                    }
-                }, 1500);
-            }
-        } catch (err) {
-            console.error('Update Check Fail:', err);
-            UI.showToast('فشل التحقق من التحديث', 'danger');
+        if (typeof App !== 'undefined' && App.checkUpdate && App.checkUpdate !== this.checkUpdate) {
+            return App.checkUpdate();
         }
     },
 
@@ -1386,41 +1351,19 @@ const App = {
         }
     },
 
-    async exportAuditSession(auditId) {
-        UI.showToast('جاري تجهيز تقرير الجرد... 📊', 'info');
-        const entries = await Inventory.getEntriesByAudit(auditId);
-        if (entries.length === 0) return UI.showToast('لا توجد بيانات لتصديرها لهذا الجرد', 'warning');
-        
-        const master = await DB.getAll('medicineMaster');
-        const masterMap = new Map(master.map(m => [m.id, m]));
-
-        const reportData = entries.map(e => ({
-            'اسم الدواء AR': masterMap.get(e.medicineId)?.nameAR || 'Unknown',
-            'اسم الدواء EN': masterMap.get(e.medicineId)?.nameEN || 'Unknown',
-            'المكان': e.location,
-            'الكمية': e.quantity,
-            'تاريخ الصلاحية': e.expiryDate || 'N/A',
-            'توقيت الإضافة': new Date(e.timestamp).toLocaleString('ar-EG'),
-            'كود الصنف': e.medicineId
-        }));
-
-        Exporter.exportToExcel(reportData, `Audit_Report_${new Date().toISOString().split('T')[0]}`);
-        UI.showToast('تم التصدير بنجاح! ✅', 'success');
-    },
-
-    // v16.2.3: Decommissioned Legacy Audit Engine (Now using Unified Task Logic)
-
-
     async deleteMasterMedicine(id) {
-        if (confirm('هل أنت متأكد؟ سيتم حذف الصنف من المستودع نهائياً.')) {
-            try {
-                await Categories.deleteMedicine(id);
-                UI.showToast('تم الحذف', 'info');
-                UI.closeModal();
-                this.renderInventory(); this.renderDashboard();
-            } catch (err) {
-                UI.showToast(err.message, 'danger');
-            }
+        if (!confirm('🚨 تحذير: حذف الصنف سيحذف كافة بيانات الجرد والمخزون المرتبطة به من المستودع. هل أنت متأكد؟')) return;
+        try {
+            UI.showToast('جاري حذف الصنف... 🗑️', 'info');
+            await Categories.deleteMedicine(id);
+            UI.showToast('تم حذف الصنف والجرد بالكامل 🗑️', 'warning');
+            UI.closeModal();
+            if (this.selectedCategoryId) this.openCategory(this.selectedCategoryId);
+            if (this.renderInventory) await this.renderInventory();
+            if (this.renderDashboard) this.renderDashboard();
+            if (this.warehouseSegment && this.renderWarehouseSegment) this.renderWarehouseSegment();
+        } catch (err) {
+            UI.showToast('فشل الحذف: ' + err.message, 'danger');
         }
     },
 
@@ -1975,7 +1918,7 @@ App.handleBackup = async function() {
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.6.3'
+            version: '18.6.4'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -4273,6 +4216,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
  * Clears all local caches and signs out to fix corrupted states.
  */
 App.recoveryReset = async function() {
+    if (!confirm('🚨 تحذير نهائي: سيتم مسح كافة البيانات المخزنة محلياً وإعادة ضبط النظام بالكامل للبدء من الصفر. هل أنت متأكد؟')) return;
     console.log('Recovery: Initiating full reset...');
     try {
         // 1. Clear LocalStorage
@@ -4327,22 +4271,6 @@ App.updateAdminUI = function() {
     }
     if (window.UI && UI.currentView === 'dashboard') {
         this.renderDashboard();
-    }
-};
-
-App.deleteMasterMedicine = async function(id) {
-    if (!confirm('🚨 تحذير: حذف الصنف سيحذف كافة بيانات الجرد المرتبطة به من المستودع. هل أنت متأكد؟')) return;
-    try {
-        UI.showToast('جاري حذف الصنف... 🗑️', 'info');
-        await DB.delete('medicineMaster', id);
-        const entries = await DB.getAll('inventory');
-        for (let entry of entries) {
-            if (entry.medicineId === id) await DB.delete('inventory', entry.id);
-        }
-        UI.showToast('تم حذف الصنف والجرد بالكامل 🗑️', 'warning');
-        if (this.selectedCategoryId) this.openCategory(this.selectedCategoryId);
-    } catch (err) {
-        UI.showToast('فشل الحذف', 'danger');
     }
 };
 
