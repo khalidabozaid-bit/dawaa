@@ -33,7 +33,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.6.2', // Universal Sovereign v18.6.2
+    VERSION: '18.6.3', // Universal Sovereign v18.6.3
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1975,7 +1975,7 @@ App.handleBackup = async function() {
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.6.2'
+            version: '18.6.3'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });

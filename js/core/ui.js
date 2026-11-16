@@ -83,7 +83,8 @@ export const UI = {
         if (icon) icon.className = isDark ? 'bx bx-sun' : 'bx bx-moon';
     },
 
-    updateDashboardStats(stats) {
+    updateDashboardStats(stats = {}) {
+        if (!stats) stats = {};
         const elements = {
             total: document.getElementById('stat-total-items'),
             low: document.getElementById('stat-low-stock'),
@@ -187,27 +188,34 @@ export const UI = {
         toast.className = `toast toast-${type}`;
         
         const isError = type === 'danger';
-        toast.innerHTML = `
-            <i class='bx ${type === 'success' ? 'bx-check-circle' : 'bx-info-circle'}'></i>
-            <span>${message}</span>
-            ${isError ? `<button class="toast-copy-btn" onclick="UI.copyErrorReport('${message}')"><i class='bx bx-copy'></i></button>` : ''}
-        `;
-        document.body.appendChild(toast);
+        const iconClass = type === 'success' ? 'bx-check-circle' : (type === 'danger' ? 'bx-error-circle' : 'bx-info-circle');
         
+        const icon = document.createElement('i');
+        icon.className = `bx ${iconClass}`;
+        
+        const span = document.createElement('span');
+        span.textContent = message;
+
+        toast.appendChild(icon);
+        toast.appendChild(span);
+
+        if (isError) {
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'toast-copy-btn';
+            copyBtn.title = 'نسخ تفاصيل الخطأ';
+            copyBtn.innerHTML = "<i class='bx bx-copy'></i>";
+            copyBtn.onclick = () => UI.copyErrorReport(message);
+            toast.appendChild(copyBtn);
+        }
+
+        document.body.appendChild(toast);
         setTimeout(() => toast.classList.add('show'), 10);
         
-        if (!isError) {
-            setTimeout(() => {
-                toast.classList.remove('show');
-                setTimeout(() => toast.remove(), 300);
-            }, 3000);
-        } else {
-            // Keep error toasts longer or until closed (optional)
-            setTimeout(() => {
-                toast.classList.remove('show');
-                setTimeout(() => toast.remove(), 6000);
-            }, 6000);
-        }
+        const duration = isError ? 6000 : 3000;
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        }, duration);
     },
 
     copyErrorReport(msg) {

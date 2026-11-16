@@ -34,9 +34,10 @@ export const Users = {
     getAll() {
         this.ensureDefaultTeam();
         try {
-            return JSON.parse(localStorage.getItem(this.STORAGE_KEY)) || DEFAULT_TEAM;
+            const stored = JSON.parse(localStorage.getItem(this.STORAGE_KEY));
+            return (Array.isArray(stored) && stored.length > 0) ? stored : JSON.parse(JSON.stringify(DEFAULT_TEAM));
         } catch (e) {
-            return DEFAULT_TEAM;
+            return JSON.parse(JSON.stringify(DEFAULT_TEAM));
         }
     },
 
@@ -98,7 +99,8 @@ export const Users = {
         const idx = team.findIndex(u => u.id === id);
         if (idx === -1) return null;
         if (name && name.trim()) team[idx].name = name.trim();
-        if (title !== undefined) team[idx].title = title.trim();
+        if (title) team[idx].title = title.trim();
+        else if (title === '') team[idx].title = '';
         if (role) {
             team[idx].role = role;
             team[idx].icon = role === 'admin' ? 'bx-shield-quarter' : 'bx-user';
@@ -117,13 +119,30 @@ export const Users = {
     deleteUser(id) {
         const active = this.getActive();
         if (active.id === id) {
-            UI.showToast('لا يمكن حذف المستخدم النشط حالياً', 'warning');
+            UI.showToast('لا يمكن حذف المستخدم النشط حالياً ⚠️', 'warning');
             return false;
         }
         let team = this.getAll();
+        const user = team.find(u => u.id === id);
+        if (!user) {
+            UI.showToast('المستخدم غير موجود', 'warning');
+            return false;
+        }
+        if (user.role === 'admin') {
+            const adminCount = team.filter(u => u.role === 'admin').length;
+            if (adminCount <= 1) {
+                UI.showToast('لا يمكن حذف المسؤول الوحيد للنظام 🛡️', 'warning');
+                return false;
+            }
+        }
         team = team.filter(u => u.id !== id);
-        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(team));
-        UI.showToast('تم حذف المستخدم من الفريق', 'info');
-        return true;
+        try {
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(team));
+            UI.showToast(`تم حذف ${user.name} من فريق العمل`, 'info');
+            return true;
+        } catch (e) {
+            UI.showToast('فشل حفظ التعديلات في الذاكرة', 'danger');
+            return false;
+        }
     }
 };

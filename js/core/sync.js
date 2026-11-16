@@ -1,3 +1,4 @@
+import { UI } from './ui.js';
 import { SyncV2 } from './sync_v2.js';
 import { DB } from './db.js';
 import { db } from './firebase-config.js';
@@ -175,12 +176,14 @@ export const Sync = {
     async broadcastAuditStatus(session) {
         if (window.App?.userRole !== 'admin') return;
         try {
+            const hostName = window.App?.user?.displayName || window.App?.user?.email || (typeof Users !== 'undefined' && Users.getActive() ? Users.getActive().name : 'صيدلي');
+            const participants = (session && session.participants && session.participants.length > 0) ? session.participants : [hostName];
             await db.collection('audits').doc('current').set({
                 ...session,
                 active: !!session,
-                participants: session ? [window.App.user.displayName || window.App.user.email] : [],
-                host: session ? (window.App.user.displayName || window.App.user.email) : null,
-                updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+                participants: participants,
+                host: hostName,
+                updatedAt: (window.firebase?.firestore?.FieldValue?.serverTimestamp ? window.firebase.firestore.FieldValue.serverTimestamp() : new Date().toISOString())
             });
         } catch (err) {
             console.warn('Sync: Failed to broadcast audit status', err);

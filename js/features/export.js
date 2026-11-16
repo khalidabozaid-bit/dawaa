@@ -7,13 +7,35 @@ import { Inventory } from './inventory.js';
  */
 
 export const Exporter = {
-    async exportToExcel(type = 'full', options = {}) {
-        console.log(`Dawaa Exporter: Starting ${type} export...`);
+    async exportToExcel(typeOrData = 'full', optionsOrFileName = {}) {
+        if (typeof XLSX === 'undefined') {
+            alert('أداة تصدير Excel غير متوفرة حالياً، يرجى التحقق من اتصال الإنترنت');
+            return;
+        }
+
+        // Case A: Passed raw report array
+        if (Array.isArray(typeOrData)) {
+            if (typeOrData.length === 0) {
+                alert('لا توجد بيانات لتصديرها');
+                return;
+            }
+            const fileName = (typeof optionsOrFileName === 'string' && optionsOrFileName.trim()) 
+                ? (optionsOrFileName.endsWith('.xlsx') ? optionsOrFileName : `${optionsOrFileName}.xlsx`)
+                : `Dawaa_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
+            const worksheet = XLSX.utils.json_to_sheet(typeOrData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Report");
+            XLSX.writeFile(workbook, fileName);
+            return;
+        }
+
+        // Case B: Passed report type filter string
+        const type = typeof typeOrData === 'string' ? typeOrData : 'full';
+        const options = (typeof optionsOrFileName === 'object' && optionsOrFileName !== null) ? optionsOrFileName : {};
         
         let stockProducts = await Inventory.getCurrentStockProducts();
         let data = [...stockProducts];
 
-        // Filter logic
         if (type === 'expiring') {
             const sixMonthsAway = new Date();
             sixMonthsAway.setMonth(sixMonthsAway.getMonth() + 6);
@@ -25,7 +47,7 @@ export const Exporter = {
             data = data.filter(item => (item.totalQuantity !== undefined ? item.totalQuantity : item.quantity || 0) <= 5);
         } else if (type === 'custom') {
             data = data.filter(i => {
-                const matchLoc = options.location === 'all' || (i.location === options.location);
+                const matchLoc = !options.location || options.location === 'all' || (i.location === options.location);
                 return matchLoc;
             });
         }
@@ -35,29 +57,20 @@ export const Exporter = {
             return;
         }
 
-        // Transform for Excel
-        const worksheetData = data.map(item => {
-            return {
-                'اسم الدواء (إنجليزي)': item.nameEN || 'Unknown',
-                'اسم الدواء (عربي)': item.nameAR || '-',
-                'التصنيف': item.categoryId || 'عام',
-                'الكمية المتوفرة': item.totalQuantity !== undefined ? item.totalQuantity : (item.quantity || 0),
-                'تاريخ الصلاحية': item.earliestExpiry || item.expiryDate || 'N/A',
-                'الموقع بالمستودع': (item.entries && item.entries[0] && item.entries[0].location) || item.location || 'المستودع الرئيسي'
-            };
-        });
-
-        // Use Global XLSX (exposed by script tag)
-        if (typeof XLSX === 'undefined') {
-            alert('أداة تصدير Excel غير متوفرة حالياً، يرجى التحقق من اتصال الإنترنت');
-            return;
-        }
+        const worksheetData = data.map(item => ({
+            'اسم الدواء (إنجليزي)': item.nameEN || 'Unknown',
+            'اسم الدواء (عربي)': item.nameAR || '-',
+            'التصنيف': item.categoryId || 'عام',
+            'الكمية المتوفرة': item.totalQuantity !== undefined ? item.totalQuantity : (item.quantity || 0),
+            'تاريخ الصلاحية': item.earliestExpiry || item.expiryDate || 'N/A',
+            'الموقع بالمستودع': item.location || 'المستودع الرئيسي'
+        }));
 
         const worksheet = XLSX.utils.json_to_sheet(worksheetData);
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "Inventory");
         
-        const typeArabic = type === 'expiring' ? 'تنبيه_الصلاحيات' : (type === 'low-stock' ? 'الارصدة_الحرجة' : 'المخزون_الشامل');
+        const typeArabic = type === 'expiring' ? 'تنبيه_الصلاحيات' : (type === 'low-stock' ? 'الأرصدة_الحرجة' : 'المخزون_الشامل');
         const fileName = `Dawaa_${typeArabic}_${new Date().toISOString().split('T')[0]}.xlsx`;
         XLSX.writeFile(workbook, fileName);
     },
