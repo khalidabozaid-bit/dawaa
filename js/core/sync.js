@@ -482,17 +482,34 @@ export const Sync = {
         try {
             const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
             if (!firestore || !cat || !cat.id) return;
+            const timestamp = (window.firebase?.firestore?.FieldValue?.serverTimestamp ? window.firebase.firestore.FieldValue.serverTimestamp() : (typeof firebase !== 'undefined' && firebase.firestore?.FieldValue?.serverTimestamp ? firebase.firestore.FieldValue.serverTimestamp() : new Date().toISOString()));
             await firestore.collection('categories').doc(cat.id).set({
                 id: cat.id,
                 nameAR: cat.nameAR,
                 nameEN: cat.nameEN || cat.id,
                 icon: cat.icon || 'bx-category',
                 color: cat.color || '#3b82f6',
-                updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+                isSystem: !!cat.isSystem,
+                updatedAt: timestamp
             }, { merge: true });
             console.log(`Sync: Category ${cat.id} pushed to cloud ☁️`);
         } catch (e) {
             console.warn('Sync Category Push notice:', e.message);
+        }
+    },
+
+    async pushAllCategories() {
+        try {
+            const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+            if (!firestore) return;
+            const localCats = (await DB.getAll('categories')) || [];
+            for (const cat of localCats) {
+                if (!cat.id || cat.id === 'undefined') continue;
+                await this.pushCategory(cat);
+            }
+            console.log(`Sync: Pushed ${localCats.length} categories to cloud ☁️`);
+        } catch (e) {
+            console.warn('Sync pushAllCategories notice:', e.message);
         }
     },
 
@@ -512,6 +529,7 @@ export const Sync = {
         try {
             const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
             if (!firestore || !loc || !loc.id) return;
+            const timestamp = (window.firebase?.firestore?.FieldValue?.serverTimestamp ? window.firebase.firestore.FieldValue.serverTimestamp() : (typeof firebase !== 'undefined' && firebase.firestore?.FieldValue?.serverTimestamp ? firebase.firestore.FieldValue.serverTimestamp() : new Date().toISOString()));
             await firestore.collection('locations').doc(loc.id).set({
                 id: loc.id,
                 nameAR: loc.nameAR,
@@ -520,7 +538,8 @@ export const Sync = {
                 color: loc.color || '#3b82f6',
                 allowedCategories: loc.allowedCategories || ['all'],
                 description: loc.description || '',
-                updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+                isSystem: !!loc.isSystem,
+                updatedAt: timestamp
             }, { merge: true });
             console.log(`Sync: Location ${loc.id} pushed to cloud ☁️`);
         } catch (e) {
@@ -720,11 +739,16 @@ export const Sync = {
 
             if (firestore) {
                 const catSnap = await firestore.collection('categories').get();
-                for (const doc of catSnap.docs) {
-                    await DB.put('categories', { ...doc.data(), id: doc.id });
-                    catCount++;
+                if (!catSnap.empty) {
+                    for (const doc of catSnap.docs) {
+                        await DB.put('categories', { ...doc.data(), id: doc.id });
+                        catCount++;
+                    }
                 }
-                if (catCount > 0 && typeof Categories !== 'undefined') {
+                // Push any local categories that are missing from cloud
+                await this.pushAllCategories();
+
+                if (typeof Categories !== 'undefined') {
                     Categories.cache = null;
                     Categories._cache = null;
                     await Categories.getAllSorted();

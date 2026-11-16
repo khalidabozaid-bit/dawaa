@@ -25,6 +25,7 @@ export const db = firebase.firestore();
 export const storage = firebase.storage();
 
 // Global Window Bindings for Legacy & Fallback Support
+window.firebase = firebase;
 window.auth = auth;
 window.db = db;
 window.storage = storage;

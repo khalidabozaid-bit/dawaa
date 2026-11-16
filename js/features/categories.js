@@ -209,22 +209,31 @@ export const Categories = {
             }
 
             // 4. Clean up obsolete legacy categories and empty ghost categories from 'categories' store
-            // (e.g. 'NSAID', 'Anti-Flu', 'Laryng.', 'GIT Prep', 'Local Prep', 'Eye-Ear-Nose', and old 'cat_*')
+            // (e.g. 'NSAID', 'Anti-Flu', 'Laryng.', 'GIT Prep', 'Local Prep', 'Eye-Ear-Nose')
             const obsoleteIds = ['nsaid', 'anti-flu', 'laryng.', 'git prep', 'local prep', 'eye-ear-nose'];
             const freshMeds = (await DB.getAll('medicineMaster')) || [];
             
             for (const cat of allCats) {
                 const lowerId = (cat.id || '').toLowerCase();
                 const isObsoleteId = obsoleteIds.includes(lowerId);
-                const isGhostCat = lowerId.startsWith('cat_') || !cat.nameAR || cat.nameAR === 'undefined';
-                if (cat.id && cat.id !== 'uncategorized' && (isObsoleteId || isGhostCat)) {
-                    // Check if any medicines are still referencing this category
-                    const stillUsed = freshMeds.some(m => m.categoryId === cat.id);
-                    if (!stillUsed) {
-                        console.log(`Dawaa Migration: Removing obsolete/ghost empty category '${cat.id}'`);
+                // A ghost category is strictly one with corrupt/missing name, NOT user-created categories starting with 'cat_'
+                const isGhostCat = !cat.nameAR || cat.nameAR === 'undefined' || cat.nameAR === 'null' || !cat.nameAR.trim();
+                
+                if (cat.id && cat.id !== 'uncategorized') {
+                    if (isGhostCat) {
+                        console.log(`Dawaa Migration: Removing corrupt/ghost category without name '${cat.id}'`);
                         await DB.delete('categories', cat.id);
                         if (typeof window.Sync !== 'undefined' && window.Sync.deleteCategory) {
                             window.Sync.deleteCategory(cat.id).catch(() => {});
+                        }
+                    } else if (isObsoleteId) {
+                        const stillUsed = freshMeds.some(m => m.categoryId === cat.id);
+                        if (!stillUsed) {
+                            console.log(`Dawaa Migration: Removing obsolete empty category '${cat.id}'`);
+                            await DB.delete('categories', cat.id);
+                            if (typeof window.Sync !== 'undefined' && window.Sync.deleteCategory) {
+                                window.Sync.deleteCategory(cat.id).catch(() => {});
+                            }
                         }
                     }
                 }
@@ -352,14 +361,14 @@ export const Categories = {
     },
 
     async saveCategory(cat) {
-        if (!cat.id || cat.id === '') cat.id = Utils.generateId();
+        if (!cat.id || cat.id === '') cat.id = `cat_${Date.now()}`;
         await DB.put('categories', cat);
         this.cache = null;
         this._cache = null;
         await this.getAllSorted();
         try {
             if (typeof window.Sync !== 'undefined' && window.Sync.pushCategory) {
-                window.Sync.pushCategory(cat);
+                await window.Sync.pushCategory(cat);
             }
         } catch (e) {
             console.warn('Sync pushCategory notice:', e);

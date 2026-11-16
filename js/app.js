@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.8.1)
+ * Dawaa App Orchestrator (v18.8.2)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.8.1', // Camera Barcode Scanner & Image Lightbox Suite v18.8.1
+    VERSION: '18.8.2', // Cloud Category Persistence & Bi-directional Sync Suite v18.8.2
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2850,7 +2850,13 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             if (!med) return;
 
             med.categoryId = targetCatId;
+            med.lastUpdated = new Date().toISOString();
+            med.v = (med.v || 1) + 1;
             await DB.put('medicineMaster', med);
+
+            if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+                window.Sync.push(med.id).catch(e => console.warn('Sync push move category error:', e));
+            }
 
             const cats = await Categories.getAllSorted();
             const newCat = cats.find(c => c.id === targetCatId);
@@ -3142,7 +3148,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const nameEnEl = document.getElementById('cat-name-en');
         const iconEl = document.getElementById('cat-icon');
         const colorEl = document.getElementById('cat-color');
-        if (!nameArEl || !nameArEl.value.trim()) return;
+        if (!nameArEl || !nameArEl.value.trim()) {
+            UI.showToast('يرجى كتابة اسم التصنيف بالعربية', 'warning');
+            return;
+        }
 
         const nameAR = nameArEl.value.trim();
         const nameEN = (nameEnEl && nameEnEl.value.trim()) ? nameEnEl.value.trim() : nameAR;
@@ -3153,10 +3162,16 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 ? nameEnEl.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') 
                 : '';
             if (!slug) {
-                const existingCats = (await DB.getAll('categories')) || [];
-                slug = `cat_${existingCats.length + 1}`;
+                slug = `cat_${Date.now()}`;
+            } else {
+                slug = slug.startsWith('cat_') ? slug : `cat_${slug}`;
             }
-            catId = slug.startsWith('cat_') ? slug : `cat_${slug}`;
+            // Collision check
+            const existing = await DB.get('categories', slug);
+            if (existing) {
+                slug = `${slug}_${Date.now()}`;
+            }
+            catId = slug;
         }
 
         const data = {
@@ -3164,12 +3179,20 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             nameAR: nameAR,
             nameEN: nameEN,
             icon: iconEl ? iconEl.value : 'bx-capsule',
-            color: colorEl ? colorEl.value : '#3b82f6'
+            color: colorEl ? colorEl.value : '#3b82f6',
+            isSystem: false,
+            updatedAt: new Date().toISOString()
         };
-        await Categories.saveCategory(data);
-        UI.closeModal();
-        UI.showToast('تم حفظ التصنيف بنجاح ✨', 'success');
-        await this.refreshAllViews(catId);
+
+        try {
+            await Categories.saveCategory(data);
+            UI.closeModal();
+            UI.showToast(`تم حفظ تصنيف «${nameAR}» بنجاح ومزامنته سحابياً ✨`, 'success');
+            await this.refreshAllViews(catId);
+        } catch (err) {
+            console.error('Error saving category form:', err);
+            UI.showToast('فشل حفظ التصنيف: ' + err.message, 'danger');
+        }
     },
 
     async deleteCategoryConfirm(id) {
