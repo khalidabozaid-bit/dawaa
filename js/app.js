@@ -3610,6 +3610,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                                         <button class="btn-primary sm-btn" onclick="window.App.openAuditSession('${s.id}')" title="متابعة العد">
                                             ▶️ متابعة الجرد
                                         </button>
+                                        <button class="btn-ghost sm-btn" onclick="window.App.openExportOptionsModal('${s.id}')" title="تصدير إكسيل">
+                                            <i class='bx bx-download'></i> Excel
+                                        </button>
                                         ${!isHold ? `
                                             <button class="btn-ghost sm-btn" onclick="window.App.holdAuditSession('${s.id}')" title="تعليق مؤقت">
                                                 ⏸️
@@ -3669,7 +3672,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                                     <button class="btn-ghost sm-btn" onclick="window.App.openAuditReportModal('${s.id}')" title="عرض تفاصيل الجرد">
                                         <i class='bx bx-show'></i> عرض الكشف
                                     </button>
-                                    <button class="btn-ghost sm-btn" onclick="window.App.exportAuditSession('${s.id}')" title="تصدير كملف إكسيل">
+                                    <button class="btn-ghost sm-btn" onclick="window.App.openExportOptionsModal('${s.id}')" title="تصدير كملف إكسيل">
                                         <i class='bx bx-download'></i> Excel
                                     </button>
                                     <button class="icon-btn text-warning" onclick="window.App.unarchiveAuditSession('${s.id}')" title="استعادة للنشط" style="padding: 4px;">
@@ -3860,7 +3863,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
 
                 <div class="form-actions mt-15" style="display:flex; gap:8px;">
-                    <button class="btn-primary sm-btn" onclick="window.App.exportAuditSession('${sessionId}')" style="flex:1;">
+                    <button class="btn-primary sm-btn" onclick="window.App.openExportOptionsModal('${sessionId}')" style="flex:1;">
                         <i class='bx bx-download'></i> تصدير إكسيل (Excel)
                     </button>
                     <button class="btn-ghost sm-btn" onclick="window.UI.closeModal()" style="flex:0.6;">إغلاق</button>
@@ -3872,7 +3875,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         }
     },
 
-    async exportAuditSession(sessionId) {
+    async exportAuditSession(sessionId, options = {}) {
         try {
             const session = await Audit.getSession(sessionId);
             if (!session) return;
@@ -3882,8 +3885,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             const locMap = new Map(locs.map(l => [l.id, l.nameAR]));
 
             const counts = session.counts || {};
-            const exportRows = [];
+            let exportRows = [];
 
+            // --- Step 1: Build raw rows ---
             for (const [key, record] of Object.entries(counts)) {
                 const [locId, medId] = key.split('___');
                 const med = masterMap.get(medId) || { nameEN: 'Unknown', nameAR: 'غير معروف' };
@@ -3894,13 +3898,14 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
                 for (const b of batches) {
                     exportRows.push({
-                        'اسم الدواء (EN)': med.nameEN || '',
-                        'اسم الدواء (AR)': med.nameAR || '',
-                        'مكان التخزين': loc,
-                        'الكمية المحصورة': b.quantity,
-                        'تاريخ الصلاحية': b.expiryDate,
-                        'المسؤول عن العد': record.userName || session.host,
-                        'تاريخ التسجيل': new Date(record.countedAt || session.startedAt).toLocaleString('ar-EG')
+                        medId: medId,
+                        nameEN: med.nameEN || '',
+                        nameAR: med.nameAR || '',
+                        location: loc,
+                        quantity: parseFloat(b.quantity) || 0,
+                        expiryDate: b.expiryDate || '',
+                        userName: record.userName || session.host,
+                        countedAt: new Date(record.countedAt || session.startedAt).toLocaleString('ar-EG')
                     });
                 }
             }
@@ -3910,12 +3915,103 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 return;
             }
 
+            // --- Step 2: Merge same expiry (always) ---
+            // Group by medId + location + expiryDate → sum quantities
+            if (options.mergeExpiry !== false) {
+                const expiryMap = new Map();
+                for (const row of exportRows) {
+                    const key = `${row.medId}___${row.location}___${row.expiryDate}`;
+                    if (expiryMap.has(key)) {
+                        expiryMap.get(key).quantity += row.quantity;
+                    } else {
+                        expiryMap.set(key, { ...row });
+                    }
+                }
+                exportRows = Array.from(expiryMap.values());
+            }
+
+            // --- Step 3: Merge locations (optional) ---
+            // Group by medId + expiryDate → sum quantities, combine location names
+            if (options.mergeLocations) {
+                const locMergeMap = new Map();
+                for (const row of exportRows) {
+                    const key = `${row.medId}___${row.expiryDate}`;
+                    if (locMergeMap.has(key)) {
+                        const existing = locMergeMap.get(key);
+                        existing.quantity += row.quantity;
+                        if (!existing.location.includes(row.location)) {
+                            existing.location += ' + ' + row.location;
+                        }
+                    } else {
+                        locMergeMap.set(key, { ...row });
+                    }
+                }
+                exportRows = Array.from(locMergeMap.values());
+            }
+
+            // --- Step 4: Full merge (optional) ---
+            // Group by medId only → sum ALL quantities regardless of expiry/location
+            if (options.mergeAll) {
+                const allMergeMap = new Map();
+                for (const row of exportRows) {
+                    if (allMergeMap.has(row.medId)) {
+                        const existing = allMergeMap.get(row.medId);
+                        existing.quantity += row.quantity;
+                        if (!existing.location.includes(row.location)) {
+                            existing.location += ' + ' + row.location;
+                        }
+                        // Keep earliest expiry for reference
+                        if (row.expiryDate && (!existing.expiryDate || row.expiryDate < existing.expiryDate)) {
+                            existing.expiryDate = row.expiryDate;
+                        }
+                    } else {
+                        allMergeMap.set(row.medId, { ...row });
+                    }
+                }
+                exportRows = Array.from(allMergeMap.values());
+            }
+
+            // --- Step 5: Sort ---
+            exportRows.sort((a, b) => (a.nameEN || a.nameAR).localeCompare(b.nameEN || b.nameAR));
+
+            // --- Step 6: Build final export format ---
+            const finalRows = exportRows.map(r => {
+                const row = {
+                    'اسم الدواء (EN)': r.nameEN,
+                    'اسم الدواء (AR)': r.nameAR,
+                    'الكمية المحصورة': r.quantity
+                };
+                if (!options.mergeAll) {
+                    row['تاريخ الصلاحية'] = r.expiryDate;
+                }
+                row['مكان التخزين'] = r.location;
+                if (!options.mergeLocations && !options.mergeAll) {
+                    row['المسؤول عن العد'] = r.userName;
+                    row['تاريخ التسجيل'] = r.countedAt;
+                }
+                return row;
+            });
+
+            // --- Step 7: Export ---
             if (window.XLSX) {
-                const ws = XLSX.utils.json_to_sheet(exportRows);
+                const ws = XLSX.utils.json_to_sheet(finalRows);
+
+                // Auto column widths
+                const colWidths = Object.keys(finalRows[0]).map(key => {
+                    const maxLen = Math.max(key.length, ...finalRows.map(r => String(r[key] || '').length));
+                    return { wch: Math.min(maxLen + 4, 40) };
+                });
+                ws['!cols'] = colWidths;
+
                 const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "تقرير الجرد");
-                XLSX.writeFile(wb, `جرد_${session.name.replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '_')}.xlsx`);
-                UI.showToast('تم تصدير ملف الإكسيل بنجاح ✅', 'success');
+                const sheetName = options.mergeAll ? 'ملخص مجمع' : options.mergeLocations ? 'مجمع بالأماكن' : 'تقرير الجرد';
+                XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+                const suffix = options.mergeAll ? '_ملخص' : options.mergeLocations ? '_مجمع' : '';
+                XLSX.writeFile(wb, `جرد_${session.name.replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '_')}${suffix}.xlsx`);
+                
+                const mergeInfo = options.mergeAll ? ' (ملخص مجمع)' : options.mergeLocations ? ' (أماكن مجمعة)' : '';
+                UI.showToast(`تم تصدير ${finalRows.length} صنف${mergeInfo} ✅`, 'success');
             } else {
                 UI.showToast('مكتبة تصدير Excel غير متوفرة', 'danger');
             }
@@ -3923,6 +4019,55 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             console.error('Export session error:', err);
             UI.showToast('فشل تصدير الإكسيل', 'danger');
         }
+    },
+
+    openExportOptionsModal(sessionId) {
+        UI.showModal(`
+            <div class="modal-header">
+                <h2><i class='bx bx-download'></i> خيارات تصدير الإكسيل</h2>
+                <p class="text-muted" style="font-size:12px; margin-top:4px;">اختر طريقة التصدير المناسبة لاحتياجك</p>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 12px;">
+                
+                <button onclick="window.App.exportAuditSession('${sessionId}', {}); window.UI.closeModal();"
+                    class="action-card-btn" style="text-align: right; width: 100%;">
+                    <i class='bx bx-table' style="font-size: 32px; color: var(--primary);"></i>
+                    <div>
+                        <strong>📋 تصدير تفصيلي (كل سطر لوحده)</strong>
+                        <small style="display:block; color: var(--text-muted); margin-top:2px;">
+                            كل دوا في كل مكان وكل صلاحية في سطر مستقل — مع تجميع الصلاحيات المتكررة
+                        </small>
+                    </div>
+                </button>
+
+                <button onclick="window.App.exportAuditSession('${sessionId}', {mergeLocations: true}); window.UI.closeModal();"
+                    class="action-card-btn" style="text-align: right; width: 100%;">
+                    <i class='bx bx-merge' style="font-size: 32px; color: var(--secondary);"></i>
+                    <div>
+                        <strong>🏪 تجميع بالأماكن</strong>
+                        <small style="display:block; color: var(--text-muted); margin-top:2px;">
+                            لو نفس الدوا في الدولاب والصيدلية بنفس الصلاحية — يتجمعوا في سطر واحد
+                        </small>
+                    </div>
+                </button>
+
+                <button onclick="window.App.exportAuditSession('${sessionId}', {mergeAll: true}); window.UI.closeModal();"
+                    class="action-card-btn" style="text-align: right; width: 100%;">
+                    <i class='bx bx-customize' style="font-size: 32px; color: var(--accent);"></i>
+                    <div>
+                        <strong>📊 ملخص مجمع (دوا = سطر واحد)</strong>
+                        <small style="display:block; color: var(--text-muted); margin-top:2px;">
+                            كل دوا في سطر واحد بإجمالي الكمية من كل الأماكن — أبسط صورة ممكنة
+                        </small>
+                    </div>
+                </button>
+            </div>
+
+            <div class="form-actions mt-15">
+                <button class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+            </div>
+        `);
     },
 
     async renderAuditLocationsLevel(container, session) {
