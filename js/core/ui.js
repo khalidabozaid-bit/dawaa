@@ -134,6 +134,12 @@ export const UI = {
 
     showModal(contentHtml) {
         console.log('UI: Opening Modal...');
+        // Permanently cancel any pending close timeout from previous modals
+        if (this._closeTimeout) {
+            clearTimeout(this._closeTimeout);
+            this._closeTimeout = null;
+        }
+
         const container = document.getElementById('modal-container');
         if (!container) {
             console.error('UI: modal-container element not found in DOM!');
@@ -171,16 +177,22 @@ export const UI = {
 
     closeModal() {
         console.log('UI: Closing Modal...');
+        if (this._closeTimeout) {
+            clearTimeout(this._closeTimeout);
+            this._closeTimeout = null;
+        }
+
         const container = document.getElementById('modal-container');
         if (!container) return;
 
         const sheet = container.querySelector('.bottom-sheet');
         if (sheet) sheet.classList.remove('show');
         
-        setTimeout(() => {
+        this._closeTimeout = setTimeout(() => {
             container.classList.remove('show');
             container.innerHTML = '';
-        }, 300);
+            this._closeTimeout = null;
+        }, 250);
     },
 
     showToast(message, type = 'info') {

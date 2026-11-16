@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.7.4)
+ * Dawaa App Orchestrator (v18.7.5)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.7.4', // Universal Sovereign v18.7.4
+    VERSION: '18.7.5', // Universal Sovereign v18.7.5
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -883,7 +883,7 @@ const App = {
             }
 
             const cat = med.categoryId ? await Categories.getInfo(med.categoryId) : null;
-            const catName = cat ? cat.nameAR : (med.categoryId || 'عام');
+            const catName = cat ? cat.nameAR : (med.categoryId || 'أدوية غير مصنفة');
             const catIcon = cat?.icon || 'bx-purchase-tag-alt';
             const catColor = cat?.color || 'var(--primary)';
             const imgSrc = (typeof Categories !== 'undefined' && Categories.getMedicineImage) ? Categories.getMedicineImage(med) : (med.imagePath || 'assets/icons/default-med.png');
@@ -914,6 +914,8 @@ const App = {
             const finalizedSessions = allSessions.filter(s => s.status === 'finalized').sort((a,b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
             const latestSession = openSession || finalizedSessions[0];
 
+            const allowedLocIds = med.allowedLocations || [];
+
             let grandTotal = 0;
             const locationRows = allLocations.map(loc => {
                 let locQty = 0;
@@ -940,39 +942,52 @@ const App = {
 
                 grandTotal += locQty;
 
+                const isAssigned = (allowedLocIds.length === 0) || allowedLocIds.includes(loc.id);
+
                 return {
                     loc,
                     qty: locQty,
                     batches: batches,
-                    hasAudit: !!auditCount
+                    hasAudit: !!auditCount,
+                    isAssigned
                 };
             });
 
+            // Filter relevant locations: show locations with stock, or locations explicitly assigned to this medicine
+            const relevantRows = locationRows.filter(r => r.qty > 0 || r.isAssigned);
+            const displayRows = relevantRows.length > 0 ? relevantRows : locationRows;
             const hasStock = grandTotal > 0;
+
+            const typeLabel = med.type === 'emergency' ? '🚨 طوارئ' : (med.type === 'supply' ? '🩹 مستلزم طبي' : '💊 دواء');
 
             UI.showModal(`
                 <div class="sheet-handle"></div>
 
                 <!-- Hero Section: Image + Names + Category -->
-                <div style="display:flex; gap:14px; align-items:flex-start; margin-bottom:14px; border-bottom:1px solid var(--border-color); padding-bottom:14px;">
-                    <div style="width:72px; height:72px; border-radius:14px; overflow:hidden; flex-shrink:0; background:rgba(59,130,246,0.08); border:1.5px solid var(--border-color); box-shadow:0 2px 8px rgba(0,0,0,0.06); display:flex; align-items:center; justify-content:center;">
+                <div style="display:flex; gap:16px; align-items:flex-start; margin-bottom:16px; border-bottom:1px solid var(--border-color); padding-bottom:16px;">
+                    <div style="width:80px; height:80px; border-radius:16px; overflow:hidden; flex-shrink:0; background:rgba(59,130,246,0.08); border:1.5px solid var(--border-color); box-shadow:0 4px 12px rgba(0,0,0,0.08); display:flex; align-items:center; justify-content:center;">
                         <img src="${imgSrc}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                     </div>
                     <div style="flex:1; min-width:0;">
-                        <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:4px;">
-                            <span class="badge" style="background:${catColor}18; color:${catColor}; font-size:11px; padding:3px 8px; border-radius:6px; font-weight:bold; display:inline-flex; align-items:center; gap:4px;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:6px; flex-wrap:wrap;">
+                            <span class="badge" style="background:${catColor}20; color:${catColor}; font-size:11px; padding:3px 9px; border-radius:6px; font-weight:bold; display:inline-flex; align-items:center; gap:4px;">
                                 <i class='bx ${catIcon}'></i> ${catName}
                             </span>
-                            <span style="font-size:10.5px; color:var(--text-muted); font-family:monospace; background:var(--bg-secondary); padding:2px 6px; border-radius:4px;">
-                                #${Utils.escapeHTML(med.id)}
-                            </span>
+                            <div style="display:flex; align-items:center; gap:4px;">
+                                <span style="font-size:10.5px; background:var(--bg-secondary); color:var(--text-muted); padding:2px 6px; border-radius:4px; font-weight:600;">
+                                    ${typeLabel}
+                                </span>
+                                <span style="font-size:10.5px; color:var(--text-muted); font-family:monospace; background:var(--bg-secondary); padding:2px 6px; border-radius:4px;">
+                                    #${Utils.escapeHTML(med.id)}
+                                </span>
+                            </div>
                         </div>
-                        <h2 style="font-size:17px; font-weight:800; margin:0 0 2px 0; color:var(--text-main); line-height:1.25; word-break:break-word;">
+                        <h2 style="font-size:18px; font-weight:800; margin:0 0 3px 0; color:var(--text-main); line-height:1.25; word-break:break-word;">
                             ${safePrimary}
                         </h2>
-                        ${safeSecondary ? `<div style="font-size:13px; color:var(--text-muted); font-weight:600; margin-bottom:4px; line-height:1.2;">${safeSecondary}</div>` : ''}
+                        ${safeSecondary ? `<div style="font-size:13.5px; color:var(--text-muted); font-weight:600; margin-bottom:4px; line-height:1.2;">${safeSecondary}</div>` : ''}
                         ${safeActive ? `
-                            <div style="font-size:11.5px; color:var(--primary); font-weight:600; display:inline-flex; align-items:center; gap:4px; margin-top:2px;">
+                            <div style="font-size:12px; color:var(--primary); font-weight:600; display:inline-flex; align-items:center; gap:4px; margin-top:2px;">
                                 <i class='bx bx-dna'></i> <span>${safeActive}</span>
                             </div>
                         ` : ''}
@@ -980,40 +995,47 @@ const App = {
                 </div>
 
                 <!-- Stock Summary Badge Bar -->
-                <div style="display:flex; justify-content:space-between; align-items:center; background:${hasStock ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)'}; border:1px solid ${hasStock ? '#10b98144' : '#ef444444'}; border-radius:12px; padding:10px 14px; margin-bottom:14px;">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <div style="width:32px; height:32px; border-radius:8px; background:${hasStock ? '#10b981' : '#ef4444'}; color:white; display:flex; align-items:center; justify-content:center; font-size:18px;">
-                            <i class='bx ${hasStock ? 'bx-cube' : 'bx-error-circle'}'></i>
+                <div style="display:flex; justify-content:space-between; align-items:center; background:${hasStock ? 'rgba(16,185,129,0.08)' : 'rgba(245,158,11,0.08)'}; border:1px solid ${hasStock ? '#10b98144' : 'rgba(245,158,11,0.3)'}; border-radius:12px; padding:12px 14px; margin-bottom:16px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <div style="width:36px; height:36px; border-radius:10px; background:${hasStock ? '#10b981' : '#f59e0b'}; color:white; display:flex; align-items:center; justify-content:center; font-size:20px;">
+                            <i class='bx ${hasStock ? 'bx-cube' : 'bx-package'}'></i>
                         </div>
                         <div>
                             <span style="font-size:11px; color:var(--text-muted); font-weight:bold; display:block;">إجمالي الرصيد بالمستودع:</span>
-                            <strong style="font-size:15px; color:${hasStock ? '#10b981' : '#ef4444'};">${grandTotal} وحدة</strong>
+                            <strong style="font-size:16px; color:${hasStock ? '#10b981' : '#f59e0b'};">${grandTotal} وحدة</strong>
                         </div>
                     </div>
-                    ${safeBarcode ? `
-                        <button type="button" class="btn-ghost sm-btn" onclick="navigator.clipboard.writeText('${safeBarcode}'); window.UI.showToast('تم نسخ الباركود: ${safeBarcode} 📋', 'info');" style="font-size:11px; padding:4px 8px; border-radius:6px; border:1px solid var(--border-color); display:flex; align-items:center; gap:4px;" title="نسخ الباركود">
-                            <i class='bx bx-barcode'></i> <span>${safeBarcode}</span>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <button type="button" class="btn-primary sm-btn" onclick="window.App.openQuickStockEntry('${med.id}')" style="font-size:11.5px; padding:6px 10px; border-radius:8px; display:flex; align-items:center; gap:4px;" title="تسجيل كمية أو رصيد لهذا الدواء">
+                            <i class='bx bx-plus-circle'></i> <span>+ رصيد</span>
                         </button>
-                    ` : ''}
+                        ${safeBarcode ? `
+                            <button type="button" class="btn-ghost sm-btn" onclick="navigator.clipboard.writeText('${safeBarcode}'); window.UI.showToast('تم نسخ الباركود: ${safeBarcode} 📋', 'info');" style="font-size:11px; padding:6px 8px; border-radius:8px; border:1px solid var(--border-color); display:flex; align-items:center; gap:4px;" title="نسخ الباركود">
+                                <i class='bx bx-barcode'></i>
+                            </button>
+                        ` : ''}
+                    </div>
                 </div>
 
                 <!-- Real Locations Breakdown -->
                 <div style="margin-bottom:16px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                        <strong style="font-size:13px; color:var(--text-main); display:flex; align-items:center; gap:6px;">
-                            <i class='bx bx-map-pin' style="color:var(--primary);"></i> التواجد الفعلي في أماكن التخزين:
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                        <strong style="font-size:13.5px; color:var(--text-main); display:flex; align-items:center; gap:6px;">
+                            <i class='bx bx-map-pin' style="color:var(--primary);"></i> أماكن التخزين وتفاصيل الرصيد:
                         </strong>
-                        <span style="font-size:10.5px; color:var(--text-muted);">بناءً على آخر جرد ميداني</span>
+                        <button type="button" onclick="window.App.openQuickStockEntry('${med.id}')" style="background:none; border:none; color:var(--primary); font-size:12px; font-weight:bold; cursor:pointer; display:flex; align-items:center; gap:2px;">
+                            <i class='bx bx-plus'></i> إضافة رصيد
+                        </button>
                     </div>
 
-                    <div style="display:flex; flex-direction:column; gap:6px; max-height:210px; overflow-y:auto; padding:2px;">
-                        ${locationRows.map(row => {
+                    <div style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto; padding:2px;">
+                        ${displayRows.map(row => {
                             const isAvailable = row.qty > 0;
                             const batchesHtml = row.batches.length > 0
                                 ? row.batches.map(b => {
                                     const badge = window.App.calcExpiryBadge(b.expiryDate);
                                     return `
-                                        <span class="batch-exterior-pill" style="display:inline-flex; align-items:center; gap:2px; font-size:9.5px; font-weight:bold; padding:1px 6px; border-radius:4px; background:${badge.bg}; color:${badge.color}; border:1px solid ${badge.color}33; white-space:nowrap;">
+                                        <span class="batch-exterior-pill" style="display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:bold; padding:2px 7px; border-radius:5px; background:${badge.bg}; color:${badge.color}; border:1px solid ${badge.color}33; white-space:nowrap;">
                                             <i class='bx ${badge.icon}'></i>
                                             <span>${b.quantity} &times; ${b.expiryDate}</span>
                                         </span>
@@ -1022,17 +1044,27 @@ const App = {
                                 : '';
 
                             return `
-                                <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:var(--surface); border:1px solid var(--border-color); border-radius:10px; transition:all 0.2s ease;">
-                                    <div style="display:flex; align-items:center; gap:8px;">
-                                        <i class='bx ${row.loc.icon || 'bx-map-pin'}' style="font-size:17px; color:${row.loc.color || 'var(--primary)'};"></i>
-                                        <strong style="font-size:12.5px; color:var(--text-main);">${Utils.escapeHTML(row.loc.nameAR)}</strong>
+                                <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:var(--surface); border:1px solid var(--border-color); border-radius:12px; transition:all 0.2s ease;">
+                                    <div style="display:flex; align-items:center; gap:10px;">
+                                        <div style="width:32px; height:32px; border-radius:8px; background:rgba(59,130,246,0.08); display:flex; align-items:center; justify-content:center;">
+                                            <i class='bx ${row.loc.icon || 'bx-map-pin'}' style="font-size:18px; color:${row.loc.color || 'var(--primary)'};"></i>
+                                        </div>
+                                        <div>
+                                            <strong style="font-size:13px; color:var(--text-main); display:block;">${Utils.escapeHTML(row.loc.nameAR)}</strong>
+                                            <small style="font-size:10.5px; color:var(--text-muted);">${row.isAssigned ? 'موقع تخزين معتمد' : 'رصيد إضافي'}</small>
+                                        </div>
                                     </div>
-                                    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;">
+                                    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:3px;">
                                         ${isAvailable ? `
-                                            <strong style="font-size:13px; color:#10b981; font-weight:800;">${row.qty} وحدة</strong>
+                                            <strong style="font-size:14px; color:#10b981; font-weight:800;">${row.qty} وحدة</strong>
                                             ${batchesHtml ? `<div style="display:flex; gap:3px; flex-wrap:wrap; justify-content:flex-end;">${batchesHtml}</div>` : ''}
                                         ` : `
-                                            <span style="font-size:11px; color:var(--text-muted); opacity:0.8;">غير متوفر (0)</span>
+                                            <div style="display:flex; align-items:center; gap:6px;">
+                                                <span style="font-size:11px; color:var(--text-muted);">رصيد 0</span>
+                                                <button type="button" onclick="window.App.openQuickStockEntry('${med.id}', '${row.loc.id}')" style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:6px; font-size:10.5px; padding:2px 6px; cursor:pointer; color:var(--primary); font-weight:bold;">
+                                                    + رصيد
+                                                </button>
+                                            </div>
                                         `}
                                     </div>
                                 </div>
@@ -1041,20 +1073,20 @@ const App = {
                     </div>
                 </div>
 
-                <!-- Quick Action Buttons -->
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:14px; border-top:1px solid var(--border-color); padding-top:14px;">
-                    <button type="button" class="btn-primary sm-btn" onclick="window.UI.closeModal(); window.App.openEditMedicine('${med.id}');" style="font-size:12px; font-weight:bold; display:flex; align-items:center; justify-content:center; gap:6px; padding:10px;">
+                <!-- Action Buttons: Seamless direct transitions without race condition -->
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:16px; border-top:1px solid var(--border-color); padding-top:14px;">
+                    <button type="button" class="btn-primary sm-btn" onclick="window.App.openEditMedicine('${med.id}');" style="font-size:13px; font-weight:bold; display:flex; align-items:center; justify-content:center; gap:6px; padding:10px 14px;">
                         <i class='bx bx-edit-alt'></i> <span>تعديل بيانات الدواء ✏️</span>
                     </button>
-                    <button type="button" class="btn-ghost sm-btn" onclick="window.UI.closeModal(); window.App.openMoveCategoryModal('${med.id}');" style="font-size:12px; font-weight:bold; display:flex; align-items:center; justify-content:center; gap:6px; padding:10px; border:1px solid var(--border-color);">
+                    <button type="button" class="btn-ghost sm-btn" onclick="window.App.openMoveCategoryModal('${med.id}');" style="font-size:13px; font-weight:bold; display:flex; align-items:center; justify-content:center; gap:6px; padding:10px 14px; border:1px solid var(--border-color);">
                         <i class='bx bx-transfer'></i> <span>نقل لتصنيف آخر ⇄</span>
                     </button>
                 </div>
                 <div style="display:flex; gap:8px; margin-top:8px;">
                     <button type="button" class="btn-ghost sm-btn w-100" onclick="window.UI.closeModal()" style="font-size:12px; padding:8px;">
-                        إغلاق
+                        إغلاق النافذة
                     </button>
-                    <button type="button" class="btn-ghost sm-btn text-danger" onclick="window.UI.closeModal(); window.App.deleteMasterMedicine('${med.id}');" style="font-size:12px; padding:8px; border:1px solid rgba(239,68,68,0.2);" title="حذف الدواء">
+                    <button type="button" class="btn-ghost sm-btn text-danger" onclick="window.App.deleteMasterMedicine('${med.id}');" style="font-size:12px; padding:8px 14px; border:1px solid rgba(239,68,68,0.2);" title="حذف الدواء">
                         <i class='bx bx-trash'></i>
                     </button>
                 </div>
@@ -1062,6 +1094,113 @@ const App = {
         } catch (err) {
             console.error('Error opening medicine details:', err);
             UI.showToast('خطأ في تحميل تفاصيل الدواء', 'danger');
+        }
+    },
+
+    // --- Quick Stock Entry directly from Medicine Sheet ---
+    async openQuickStockEntry(medicineId, preSelectedLocId = null) {
+        try {
+            const med = await DB.get('medicineMaster', medicineId);
+            if (!med) return;
+            const allLocs = (await Locations.getAll()) || [];
+            const allowedLocIds = med.allowedLocations || allLocs.map(l => l.id);
+            const targetLocs = allLocs.filter(l => allowedLocIds.includes(l.id));
+            const displayLocs = targetLocs.length > 0 ? targetLocs : allLocs;
+
+            UI.showModal(`
+                <div class="sheet-handle"></div>
+                <div class="modal-header">
+                    <h2><i class='bx bx-plus-circle'></i> تسجيل رصيد في موقع تخزين</h2>
+                    <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
+                        الدواء: <strong>${med.nameEN || med.nameAR}</strong>
+                    </p>
+                </div>
+                <form onsubmit="event.preventDefault(); window.App.saveQuickStockEntry('${medicineId}');">
+                    <div class="form-group mb-12">
+                        <label class="form-label">مكان التخزين (الموقع):</label>
+                        <select id="qse-location" class="form-select" required>
+                            ${displayLocs.map(l => `<option value="${l.id}" ${preSelectedLocId === l.id ? 'selected' : ''}>${l.nameAR} (${l.nameEN || l.id})</option>`).join('')}
+                        </select>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:14px;">
+                        <div class="form-group">
+                            <label class="form-label">الكمية المسجلة (وحدة):</label>
+                            <input type="number" id="qse-qty" class="form-input" min="0" step="1" placeholder="مثال: 10" required autofocus>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">تاريخ الصلاحية (اختياري):</label>
+                            <input type="month" id="qse-expiry" class="form-input">
+                        </div>
+                    </div>
+
+                    <div class="modal-actions" style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
+                        <button type="submit" class="btn-primary">حفظ الرصيد ✅</button>
+                        <button type="button" class="btn-ghost" onclick="window.App.openMedicineDetails('${medicineId}')">رجوع للدواء</button>
+                    </div>
+                </form>
+            `);
+        } catch (err) {
+            console.error('Error opening quick stock entry:', err);
+            UI.showToast('تعذر فتح نافذة إضافة الرصيد', 'danger');
+        }
+    },
+
+    async saveQuickStockEntry(medicineId) {
+        try {
+            const locId = document.getElementById('qse-location')?.value;
+            const qty = parseFloat(document.getElementById('qse-qty')?.value);
+            const exp = document.getElementById('qse-expiry')?.value || '';
+
+            if (isNaN(qty) || qty < 0) {
+                return UI.showToast('يرجى إدخال كمية صحيحة', 'warning');
+            }
+
+            const allLocs = (await Locations.getAll()) || [];
+            const locObj = allLocs.find(l => l.id === locId);
+            const locName = locObj?.nameAR || locId;
+
+            // Check if record exists for this med + loc
+            const allInv = (await DB.getAll('inventory')) || [];
+            const existing = allInv.find(r => String(r.medicineId) === String(medicineId) && (r.locationId === locId || r.location === locName));
+
+            if (existing) {
+                existing.quantity = qty;
+                if (exp) existing.expiryDate = exp;
+                existing.lastUpdated = new Date().toISOString();
+                existing.syncStatus = 'local';
+                await DB.put('inventory', existing);
+            } else {
+                const newRec = {
+                    id: 'inv_' + Date.now(),
+                    medicineId: String(medicineId),
+                    locationId: locId,
+                    location: locName,
+                    quantity: qty,
+                    expiryDate: exp,
+                    lastUpdated: new Date().toISOString(),
+                    syncStatus: 'local'
+                };
+                await DB.put('inventory', newRec);
+            }
+
+            // Also ensure the location is allowed on the medicine
+            const med = await DB.get('medicineMaster', medicineId);
+            if (med) {
+                const allowed = new Set(med.allowedLocations || []);
+                allowed.add(locId);
+                med.allowedLocations = Array.from(allowed);
+                med.lastUpdated = new Date().toISOString();
+                await DB.put('medicineMaster', med);
+                if (typeof Sync !== 'undefined' && Sync.push) Sync.push(medicineId);
+            }
+
+            UI.showToast(`تم تسجيل ${qty} وحدة في ${locName} بنجاح ✅`, 'success');
+            await this.refreshAllViews();
+            await this.openMedicineDetails(medicineId);
+        } catch (err) {
+            console.error('Error saving quick stock:', err);
+            UI.showToast('فشل حفظ الرصيد: ' + err.message, 'danger');
         }
     },
 
@@ -1178,16 +1317,42 @@ const App = {
                     <!-- Storage Locations Multi-select -->
                     <div class="form-group" style="margin-bottom:14px;">
                         <label class="form-label" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                            <span><i class='bx bx-map-pin'></i> أماكن التخزين المتاحة لهذا الدواء:</span>
-                            <small style="color:var(--text-muted); font-size:11px;">(يمكنك اختيار أكثر من مكان)</small>
+                            <span><i class='bx bx-map-pin'></i> أماكن تواجد الدواء (حدد أين يُخزن الدواء):</span>
+                            <small style="color:var(--text-muted); font-size:11px;">(يمكن اختيار أكثر من مكان)</small>
                         </label>
-                        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap:8px; max-height:150px; overflow-y:auto; background:var(--bg-secondary); padding:10px; border-radius:10px; border:1px solid var(--border-color);">
+                        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap:8px; max-height:140px; overflow-y:auto; background:var(--bg-secondary); padding:10px; border-radius:10px; border:1px solid var(--border-color);">
                             ${allLocs.map(l => `
                                 <label style="display:flex; align-items:center; gap:8px; background:var(--surface); padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); cursor:pointer; font-size:12px; font-weight:600;">
                                     <input type="checkbox" name="m-locations" value="${l.id}" checked style="width:16px; height:16px; accent-color:var(--primary); cursor:pointer;">
                                     <span><i class='bx ${l.icon || 'bx-map-pin'}' style="color:var(--primary);"></i> ${Utils.escapeHTML(l.nameAR)}</span>
                                 </label>
                             `).join('')}
+                        </div>
+                    </div>
+
+                    <!-- Optional Opening Stock Entry -->
+                    <div class="form-group" style="background:rgba(59,130,246,0.05); border:1px dashed rgba(59,130,246,0.3); border-radius:12px; padding:12px; margin-bottom:14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <label class="form-label" style="margin:0; font-size:13px; font-weight:bold; color:var(--primary);">
+                                <i class='bx bx-box'></i> تسجيل رصيد أولي الآن؟ (اختياري)
+                            </label>
+                            <span style="font-size:11px; color:var(--text-muted);">يمكن تركه 0 والاعتماد على الجرد</span>
+                        </div>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:8px;">
+                            <div>
+                                <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">الكمية الأولية (وحدة):</label>
+                                <input type="number" id="m-init-qty" class="form-input" placeholder="0" min="0" step="1" style="padding:6px 10px; font-size:13px;">
+                            </div>
+                            <div>
+                                <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">في موقع التخزين:</label>
+                                <select id="m-init-loc" class="form-select" style="padding:6px 10px; font-size:13px;">
+                                    ${allLocs.map(l => `<option value="${l.id}">${l.nameAR}</option>`).join('')}
+                                </select>
+                            </div>
+                        </div>
+                        <div>
+                            <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">تاريخ الصلاحية (اختياري):</label>
+                            <input type="month" id="m-init-exp" class="form-input" style="padding:6px 10px; font-size:13px;">
                         </div>
                     </div>
 
@@ -1210,12 +1375,15 @@ const App = {
     async openEditMedicine(id) {
         try {
             const med = await DB.get('medicineMaster', id);
+            if (!med) return UI.showToast('تعذر العثور على الدواء', 'warning');
             const cats = await Categories.getAllSorted();
+            const allLocs = (await Locations.getAll()) || [];
             const currentImg = Categories.getMedicineImage(med, { icon: 'bx-capsule' });
+            const allowedLocIds = new Set(med.allowedLocations || allLocs.map(l => l.id));
             
             UI.showModal(`
                 <div class="sheet-handle"></div>
-                <div class="modal-header"><h2>تعديل صنف المستودع</h2></div>
+                <div class="modal-header"><h2>تعديل صنف المستودع ✏️</h2></div>
                 <form id="form-edit-med" onsubmit="event.preventDefault(); window.App.updateMasterMedicine('${id}');">
                     <div class="image-upload-wrap">
                         <div class="image-preview" id="e-img-preview">
@@ -1225,56 +1393,78 @@ const App = {
                         <input type="file" id="e-file" accept="image/*" style="display:none" onchange="window.App.handleImagePreview(this, 'e-img-preview')">
                     </div>
 
-                    <div class="form-group">
+                    <div class="form-group mb-12">
                         <label class="form-label">الاسم بالإنجليزية:</label>
-                        <input type="text" id="e-name-en" class="form-input" value="${med.nameEN}" placeholder="e.g. Panadol" required>
+                        <input type="text" id="e-name-en" class="form-input" value="${Utils.escapeHTML(med.nameEN || '')}" placeholder="e.g. Panadol" required>
                     </div>
 
-                    <div class="form-group">
+                    <div class="form-group mb-12">
                         <label class="form-label">الاسم (العربية):</label>
-                        <input type="text" id="e-name-ar" class="form-input" value="${med.nameAR || ''}">
+                        <input type="text" id="e-name-ar" class="form-input" value="${Utils.escapeHTML(med.nameAR || '')}">
                     </div>
 
-                    <div class="form-group">
-                        <label class="form-label">المادة الفعالة:</label>
-                        <input type="text" id="e-active" class="form-input" value="${med.activeIngredient || ''}">
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:12px;">
+                        <div class="form-group">
+                            <label class="form-label">المادة الفعالة:</label>
+                            <input type="text" id="e-active" class="form-input" value="${Utils.escapeHTML(med.activeIngredient || '')}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">الباركود:</label>
+                            <input type="text" id="e-barcode" class="form-input" value="${Utils.escapeHTML(med.barcode || med.id || '')}">
+                        </div>
                     </div>
 
-                    <div class="form-group">
-                        <label class="form-label">القسم:</label>
-                        <select id="e-category" class="form-select" required>
-                            ${cats.map(c => `<option value="${c.id}" ${c.id === med.categoryId ? 'selected' : ''}>${c.nameAR}</option>`).join('')}
-                        </select>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:14px;">
+                        <div class="form-group">
+                            <label class="form-label">القسم:</label>
+                            <select id="e-category" class="form-select" required>
+                                ${cats.map(c => `<option value="${c.id}" ${c.id === (med.categoryId || 'uncategorized') ? 'selected' : ''}>${c.nameAR}</option>`).join('')}
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">نوع الدواء:</label>
+                            <select id="e-type" class="form-select">
+                                <option value="medicine" ${med.type === 'medicine' ? 'selected' : ''}>💊 دواء عادي</option>
+                                <option value="emergency" ${med.type === 'emergency' ? 'selected' : ''}>🚨 دواء طوارئ</option>
+                                <option value="supply" ${med.type === 'supply' ? 'selected' : ''}>🩹 مستلزم طبي</option>
+                            </select>
+                        </div>
                     </div>
 
-                    <div class="form-group">
-                        <label class="form-label">النوع:</label>
-                        <select id="e-type" class="form-select">
-                            <option value="medicine" ${med.type === 'medicine' ? 'selected' : ''}>دواء عادي</option>
-                            <option value="emergency" ${med.type === 'emergency' ? 'selected' : ''}>دواء طوارئ</option>
-                            <option value="supply" ${med.type === 'supply' ? 'selected' : ''}>مستلزم طبي</option>
-                        </select>
+                    <!-- Storage Locations Multi-select in Edit -->
+                    <div class="form-group" style="margin-bottom:14px;">
+                        <label class="form-label" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span><i class='bx bx-map-pin'></i> أماكن تواجد الدواء المعتمدة (Storage Locations):</span>
+                            <small style="color:var(--text-muted); font-size:11px;">(حدد الأماكن المصرح بها)</small>
+                        </label>
+                        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap:8px; max-height:140px; overflow-y:auto; background:var(--bg-secondary); padding:10px; border-radius:10px; border:1px solid var(--border-color);">
+                            ${allLocs.map(l => {
+                                const isChecked = allowedLocIds.has(l.id);
+                                return `
+                                    <label style="display:flex; align-items:center; gap:8px; background:var(--surface); padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); cursor:pointer; font-size:12px; font-weight:600;">
+                                        <input type="checkbox" name="e-locations" value="${l.id}" ${isChecked ? 'checked' : ''} style="width:16px; height:16px; accent-color:var(--primary); cursor:pointer;">
+                                        <span><i class='bx ${l.icon || 'bx-map-pin'}' style="color:var(--primary);"></i> ${Utils.escapeHTML(l.nameAR)}</span>
+                                    </label>
+                                `;
+                            }).join('')}
+                        </div>
                     </div>
 
-
-                    <div class="form-group checkbox-group mt-10" style="display: flex; align-items: center; gap: 8px; background: var(--bg-secondary); padding: 10px; border-radius: 8px;">
+                    <div class="form-group checkbox-group mt-10 mb-15" style="display: flex; align-items: center; gap: 8px; background: var(--bg-secondary); padding: 10px; border-radius: 8px;">
                         <input type="checkbox" id="e-sync" checked style="width: 18px; height: 18px;">
                         <label for="e-sync" style="font-size: 13px; font-weight: 700; cursor: pointer;">تحديث البيانات في السحابة ☁️</label>
                     </div>
 
-
-                    <div class="form-actions mt-20">
-
-                        <button type="submit" class="btn-primary">حفظ التعديلات</button>
-                        <button type="button" class="btn-ghost" style="color:var(--danger)" onclick="window.App.deleteMasterMedicine('${id}')">حذف الصنف نهائياً</button>
-                        <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+                    <div class="form-actions mt-15" style="display:flex; gap:10px;">
+                        <button type="submit" class="btn-primary" style="flex:1;">حفظ التعديلات</button>
+                        <button type="button" class="btn-ghost" onclick="window.App.openMedicineDetails('${id}')">إلغاء</button>
                     </div>
                 </form>
             `);
         } catch (err) {
             console.warn('Category Load Error:', err);
         }
-
     },
 
     handleImagePreview(input, previewId) {
@@ -1335,6 +1525,27 @@ const App = {
 
             await DB.put('medicineMaster', data);
 
+            // Save initial stock if provided by user
+            const initQty = parseFloat(document.getElementById('m-init-qty')?.value) || 0;
+            const initLocId = document.getElementById('m-init-loc')?.value;
+            const initExp = document.getElementById('m-init-exp')?.value || '';
+
+            if (initQty > 0 && initLocId) {
+                const allLocsList = (await Locations.getAll()) || [];
+                const locObj = allLocsList.find(l => l.id === initLocId);
+                const invRecord = {
+                    id: 'inv_' + Date.now(),
+                    medicineId: medId,
+                    locationId: initLocId,
+                    location: locObj?.nameAR || initLocId,
+                    quantity: initQty,
+                    expiryDate: initExp,
+                    lastUpdated: now,
+                    syncStatus: 'local'
+                };
+                await DB.put('inventory', invRecord);
+            }
+
             // Ensure category is allowed in the selected locations
             if (selectedLocIds.length > 0 && typeof Locations !== 'undefined') {
                 for (const locId of selectedLocIds) {
@@ -1388,13 +1599,20 @@ const App = {
                 imgData = await Utils.fileToBase64(file);
             }
 
+            const selectedLocIds = [];
+            document.querySelectorAll('input[name="e-locations"]:checked').forEach(cb => {
+                selectedLocIds.push(cb.value);
+            });
+
             const updated = {
                 ...med,
                 nameEN: document.getElementById('e-name-en').value.trim(),
-                nameAR: document.getElementById('e-name-ar').value.trim(),
-                activeIngredient: document.getElementById('e-active').value.trim(),
+                nameAR: document.getElementById('e-name-ar').value.trim() || document.getElementById('e-name-en').value.trim(),
+                activeIngredient: (document.getElementById('e-active')?.value || '').trim(),
+                barcode: (document.getElementById('e-barcode')?.value || med.barcode || med.id).trim(),
                 categoryId: document.getElementById('e-category').value,
                 type: document.getElementById('e-type').value,
+                allowedLocations: selectedLocIds.length > 0 ? selectedLocIds : null,
                 imagePath: imgData,
                 syncStatus: 'local',
                 lastUpdated: new Date().toISOString()
@@ -2027,7 +2245,7 @@ App.handleBackup = async function() {
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.7.4'
+            version: '18.7.5'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
