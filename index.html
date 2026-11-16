@@ -78,7 +78,7 @@
             <div class="app-logo">
                 <i class='bx bxs-capsule'></i>
                 <h1>دواء</h1>
-                <span id="app-version-tag" style="display: none;">v18.8.2</span>
+                <span id="app-version-tag" style="display: none;">v18.9.0</span>
                 <span id="network-status" style="display: none;"></span>
             </div>
             
@@ -222,12 +222,19 @@
                     </button>
                 </div>
                 <div id="inventory-filter-alert" class="mb-15" style="display: none;"></div>
-                <div class="wh-category-filter-bar mb-15" style="display: flex; gap: 10px; align-items: center;">
-                    <div style="flex: 1; display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 4px 12px; box-shadow: var(--shadow-sm);">
+                <div class="wh-category-filter-bar mb-15" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 140px; display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 4px 12px; box-shadow: var(--shadow-sm);">
                         <i class='bx bx-category' style="font-size: 20px; color: var(--primary);"></i>
                         <span style="font-size: 12px; font-weight: bold; color: var(--text-muted); white-space: nowrap;">التصنيف:</span>
                         <select id="category-dropdown-select" class="form-select" style="border: none; background: transparent; padding: 6px; font-weight: bold; font-size: 13px; color: var(--text-main); flex: 1; cursor: pointer; outline: none;" onchange="window.App.filterByCategory(this.value)">
                             <option value="">📦 جميع التصنيفات</option>
+                        </select>
+                    </div>
+                    <div style="flex: 1; min-width: 140px; display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 4px 12px; box-shadow: var(--shadow-sm);">
+                        <i class='bx bx-map-pin' style="font-size: 20px; color: #10b981;"></i>
+                        <span style="font-size: 12px; font-weight: bold; color: var(--text-muted); white-space: nowrap;">المكان:</span>
+                        <select id="location-dropdown-select" class="form-select" style="border: none; background: transparent; padding: 6px; font-weight: bold; font-size: 13px; color: var(--text-main); flex: 1; cursor: pointer; outline: none;" onchange="window.App.filterByLocation(this.value)">
+                            <option value="">📍 جميع الأماكن</option>
                         </select>
                     </div>
                 </div>
@@ -425,7 +432,7 @@
 
     <!-- App Scripts -->
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/app.js?v=18.8.2"></script>
+    <script type="module" src="js/app.js?v=18.9.0"></script>
     
     <!-- Navigation Logic managed by js/app.js -->
 </body>

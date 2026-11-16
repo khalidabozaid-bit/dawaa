@@ -178,6 +178,20 @@ export const Inventory = {
         const safeSecondary = (typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(secondaryName) : secondaryName;
         const safeActive = (m.activeIngredient && typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(m.activeIngredient) : (m.activeIngredient || '');
 
+        // Sync status badge
+        const syncStatus = m.syncStatus || item.syncStatus;
+        const syncBadge = (syncStatus === 'global_v2' || syncStatus === 'synced')
+            ? '<span style="font-size:10px; color:#10b981;" title="مزامن مع السحابة">☁️</span>'
+            : '<span style="font-size:10px; color:#94a3b8;" title="محلي فقط">⬆️</span>';
+
+        // Primary location badge
+        const primaryLocId = m.primaryLocation;
+        let locBadgeHtml = '';
+        if (primaryLocId && typeof window.Locations !== 'undefined') {
+            // Use a synchronous approach with cached data
+            locBadgeHtml = `<span class="loc-badge-pending" data-loc-id="${primaryLocId}" style="font-size:10px; color:#0ea5e9; font-weight:600; display:inline-flex; align-items:center; gap:2px;"><i class='bx bx-map-pin' style="font-size:11px;"></i> <span class="loc-name-text">📍</span></span>`;
+        }
+
         return `
             <div class="inventory-card master-catalog-card" data-med-id="${medId}" style="display:flex; align-items:center; gap:12px; padding:12px 16px; margin-bottom:10px; border-radius:16px; background:var(--surface); border:1px solid var(--border-color); box-shadow:var(--shadow-sm); transition:all 0.2s ease;">
                 <div class="card-img" onclick="window.App.openMedicineDetails('${medId}')" style="cursor:pointer; width:48px; height:48px; border-radius:12px; overflow:hidden; flex-shrink:0; background:rgba(59,130,246,0.08); display:flex; align-items:center; justify-content:center;">
@@ -185,16 +199,20 @@ export const Inventory = {
                 </div>
                 <div class="card-info" onclick="window.App.openMedicineDetails('${medId}')" style="flex:1; min-width:0; cursor:pointer;">
                     <div style="display:flex; flex-direction:column; gap:2px;">
-                        <h3 style="font-size:15px; font-weight:800; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-main);">${safePrimary}</h3>
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <h3 style="font-size:15px; font-weight:800; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-main); flex:1;">${safePrimary}</h3>
+                            ${syncBadge}
+                        </div>
                         ${safeSecondary ? `<span style="font-size:12px; color:var(--text-muted); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${safeSecondary}</span>` : ''}
                     </div>
-                    ${safeActive ? `
-                        <div class="card-meta" style="margin-top:4px;">
+                    <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+                        ${safeActive ? `
                             <span style="font-size:11px; color:var(--primary); font-weight:600; display:inline-flex; align-items:center; gap:4px;">
                                 <i class='bx bx-dna'></i> ${safeActive}
                             </span>
-                        </div>
-                    ` : ''}
+                        ` : ''}
+                        ${locBadgeHtml}
+                    </div>
                 </div>
                 <div class="card-actions" style="display:flex; align-items:center; flex-shrink:0;">
                     <button class="icon-btn" onclick="event.stopPropagation(); window.App.openMasterMedicineMenu('${medId}')" title="خيارات الدواء" style="padding:8px; font-size:20px; color:var(--text-muted); border-radius:8px;">

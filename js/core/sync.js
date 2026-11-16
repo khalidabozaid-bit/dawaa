@@ -40,7 +40,7 @@ export const Sync = {
         if (!firestore) return;
 
         try {
-            // 1. Pull Medicines (from 'medicines' collection with fallback to CLOUD_PATH)
+            // 1. Pull Medicines (from 'medicines' collection — Pure V2)
             let cloudMeds = [];
             try {
                 const medSnap = await firestore.collection('medicines').get();
@@ -48,13 +48,6 @@ export const Sync = {
                     cloudMeds = medSnap.docs.map(d => ({ ...d.data(), id: d.id }));
                 }
             } catch (me) {}
-
-            if (!cloudMeds || cloudMeds.length === 0) {
-                try {
-                    const doc = await firestore.doc(this.CLOUD_PATH).get();
-                    if (doc.exists) cloudMeds = doc.data().masterData || [];
-                } catch (de) {}
-            }
 
             if (Array.isArray(cloudMeds) && cloudMeds.length > 0) {
                 let syncCount = 0;
@@ -147,35 +140,11 @@ export const Sync = {
                 syncMed.imagePath = ''; 
             }
 
-            // 1. V2 Document-per-medicine write for live multi-device listeners
+            // V2 Document-per-medicine write (Pure V2 — no legacy global_master)
             await firestore.collection('medicines').doc(med.id).set({
                 ...syncMed,
                 lastUpdatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
             }, { merge: true });
-
-            // 2. Legacy Master Array write for backward compatibility
-            try {
-                const docRef = firestore.doc(this.CLOUD_PATH);
-                const doc = await docRef.get();
-                let masterData = doc.exists ? (doc.data().masterData || []) : [];
-                
-                // In the legacy multi-item array, strip data:image to avoid 1MB document limit
-                const legacyMed = { ...syncMed };
-                if (legacyMed.imagePath?.startsWith('data:image')) {
-                    legacyMed.imagePath = '';
-                }
-
-                const existingIdx = masterData.findIndex(m => m.id === med.id);
-                if (existingIdx > -1) masterData[existingIdx] = legacyMed;
-                else masterData.push(legacyMed);
-
-                await docRef.set({ 
-                    masterData,
-                    updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
-            } catch (lex) {
-                console.warn('Sync: Legacy master array write warning:', lex.message);
-            }
 
             med.syncStatus = 'global_v2';
             await DB.put('medicineMaster', med);
@@ -191,24 +160,10 @@ export const Sync = {
         if (!firestore || !medId) return;
 
         try {
-            // 1. Delete from 'medicines' collection
+            // Delete from 'medicines' collection (Pure V2)
             await firestore.collection('medicines').doc(medId).delete();
 
-            // 2. Remove from legacy array
-            try {
-                const docRef = firestore.doc(this.CLOUD_PATH);
-                const doc = await docRef.get();
-                if (doc.exists) {
-                    let masterData = doc.data().masterData || [];
-                    masterData = masterData.filter(m => m.id !== medId);
-                    await docRef.set({
-                        masterData,
-                        updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
-                    }, { merge: true });
-                }
-            } catch (lex) {}
-
-            // 3. Delete any stock entries in cloud for this medicine
+            // Delete any stock entries in cloud for this medicine
             try {
                 const invSnap = await firestore.collection('inventory_sync').where('medicineId', '==', medId).get();
                 const batch = firestore.batch();
@@ -566,34 +521,7 @@ export const Sync = {
         const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
         if (!firestore) return;
 
-        // 1. Live Master Data (Legacy Single-Pharmacy Document)
-        try {
-            const unsubMaster = firestore.doc(this.CLOUD_PATH).onSnapshot(async (doc) => {
-                if (!doc.exists) return;
-                const cloudMeds = doc.data()?.masterData;
-                if (!Array.isArray(cloudMeds) || cloudMeds.length === 0) return;
-
-                let updatedCount = 0;
-                for (const med of cloudMeds) {
-                    const localMed = await DB.get('medicineMaster', med.id);
-                    if (!localMed || (med.v && med.v > (localMed.v || 0)) || (!localMed.v && med.lastSynced && med.lastSynced !== localMed.lastSynced)) {
-                        if (localMed && localMed.imagePath?.startsWith('data:image') && (!med.imagePath || med.imagePath === '')) {
-                            med.imagePath = localMed.imagePath;
-                        }
-                        med.syncStatus = 'synced';
-                        await DB.put('medicineMaster', med);
-                        updatedCount++;
-                    }
-                }
-                if (updatedCount > 0) {
-                    console.log(`Sync Live: ${updatedCount} medicines synchronized from cloud.`);
-                    if (window.App?.refreshAllViews) window.App.refreshAllViews();
-                }
-            }, err => console.warn('Sync Live master notice:', err.message));
-            this._liveListeners.push(unsubMaster);
-        } catch (e) {}
-
-        // 2. Live Master Medicines Collection (V2)
+        // 1. Live Master Medicines Collection (V2 — Pure Cloud Sync)
         try {
             const unsubMeds = firestore.collection('medicines').onSnapshot(async (snapshot) => {
                 const changes = snapshot.docChanges();

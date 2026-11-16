@@ -32,11 +32,12 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.8.2', // Cloud Category Persistence & Bi-directional Sync Suite v18.8.2
+    VERSION: '18.9.0', // Warehouse Restructuring: Pure Catalog + Location Hub + Dual Filter + V2 Cloud Sync
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
     selectedCategoryId: null, 
+    selectedLocationId: null,
     notifications: [],
     unreadCount: 0,
 
@@ -550,55 +551,41 @@ const App = {
             this.currentFilterType = type;
             const alertContainer = document.getElementById('inventory-filter-alert');
             if (alertContainer) {
-                if (type === 'low-stock') {
-                    alertContainer.style.display = 'block';
-                    alertContainer.innerHTML = `
-                        <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--danger); padding: 8px 14px; border-radius: 12px; font-size: 13px; font-weight: 700;">
-                            <span><i class='bx bx-trending-down'></i> تصفية: عرض الأرصدة الحرجة (5 أو أقل)</span>
-                            <button onclick="window.App.renderInventory('detailed')" style="border: none; background: var(--surface); color: var(--text-main); padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: bold; cursor: pointer;">عرض الكل ✖</button>
-                        </div>
-                    `;
-                } else if (type === 'expiry') {
-                    alertContainer.style.display = 'block';
-                    alertContainer.innerHTML = `
-                        <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: var(--warning); padding: 8px 14px; border-radius: 12px; font-size: 13px; font-weight: 700;">
-                            <span><i class='bx bx-time-five'></i> تصفية: الأدوية التي تنتهي خلال 6 أشهر</span>
-                            <button onclick="window.App.renderInventory('detailed')" style="border: none; background: var(--surface); color: var(--text-main); padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: bold; cursor: pointer;">عرض الكل ✖</button>
-                        </div>
-                    `;
-                } else {
-                    alertContainer.style.display = 'none';
-                    alertContainer.innerHTML = '';
-                }
+                alertContainer.style.display = 'none';
+                alertContainer.innerHTML = '';
             }
 
-            this.renderCategoryChips(); // Refresh filters
+            this.renderCategoryChips(); // Refresh category filter
+            this.renderLocationChips(); // Refresh location filter
 
-            let data = await Inventory.getCurrentStockProducts();
-            const masterData = await DB.getAll('medicineMaster');
-            const masterMap = new Map(masterData.map(m => [m.id, m]));
-            
-            // 1. Initial Filtering by Type
-            if (type === 'expiry') {
-                const sixMonths = new Date();
-                sixMonths.setMonth(sixMonths.getMonth() + 6);
-                data = data.filter(i => (i.earliestExpiry || i.expiryDate) && new Date(i.earliestExpiry || i.expiryDate) <= sixMonths);
-            } else if (type === 'low-stock') {
-                data = data.filter(i => (i.totalQuantity || 0) <= 5);
-            }
+            // Pure Catalog: Read directly from medicineMaster (no stock/inventory join)
+            let data = (await DB.getAll('medicineMaster')) || [];
 
-            // 2. Secondary Filtering by Category
+            // 1. Filter by Category
             if (this.selectedCategoryId) {
                 const sel = this.selectedCategoryId;
                 const allCurrentCats = await Categories.getAllSorted();
                 const validCatIds = new Set(allCurrentCats.filter(c => c.id !== 'uncategorized').map(c => c.id));
-                data = data.filter(i => {
-                    const m = masterMap.get(i.medicineId || i.id);
-                    const cat = (m && m.categoryId) || i.categoryId;
+                data = data.filter(m => {
+                    const cat = m.categoryId;
                     if (sel === 'uncategorized') {
                         return !cat || cat === 'uncategorized' || !validCatIds.has(cat);
                     }
                     return cat === sel;
+                });
+            }
+
+            // 2. Filter by Location
+            if (this.selectedLocationId) {
+                const locId = this.selectedLocationId;
+                data = data.filter(m => {
+                    if (m.allowedLocations && Array.isArray(m.allowedLocations) && m.allowedLocations.length > 0) {
+                        return m.allowedLocations.includes(locId);
+                    }
+                    if (m.primaryLocation) {
+                        return m.primaryLocation === locId;
+                    }
+                    return false;
                 });
             }
 
@@ -659,6 +646,41 @@ const App = {
             this.handleGlobalSearch(searchInput.value);
         } else {
             this.renderInventory(this.currentFilterType || 'detailed');
+        }
+    },
+
+    filterByLocation(locId) {
+        this.selectedLocationId = locId || null;
+
+        // Sync Dropdown Select
+        const selectEl = document.getElementById('location-dropdown-select');
+        if (selectEl && selectEl.value !== (locId || '')) {
+            selectEl.value = locId || '';
+        }
+
+        const searchInput = document.getElementById('global-search');
+        if (searchInput && searchInput.value.trim().length > 0) {
+            this.handleGlobalSearch(searchInput.value);
+        } else {
+            this.renderInventory(this.currentFilterType || 'detailed');
+        }
+    },
+
+    async renderLocationChips() {
+        try {
+            const locs = await Locations.getAll();
+            const selectEl = document.getElementById('location-dropdown-select');
+            if (selectEl) {
+                selectEl.innerHTML = `
+                    <option value="">📍 جميع الأماكن</option>
+                    ${locs.map(l => {
+                        const isSel = this.selectedLocationId === l.id ? 'selected' : '';
+                        return `<option value="${l.id}" ${isSel}>${l.nameAR}</option>`;
+                    }).join('')}
+                `;
+            }
+        } catch (err) {
+            console.error('Error rendering location filter:', err);
         }
     },
 
@@ -978,6 +1000,9 @@ const App = {
             
             // Resolve assigned clinic locations
             const assignedLocs = allLocations.filter(loc => allowedLocIds.includes(loc.id));
+            
+            // Resolve primary location
+            const primaryLocObj = med.primaryLocation ? allLocations.find(l => l.id === med.primaryLocation) : null;
 
             const typeLabel = med.type === 'emergency' ? '🚨 طوارئ' : (med.type === 'supply' ? '🩹 مستلزم طبي' : '💊 دواء');
 
@@ -1031,12 +1056,29 @@ const App = {
                 <div style="margin-bottom:16px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                         <strong style="font-size:13.5px; color:var(--text-main); display:flex; align-items:center; gap:6px;">
-                            <i class='bx bx-map-pin' style="color:var(--primary);"></i> أماكن الحفظ والتواجد المعتمدة في مبنى العيادة:
+                            <i class='bx bx-map-pin' style="color:var(--primary);"></i> أماكن التخزين والتواجد:
                         </strong>
                     </div>
 
+                    ${primaryLocObj ? `
+                        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 14px; background:linear-gradient(135deg, ${primaryLocObj.color || 'var(--primary)'}12, ${primaryLocObj.color || 'var(--primary)'}05); border:1.5px solid ${primaryLocObj.color || 'var(--primary)'}40; border-radius:12px; margin-bottom:8px;">
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <div style="width:36px; height:36px; border-radius:10px; background:${primaryLocObj.color || 'var(--primary)'}20; display:flex; align-items:center; justify-content:center;">
+                                    <i class='bx ${primaryLocObj.icon || 'bx-map-pin'}' style="font-size:20px; color:${primaryLocObj.color || 'var(--primary)'};"></i>
+                                </div>
+                                <div>
+                                    <strong style="font-size:13px; color:var(--text-main); display:block;">${Utils.escapeHTML(primaryLocObj.nameAR)}</strong>
+                                    <small style="font-size:11px; color:var(--text-muted);">مكان التخزين الأساسي ⭐</small>
+                                </div>
+                            </div>
+                            <span style="font-size:10px; font-weight:700; color:${primaryLocObj.color || 'var(--primary)'}; background:${primaryLocObj.color || 'var(--primary)'}15; padding:4px 8px; border-radius:6px; display:inline-flex; align-items:center; gap:4px;">
+                                <i class='bx bx-star'></i> أساسي
+                            </span>
+                        </div>
+                    ` : ''}
+
                     <div style="display:flex; flex-direction:column; gap:8px;">
-                        ${assignedLocs.length > 0 ? assignedLocs.map(loc => `
+                        ${assignedLocs.filter(loc => !primaryLocObj || loc.id !== primaryLocObj.id).length > 0 ? assignedLocs.filter(loc => !primaryLocObj || loc.id !== primaryLocObj.id).map(loc => `
                             <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:var(--surface); border:1px solid var(--border-color); border-radius:12px;">
                                 <div style="display:flex; align-items:center; gap:10px;">
                                     <div style="width:36px; height:36px; border-radius:10px; background:rgba(59,130,246,0.08); display:flex; align-items:center; justify-content:center;">
@@ -1044,22 +1086,23 @@ const App = {
                                     </div>
                                     <div>
                                         <strong style="font-size:13px; color:var(--text-main); display:block;">${Utils.escapeHTML(loc.nameAR)}</strong>
-                                        <small style="font-size:11px; color:var(--text-muted);">${loc.description || 'موقع حفظ معتمد للصنف في العيادة'}</small>
+                                        <small style="font-size:11px; color:var(--text-muted);">${loc.description || 'موقع حفظ معتمد'}</small>
                                     </div>
                                 </div>
                                 <span style="font-size:11px; font-weight:700; color:#10b981; background:rgba(16,185,129,0.1); padding:4px 8px; border-radius:6px; display:inline-flex; align-items:center; gap:4px;">
                                     <i class='bx bx-check-circle'></i> معتمد
                                 </span>
                             </div>
-                        `).join('') : `
+                        `).join('') : ''}
+                        ${!primaryLocObj && assignedLocs.length === 0 ? `
                             <div style="text-align:center; padding:16px; background:var(--bg-secondary); border-radius:12px; border:1px dashed var(--border-color);">
                                 <i class='bx bx-map-pin' style="font-size:26px; color:var(--text-muted);"></i>
-                                <p style="font-size:12.5px; color:var(--text-muted); margin:4px 0 8px 0;">لم يتم تحديد أماكن حفظ معتمدة لهذا الدواء بعد</p>
+                                <p style="font-size:12.5px; color:var(--text-muted); margin:4px 0 8px 0;">لم يتم تحديد أماكن حفظ لهذا الدواء بعد</p>
                                 <button type="button" class="btn-ghost sm-btn" onclick="window.App.openEditMedicine('${med.id}')" style="font-size:11.5px; border:1px solid var(--border-color); font-weight:bold;">
                                     تحديد أماكن الحفظ الآن ✏️
                                 </button>
                             </div>
-                        `}
+                        ` : ''}
                     </div>
                 </div>
 
@@ -1220,16 +1263,28 @@ const App = {
                         </div>
                     </div>
 
+                    <!-- Primary Storage Location -->
+                    <div class="form-group" style="margin-bottom:14px;">
+                        <label class="form-label" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span><i class='bx bx-current-location'></i> مكان التخزين الأساسي (Primary):</span>
+                            <small style="color:var(--text-muted); font-size:11px;">(إجباري)</small>
+                        </label>
+                        <select id="m-primary-location" class="form-select" style="font-weight:bold; font-size:13px;" onchange="window.App._autocheckPrimaryLoc(this.value, 'm')">
+                            <option value="">اختر المكان الأساسي...</option>
+                            ${allLocs.map(l => `<option value="${l.id}"><i class='bx ${l.icon || 'bx-map-pin'}'></i> ${Utils.escapeHTML(l.nameAR)}</option>`).join('')}
+                        </select>
+                    </div>
+
                     <!-- Storage Locations Multi-select -->
                     <div class="form-group" style="margin-bottom:14px;">
                         <label class="form-label" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                            <span><i class='bx bx-map-pin'></i> أماكن الحفظ والتواجد في مبنى العيادة:</span>
+                            <span><i class='bx bx-map-pin'></i> أماكن تواجد إضافية (اختياري):</span>
                             <small style="color:var(--text-muted); font-size:11px;">(يمكن اختيار أكثر من مكان)</small>
                         </label>
                         <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap:8px; max-height:140px; overflow-y:auto; background:var(--bg-secondary); padding:10px; border-radius:10px; border:1px solid var(--border-color);">
                             ${allLocs.map(l => `
                                 <label style="display:flex; align-items:center; gap:8px; background:var(--surface); padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); cursor:pointer; font-size:12px; font-weight:600;">
-                                    <input type="checkbox" name="m-locations" value="${l.id}" checked style="width:16px; height:16px; accent-color:var(--primary); cursor:pointer;">
+                                    <input type="checkbox" name="m-locations" value="${l.id}" style="width:16px; height:16px; accent-color:var(--primary); cursor:pointer;">
                                     <span><i class='bx ${l.icon || 'bx-map-pin'}' style="color:var(--primary);"></i> ${Utils.escapeHTML(l.nameAR)}</span>
                                 </label>
                             `).join('')}
@@ -1338,10 +1393,25 @@ const App = {
                         </div>
                     </div>
 
+                    <!-- Primary Storage Location -->
+                    <div class="form-group" style="margin-bottom:14px;">
+                        <label class="form-label" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span><i class='bx bx-current-location'></i> مكان التخزين الأساسي (Primary):</span>
+                            <small style="color:var(--text-muted); font-size:11px;">(إجباري)</small>
+                        </label>
+                        <select id="e-primary-location" class="form-select" style="font-weight:bold; font-size:13px;" onchange="window.App._autocheckPrimaryLoc(this.value, 'e')">
+                            <option value="">اختر المكان الأساسي...</option>
+                            ${allLocs.map(l => {
+                                const isSelected = (med.primaryLocation === l.id) ? 'selected' : '';
+                                return `<option value="${l.id}" ${isSelected}>${Utils.escapeHTML(l.nameAR)}</option>`;
+                            }).join('')}
+                        </select>
+                    </div>
+
                     <!-- Storage Locations Multi-select in Edit -->
                     <div class="form-group" style="margin-bottom:14px;">
                         <label class="form-label" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                            <span><i class='bx bx-map-pin'></i> أماكن تواجد الدواء المعتمدة (Storage Locations):</span>
+                            <span><i class='bx bx-map-pin'></i> أماكن تواجد إضافية (Storage Locations):</span>
                             <small style="color:var(--text-muted); font-size:11px;">(حدد الأماكن المصرح بها)</small>
                         </label>
                         <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap:8px; max-height:140px; overflow-y:auto; background:var(--bg-secondary); padding:10px; border-radius:10px; border:1px solid var(--border-color);">
@@ -1583,6 +1653,12 @@ const App = {
                 selectedLocIds.push(cb.value);
             });
 
+            const primaryLoc = document.getElementById('m-primary-location')?.value || '';
+            // Auto-include primary location in allowedLocations
+            if (primaryLoc && !selectedLocIds.includes(primaryLoc)) {
+                selectedLocIds.unshift(primaryLoc);
+            }
+
             if (!nameEN || !categoryId) {
                 return UI.showToast('يرجى ملء اسم الدواء واختيار القسم', 'warning');
             }
@@ -1612,6 +1688,7 @@ const App = {
                 categoryId,
                 barcode: barcode || medId,
                 type,
+                primaryLocation: primaryLoc || null,
                 allowedLocations: selectedLocIds.length > 0 ? selectedLocIds : null,
                 imagePath: imgData,
                 syncStatus: 'local',
@@ -1703,6 +1780,12 @@ const App = {
                 selectedLocIds.push(cb.value);
             });
 
+            const primaryLoc = document.getElementById('e-primary-location')?.value || '';
+            // Auto-include primary location in allowedLocations
+            if (primaryLoc && !selectedLocIds.includes(primaryLoc)) {
+                selectedLocIds.unshift(primaryLoc);
+            }
+
             const updated = {
                 ...med,
                 nameEN: document.getElementById('e-name-en').value.trim(),
@@ -1711,6 +1794,7 @@ const App = {
                 barcode: (document.getElementById('e-barcode')?.value || med.barcode || med.id).trim(),
                 categoryId: document.getElementById('e-category').value,
                 type: document.getElementById('e-type').value,
+                primaryLocation: primaryLoc || null,
                 allowedLocations: selectedLocIds.length > 0 ? selectedLocIds : null,
                 imagePath: imgData,
                 syncStatus: 'local',
@@ -2002,19 +2086,33 @@ const App = {
     async handleGlobalSearch(query) {
         const q = (query || '').trim().toLowerCase();
         try {
-            let data = await Inventory.getCurrentStockProducts();
-            
-            // Respect active filter type if set
-            if (this.currentFilterType === 'expiry') {
-                const sixMonths = new Date();
-                sixMonths.setMonth(sixMonths.getMonth() + 6);
-                data = data.filter(i => (i.earliestExpiry || i.expiryDate) && new Date(i.earliestExpiry || i.expiryDate) <= sixMonths);
-            } else if (this.currentFilterType === 'low-stock') {
-                data = data.filter(i => (i.totalQuantity || 0) <= 5);
+            // Pure Catalog: Read from medicineMaster directly (no stock data)
+            let data = (await DB.getAll('medicineMaster')) || [];
+
+            // Filter by category
+            if (this.selectedCategoryId) {
+                const sel = this.selectedCategoryId;
+                const allCurrentCats = await Categories.getAllSorted();
+                const validCatIds = new Set(allCurrentCats.filter(c => c.id !== 'uncategorized').map(c => c.id));
+                data = data.filter(m => {
+                    const cat = m.categoryId;
+                    if (sel === 'uncategorized') {
+                        return !cat || cat === 'uncategorized' || !validCatIds.has(cat);
+                    }
+                    return cat === sel;
+                });
             }
 
-            if (this.selectedCategoryId) {
-                data = data.filter(m => m.categoryId === this.selectedCategoryId);
+            // Filter by location
+            if (this.selectedLocationId) {
+                const locId = this.selectedLocationId;
+                data = data.filter(m => {
+                    if (m.allowedLocations && Array.isArray(m.allowedLocations) && m.allowedLocations.length > 0) {
+                        return m.allowedLocations.includes(locId);
+                    }
+                    if (m.primaryLocation) return m.primaryLocation === locId;
+                    return false;
+                });
             }
 
             if (q.length > 0) {
@@ -2709,16 +2807,116 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
         try {
             const locs = await Locations.getAll();
-            container.innerHTML = locs.map(loc => {
+            const allMeds = (await DB.getAll('medicineMaster')) || [];
+
+            const htmlPromises = locs.map(async (loc) => {
+                // Count medicines assigned to this location
+                const medsInLoc = allMeds.filter(m => {
+                    if (m.allowedLocations && Array.isArray(m.allowedLocations) && m.allowedLocations.length > 0) {
+                        return m.allowedLocations.includes(loc.id);
+                    }
+                    if (m.primaryLocation === loc.id) return true;
+                    return false;
+                });
+                const count = medsInLoc.length;
+                const primaryCount = allMeds.filter(m => m.primaryLocation === loc.id).length;
+
                 return `
-                    <div class="square-card" onclick="window.App.openEditLocationModal('${loc.id}')" title="تعديل ${loc.nameAR}">
+                    <div class="square-card" onclick="window.App.openLocationDetailModal('${loc.id}')" title="استعراض أدوية ${loc.nameAR}">
                         <i class='bx ${loc.icon || 'bx-map-pin'} square-icon' style="color: ${loc.color || 'var(--primary)'}"></i>
                         <h3>${loc.nameAR}</h3>
+                        <span class="square-meta">${count} صنف</span>
+                        ${primaryCount > 0 ? `<span style="font-size:10px; color:var(--primary); font-weight:600;">⭐ ${primaryCount} أساسي</span>` : ''}
                     </div>
                 `;
-            }).join('');
+            });
+
+            container.innerHTML = (await Promise.all(htmlPromises)).join('');
         } catch (err) {
             console.error('Error rendering warehouse locations:', err);
+        }
+    },
+
+    // --- Interactive Location Detail Modal (Location Hub) ---
+    async openLocationDetailModal(locId) {
+        try {
+            const loc = await Locations.get(locId);
+            if (!loc) return UI.showToast('تعذر العثور على المكان', 'warning');
+
+            const medsInLoc = await Locations.getMedicinesForLocation(locId);
+
+            UI.showModal(`
+                <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:16px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <div style="width:44px; height:44px; border-radius:12px; background:${loc.color || 'var(--primary)'}15; display:flex; align-items:center; justify-content:center;">
+                            <i class='bx ${loc.icon || 'bx-map-pin'}' style="font-size:24px; color:${loc.color || 'var(--primary)'}"></i>
+                        </div>
+                        <div>
+                            <h2 style="margin:0; font-size:18px;">${Utils.escapeHTML(loc.nameAR)}</h2>
+                            <small class="text-muted">${loc.description || 'مكان تخزين'} — ${medsInLoc.length} صنف</small>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn-ghost sm-btn" onclick="window.App.openEditLocationModal('${locId}')" title="تعديل بيانات المكان">
+                            <i class='bx bx-edit'></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="category-meds-list" style="max-height:380px; overflow-y:auto; display:flex; flex-direction:column; gap:10px;">
+                    ${medsInLoc.map(m => {
+                        const img = Categories.getMedicineImage(m);
+                        const isPrimary = m.primaryLocation === locId;
+                        return `
+                            <div class="cat-med-item" style="display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:12px;">
+                                <div style="width:40px; height:40px; border-radius:8px; overflow:hidden; flex-shrink:0;">
+                                    <img src="${img}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                                </div>
+                                <div style="flex:1; min-width:0;">
+                                    <h4 style="margin:0; font-size:13px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${m.nameEN || m.nameAR}</h4>
+                                    <div style="display:flex; align-items:center; gap:6px; margin-top:2px;">
+                                        <span style="font-size:11px; color:var(--text-muted);">${m.nameAR && m.nameAR !== m.nameEN ? m.nameAR : (m.activeIngredient || 'دواء')}</span>
+                                        ${isPrimary ? '<span style="font-size:9px; background:var(--primary); color:white; padding:1px 5px; border-radius:4px; font-weight:bold;">أساسي ⭐</span>' : ''}
+                                    </div>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:6px;">
+                                    <button class="icon-btn" onclick="window.App.openMedicineDetails('${m.id}')" title="عرض تفاصيل الدواء" style="padding:4px;">
+                                        <i class='bx bx-show' style="font-size:16px;"></i>
+                                    </button>
+                                    <button class="icon-btn" onclick="window.App.openEditMedicine('${m.id}')" title="تعديل الدواء" style="padding:4px;">
+                                        <i class='bx bx-edit-alt' style="font-size:16px;"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                    ${medsInLoc.length === 0 ? `
+                        <div class="empty-state" style="padding:24px; text-align:center;">
+                            <i class='bx bx-map-pin' style="font-size:36px; color:var(--text-muted);"></i>
+                            <p style="font-size:13px; color:var(--text-muted); margin:8px 0;">لا توجد أدوية محددة لهذا المكان حالياً</p>
+                            <p style="font-size:11px; color:var(--text-muted);">أضف أدوية واختر هذا المكان كمكان تخزين أساسي أو إضافي</p>
+                        </div>
+                    ` : ''}
+                </div>
+
+                <div style="display:flex; gap:8px; margin-top:14px; border-top:1px solid var(--border-color); padding-top:12px;">
+                    <button type="button" class="btn-ghost sm-btn w-100" onclick="window.UI.closeModal()" style="font-size:12px; padding:8px;">
+                        إغلاق النافذة
+                    </button>
+                </div>
+            `);
+        } catch (err) {
+            console.error('Error opening location detail:', err);
+            UI.showToast('خطأ في تحميل بيانات المكان', 'danger');
+        }
+    },
+
+    // Auto-check primary location in multi-select checkboxes
+    _autocheckPrimaryLoc(locId, prefix) {
+        if (!locId) return;
+        const checkbox = document.querySelector(`input[name="${prefix}-locations"][value="${locId}"]`);
+        if (checkbox && !checkbox.checked) {
+            checkbox.checked = true;
         }
     },
 
