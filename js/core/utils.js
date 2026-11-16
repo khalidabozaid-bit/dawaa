@@ -48,6 +48,16 @@ export const Utils = {
         return { label: 'صالح', class: 'status-safe' };
     },
 
+    escapeHTML(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    },
+
     debounce(func, wait = 300) {
         let timeout;
         return function(...args) {

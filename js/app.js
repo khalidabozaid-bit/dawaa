@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.6.6)
+ * Dawaa App Orchestrator (v18.6.7)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.6.6', // Universal Sovereign v18.6.6
+    VERSION: '18.6.7', // Universal Sovereign v18.6.7
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1834,7 +1834,7 @@ App.handleBackup = async function() {
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.6.6'
+            version: '18.6.7'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -3122,12 +3122,12 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     <div>
                         <span style="font-size:11px; font-weight:bold; color:var(--text-muted);">المستخدم النشط حالياً بالنظام:</span>
                         <div style="display:flex; align-items:center; gap:6px;">
-                            <strong style="font-size:15px; color:var(--text-main);">${active.name}</strong>
+                            <strong style="font-size:15px; color:var(--text-main);">${Utils.escapeHTML(active.name)}</strong>
                             <span class="badge ${active.role === 'admin' ? 'bg-primary text-white' : 'bg-secondary'}" style="font-size:10px; padding:2px 6px; border-radius:4px;">
                                 ${active.role === 'admin' ? 'مدير 🛡️' : 'صيدلي 💊'}
                             </span>
                         </div>
-                        <small style="color:var(--text-muted); font-size:11px;">${active.title || 'مسؤول الصيدلية'}</small>
+                        <small style="color:var(--text-muted); font-size:11px;">${Utils.escapeHTML(active.title || 'مسؤول الصيدلية')}</small>
                     </div>
                 </div>
                 <span class="badge" style="background:#10b981; color:white; font-size:11px; padding:4px 8px; border-radius:6px; font-weight:bold;">
@@ -3147,12 +3147,12 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                                 </div>
                                 <div>
                                     <div style="display:flex; align-items:center; gap:6px;">
-                                        <strong style="font-size:14px;">${member.name}</strong>
+                                        <strong style="font-size:14px;">${Utils.escapeHTML(member.name)}</strong>
                                         <span class="badge ${member.role === 'admin' ? 'bg-primary text-white' : 'bg-secondary'}" style="font-size:10px; padding:1px 5px; border-radius:4px;">
                                             ${member.role === 'admin' ? 'مدير 🛡️' : 'صيدلي 💊'}
                                         </span>
                                     </div>
-                                    <small style="color:var(--text-muted); font-size:11px;">${member.title || 'عضو فريق'}</small>
+                                    <small style="color:var(--text-muted); font-size:11px;">${Utils.escapeHTML(member.title || 'عضو فريق')}</small>
                                 </div>
                             </div>
                             <div style="display:flex; align-items:center; gap:6px;">
@@ -3238,11 +3238,11 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             <form onsubmit="event.preventDefault(); window.App.saveEditUserFromSettings('${user.id}');">
                 <div class="form-group mb-12">
                     <label class="form-label">الاسم:</label>
-                    <input type="text" id="edit-user-name" class="form-input" value="${user.name}" required>
+                    <input type="text" id="edit-user-name" class="form-input" value="${Utils.escapeHTML(user.name)}" required>
                 </div>
                 <div class="form-group mb-12">
                     <label class="form-label">المسمى الوظيفي:</label>
-                    <input type="text" id="edit-user-title" class="form-input" value="${user.title || ''}">
+                    <input type="text" id="edit-user-title" class="form-input" value="${Utils.escapeHTML(user.title || '')}">
                 </div>
                 <div class="form-group mb-15">
                     <label class="form-label">الصلاحيات:</label>
