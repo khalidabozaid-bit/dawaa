@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.6.4)
+ * Dawaa App Orchestrator (v18.6.5)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.6.4', // Universal Sovereign v18.6.4
+    VERSION: '18.6.5', // Universal Sovereign v18.6.5
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1401,12 +1401,20 @@ const App = {
             }
 
             if (q.length > 0) {
-                data = data.filter(m => 
-                    (m.nameEN && m.nameEN.toLowerCase().includes(q)) ||
-                    (m.nameAR && m.nameAR.toLowerCase().includes(q)) ||
-                    (m.categoryId && m.categoryId.toLowerCase().includes(q)) ||
-                    (m.id && m.id.toLowerCase().includes(q))
-                );
+                const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(q) : q;
+                data = data.filter(m => {
+                    const en = (m.nameEN || '').toLowerCase();
+                    const arRaw = (m.nameAR || '').toLowerCase();
+                    const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(arRaw) : arRaw;
+                    const cat = (m.categoryId || '').toLowerCase();
+                    const id = String(m.id || '').toLowerCase();
+
+                    return en.includes(q) ||
+                           arRaw.includes(q) ||
+                           arNorm.includes(qNorm) ||
+                           cat.includes(q) ||
+                           id.includes(q);
+                });
             }
 
             this.renderInventoryList(data, 'inventory-items-list', true);
@@ -1493,7 +1501,7 @@ const App = {
                         </div>
                         <div class="form-group">
                             <label class="form-label">تاريخ الصلاحية:</label>
-                            <input type="month" id="qa-expiry" class="form-input" value="2027-12" required>
+                            <input type="month" id="qa-expiry" class="form-input" value="${(typeof Utils !== 'undefined' && Utils.getDefaultExpiry) ? Utils.getDefaultExpiry() : (new Date().getFullYear() + 2) + '-12'}" required>
                         </div>
                     </div>
                     <div class="form-group" style="margin-bottom:15px;">
@@ -1604,7 +1612,7 @@ const App = {
             const nameAR = document.getElementById('qa-name-ar').value.trim() || nameEN;
             const categoryId = document.getElementById('qa-category').value;
             const qty = Number(document.getElementById('qa-qty').value) || 0;
-            const expiry = document.getElementById('qa-expiry').value || '2027-12';
+            const expiry = document.getElementById('qa-expiry').value || ((typeof Utils !== 'undefined' && Utils.getDefaultExpiry) ? Utils.getDefaultExpiry() : (new Date().getFullYear() + 2) + '-12');
             const location = document.getElementById('qa-location').value.trim() || 'المستودع الرئيسي';
 
             if (!nameEN || !categoryId) {
@@ -1663,12 +1671,12 @@ const App = {
                 entry.lastUpdated = now;
                 await DB.put('inventory', entry);
             } else {
-                const newQty = Math.max(0, 15 + delta);
+                const newQty = Math.max(0, delta);
                 entry = {
                     id: 'inv_' + medId,
                     medicineId: medId,
                     quantity: newQty,
-                    expiryDate: '2027-12-31',
+                    expiryDate: `${new Date().getFullYear() + 2}-12-31`,
                     location: 'المستودع الرئيسي',
                     lastUpdated: now
                 };
@@ -1717,14 +1725,14 @@ const App = {
             UI.showModal(`
                 <div class="modal-header">
                     <h2>إدارة الأقسام والتبويب</h2>
-                    <button class="btn-primary sm-btn" onclick="window.App.openAddCategory()">+ قسم جديد</button>
+                    <button class="btn-primary sm-btn" onclick="window.App.openAddCategoryModal()">+ قسم جديد</button>
                 </div>
                 <div class="items-list mini">
                     ${cats.map(c => {
                         const count = allMeds.filter(m => m.categoryId === c.id).length;
                         return `
                             <div class="cat-manage-item">
-                                <div class="cat-info" onclick="window.App.openEditCategory('${c.id}')" style="cursor:pointer">
+                                <div class="cat-info" onclick="window.App.openEditCategoryModal('${c.id}')" style="cursor:pointer">
                                     <i class='bx ${c.icon}' style="color: ${c.color}; font-size: 24px;"></i>
                                     <div style="display:flex; flex-direction:column">
                                         <span style="font-weight:800">${c.nameAR}</span>
@@ -1732,7 +1740,7 @@ const App = {
                                     </div>
                                 </div>
                                 <div class="cat-actions">
-                                    <button class="icon-btn" onclick="window.App.confirmDeleteCategory('${c.id}')" title="حذف القسم"><i class='bx bx-trash' style="color:var(--danger)"></i></button>
+                                    <button class="icon-btn" onclick="window.App.deleteCategoryConfirm('${c.id}')" title="حذف القسم"><i class='bx bx-trash' style="color:var(--danger)"></i></button>
                                 </div>
                             </div>
                         `;
@@ -1746,95 +1754,20 @@ const App = {
     },
 
     openAddCategory() {
-        UI.showModal(`
-            <div class="modal-header"><h2>إضافة قسم جديد</h2></div>
-            <form id="form-add-cat" onsubmit="event.preventDefault(); window.App.saveCategory();">
-                <div class="form-group">
-                    <label class="form-label">اسم القسم (بالعربية):</label>
-                    <input type="text" id="cat-name" class="form-input" placeholder="مثلاً: فيتامينات" required>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">الأيقونة (Boxicons):</label>
-                    <input type="text" id="cat-icon" class="form-input" value="bx-package">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">اللون مميز:</label>
-                    <input type="color" id="cat-color" class="form-input" style="height:45px" value="#64748b">
-                </div>
-                <div class="form-actions mt-20">
-                    <button type="submit" class="btn-primary">حفظ القسم</button>
-                    <button type="button" class="btn-ghost" onclick="window.App.openManageCategories()">رجوع</button>
-                </div>
-            </form>
-        `);
+        this.openAddCategoryModal();
     },
 
-    async openEditCategory(id) {
-        try {
-            const cat = await Categories.getInfo(id);
-            UI.showModal(`
-                <div class="modal-header"><h2>تعديل قسم: ${cat.nameAR}</h2></div>
-                <form id="form-edit-cat" onsubmit="event.preventDefault(); window.App.saveCategory('${id}');">
-                    <div class="form-group">
-                        <label class="form-label">اسم القسم:</label>
-                        <input type="text" id="cat-name" class="form-input" value="${cat.nameAR}" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">الأيقونة:</label>
-                        <input type="text" id="cat-icon" class="form-input" value="${cat.icon || 'bx-package'}">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">اللون:</label>
-                        <input type="color" id="cat-color" class="form-input" style="height:45px" value="${cat.color || '#64748b'}">
-                    </div>
-                    <div class="form-actions mt-20">
-                        <button type="submit" class="btn-primary">تحديث</button>
-                        <button type="button" class="btn-ghost" onclick="window.App.openManageCategories()">رجوع</button>
-                    </div>
-                </form>
-            `);
-        } catch (err) {
-            UI.showToast('خطأ في تحميل بيانات القسم', 'danger');
-        }
+    openEditCategory(id) {
+        this.openEditCategoryModal(id);
     },
 
     async saveCategory(id = null) {
-        try {
-            const name = document.getElementById('cat-name').value.trim();
-            const icon = document.getElementById('cat-icon').value.trim();
-            const color = document.getElementById('cat-color').value;
-            
-            if (!name) return;
-            
-            const cat = {
-                id: id || name.toLowerCase().replace(/\s+/g, '-'),
-                nameAR: name,
-                icon: icon,
-                color: color
-            };
-            
-            await Categories.saveCategory(cat);
-            UI.showToast('تم حفظ القسم بنجاح ✨', 'success');
-            this.openManageCategories();
-        } catch (err) {
-            UI.showToast('فشل حفظ القسم', 'danger');
-        }
+        return this.saveCategoryForm(id);
     },
 
-
     async confirmDeleteCategory(catId) {
-        try {
-            const meds = await Categories.getMedicinesByCategoryId(catId);
-            const cat = await Categories.getInfo(catId);
-            
-            if (meds.length === 0) {
-                if (confirm(`هل أنت متأكد من حذف قسم "${cat.nameAR}"؟`)) {
-                    await Categories.deleteCategory(catId);
-                    UI.showToast('تم حذف القسم', 'success');
-                    this.openManageCategories();
-                }
-                return;
-            }
+        return this.deleteCategoryConfirm(catId);
+    },
 
             UI.showModal(`
                 <div class="modal-header"><h2>حذف قسم: ${cat.nameAR}</h2></div>
@@ -1918,7 +1851,7 @@ App.handleBackup = async function() {
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.6.4'
+            version: '18.6.5'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -2641,17 +2574,23 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     },
 
     async saveCategoryForm(id = null) {
+        const nameEl = document.getElementById('cat-name-ar');
+        const iconEl = document.getElementById('cat-icon');
+        const colorEl = document.getElementById('cat-color');
+        if (!nameEl || !nameEl.value.trim()) return;
+
         const data = {
             id: id || Utils.generateId(),
-            nameAR: document.getElementById('cat-name-ar').value.trim(),
-            icon: document.getElementById('cat-icon').value,
-            color: document.getElementById('cat-color').value
+            nameAR: nameEl.value.trim(),
+            icon: iconEl ? iconEl.value : 'bx-capsule',
+            color: colorEl ? colorEl.value : '#3b82f6'
         };
         await Categories.saveCategory(data);
         UI.closeModal();
         UI.showToast('تم حفظ التصنيف بنجاح ✨', 'success');
-        this.renderWarehouseCategories();
-        this.renderCategoryChips();
+        if (typeof this.renderWarehouseCategories === 'function') this.renderWarehouseCategories();
+        if (typeof this.renderCategoryChips === 'function') this.renderCategoryChips();
+        if (typeof this.renderInventory === 'function') this.renderInventory();
     },
 
     async deleteCategoryConfirm(id) {
@@ -2659,8 +2598,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         await Categories.deleteCategory(id);
         UI.closeModal();
         UI.showToast('تم حذف التصنيف', 'info');
-        this.renderWarehouseCategories();
-        this.renderCategoryChips();
+        if (typeof this.renderWarehouseCategories === 'function') this.renderWarehouseCategories();
+        if (typeof this.renderCategoryChips === 'function') this.renderCategoryChips();
+        if (typeof this.renderInventory === 'function') this.renderInventory();
     },
 
     // =========================================================================
@@ -2957,7 +2897,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         medAR: med.nameAR,
                         location: loc,
                         quantity: b.quantity,
-                        expiryDate: b.expiryDate || '2027-12',
+                        expiryDate: b.expiryDate || 'غير محدد',
                         countedBy: record.userName || session.host
                     });
                 }
@@ -2969,7 +2909,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 <div class="modal-header" style="border-bottom:1px solid var(--border-color); padding-bottom:10px; margin-bottom:12px;">
                     <div>
                         <h2 style="margin:0; font-size:16px;">📋 كشف تفاصيل: ${session.name}</h2>
-                        <small class="text-muted">تاريخ الاعتماد: ${new Date(session.finalizedAt || session.startedAt).toLocaleDateString('ar-EG')} | القائم بالجرد: ${session.host || 'خالد'}</small>
+                        <small class="text-muted">تاريخ الاعتماد: ${new Date(session.finalizedAt || session.startedAt).toLocaleDateString('ar-EG')} | القائم بالجرد: ${session.host || this.getActiveUserName()}</small>
                     </div>
                 </div>
 
@@ -3390,7 +3330,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     },
 
     getActiveUserName() {
-        return (typeof Users !== 'undefined' && Users.getActive()) ? Users.getActive().name : (this.userName || 'خالد');
+        return (typeof Users !== 'undefined' && Users.getActive()) ? Users.getActive().name : (this.userName || 'مسؤول الصيدلية');
     },
 
     async joinGroupAuditSession(sessionId) {
@@ -3402,7 +3342,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     async recordZeroCountModal(medicineId) {
         if (!confirm('هل تريد تسجيل هذا الصنف كغير متوفر (رصيد صفر) في هذا المكان؟')) return;
         await Audit.recordCount(this.selectedAuditSessionId, this.selectedAuditLocationId, medicineId, {
-            batches: [{ quantity: 0, expiryDate: '2027-12' }]
+            batches: [{ quantity: 0, expiryDate: '' }]
         });
         UI.closeModal();
         UI.showToast('تم تسجيل رصيد الصنف كـ صفر (0) بنجاح ✅', 'info');
@@ -3745,21 +3685,21 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const existingCount = (session?.counts && session.counts[countKey]) || null;
         const imgUrl = Categories.getMedicineImage(med);
 
+        const defaultYear = new Date().getFullYear() + 2;
+        const defaultExpiry = `${defaultYear}-12`;
+
         // Clean slate for session: if not counted in this session, start completely empty!
         let initialBatches = [];
         if (existingCount && Array.isArray(existingCount.batches) && existingCount.batches.length > 0) {
             initialBatches = existingCount.batches.map(b => ({ ...b }));
         } else if (existingCount && existingCount.quantity !== undefined) {
-            initialBatches = [{ quantity: existingCount.quantity, expiryDate: existingCount.expiryDate || '2027-12' }];
+            initialBatches = [{ quantity: existingCount.quantity, expiryDate: existingCount.expiryDate || defaultExpiry }];
         } else {
             initialBatches = []; // Clean slate: no previous quantities lingering!
         }
 
         this._modalMedicineId = medicineId;
         this._modalBatches = initialBatches;
-
-        const defaultYear = new Date().getFullYear() + 2;
-        const defaultExpiry = `${defaultYear}-12`;
         const initialBadge = this.calcExpiryBadge(defaultExpiry);
 
         UI.showModal(`
@@ -3996,7 +3936,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     sourceMeta = {
                         name: lastFinalized.name,
                         date: new Date(lastFinalized.finalizedAt || lastFinalized.updatedAt).toLocaleDateString('ar-EG'),
-                        host: lastFinalized.host || 'خالد',
+                        host: lastFinalized.host || this.getActiveUserName(),
                         statusText: 'آخر جرد معتمد 🏁'
                     };
                 }
@@ -4012,7 +3952,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         imagePath: med.imagePath,
                         location: locName,
                         quantity: item.quantity,
-                        expiryDate: item.expiryDate || '2027-12',
+                        expiryDate: item.expiryDate || 'غير محدد',
                         badge: badge
                     };
                 });
@@ -4022,7 +3962,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     sourceMeta = {
                         name: targetSession.name,
                         date: new Date(targetSession.startedAt).toLocaleDateString('ar-EG'),
-                        host: targetSession.host || 'خالد',
+                        host: targetSession.host || this.getActiveUserName(),
                         statusText: targetSession.status === 'finalized' ? 'معتمد 🏁' : (targetSession.status === 'active' ? 'جاري 🟢' : 'معلق ⏸️')
                     };
                     const counts = targetSession.counts || {};
@@ -4041,7 +3981,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                                 imagePath: med.imagePath,
                                 location: locName,
                                 quantity: b.quantity,
-                                expiryDate: b.expiryDate || '2027-12',
+                                expiryDate: b.expiryDate || 'غير محدد',
                                 badge: this.calcExpiryBadge(b.expiryDate)
                             });
                         }

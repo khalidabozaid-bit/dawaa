@@ -163,16 +163,26 @@ export const Categories = {
 
     async searchMaster(query) {
         if (!query) return [];
-        const q = String(query).trim().toLowerCase();
-        if (!q) return [];
+        const qRaw = String(query).trim().toLowerCase();
+        if (!qRaw) return [];
+        const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(qRaw) : qRaw;
         const all = (await DB.getAll('medicineMaster')) || [];
         return all
-            .filter(m => 
-                (m.nameEN || '').toLowerCase().includes(q) || 
-                (m.nameAR || '').toLowerCase().includes(q) ||
-                (m.id || '').toString().includes(q) ||
-                (m.activeIngredient || '').toLowerCase().includes(q)
-            )
+            .filter(m => {
+                const en = (m.nameEN || '').toLowerCase();
+                const arRaw = (m.nameAR || '').toLowerCase();
+                const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(arRaw) : arRaw;
+                const actRaw = (m.activeIngredient || '').toLowerCase();
+                const actNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(actRaw) : actRaw;
+                const id = String(m.id || '').toLowerCase();
+
+                return en.includes(qRaw) ||
+                       arRaw.includes(qRaw) ||
+                       arNorm.includes(qNorm) ||
+                       actRaw.includes(qRaw) ||
+                       actNorm.includes(qNorm) ||
+                       id.includes(qRaw);
+            })
             .sort((a, b) => (a.nameEN || '').localeCompare(b.nameEN || ''));
     },
 

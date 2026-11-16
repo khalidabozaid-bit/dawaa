@@ -57,6 +57,28 @@ export const Utils = {
         };
     },
 
+    normalizeArabic(text) {
+        if (!text) return '';
+        return String(text)
+            .toLowerCase()
+            .trim()
+            .replace(/[أإآٱ]/g, 'ا')
+            .replace(/ة/g, 'ه')
+            .replace(/[ىئ]/g, 'ي')
+            .replace(/ؤ/g, 'و')
+            .replace(/ڤ/g, 'ف')
+            .replace(/پ/g, 'ب')
+            .replace(/چ/g, 'ج')
+            .replace(/گ/g, 'ك')
+            .replace(/[\u064B-\u065F\u0670]/g, '')
+            .replace(/\u0640/g, '');
+    },
+
+    getDefaultExpiry(yearsAhead = 2) {
+        const y = new Date().getFullYear() + yearsAhead;
+        return `${y}-12`;
+    },
+
     fileToBase64(file) {
         return new Promise((resolve, reject) => {
             if (!file) return resolve(null);
