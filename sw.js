@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'dawaa-cache-v18.11.0';
+const CACHE_NAME = 'dawaa-cache-v18.11.1';
 const IMAGE_CACHE_NAME = 'dawaa-images-v1';
 const MAX_IMAGES = 1000;
 
@@ -39,7 +39,7 @@ const ASSETS_TO_CACHE = [
   'https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js',
   'https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@400;500;600;700;800&display=swap',
   'https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css',
-  'https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js'
+  'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
 ];
 
 self.addEventListener('install', (event) => {

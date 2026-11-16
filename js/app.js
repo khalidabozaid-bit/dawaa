@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.11.0', // Desktop responsive layout — sidebar nav, wider grids, centered modals, tablet/desktop/wide breakpoints
+    VERSION: '18.11.1', // Fix XLSX CDN, redesign audit sessions UI
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -3563,8 +3563,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         container.innerHTML = `
             <div class="view-header">
                 <div class="header-left">
-                    <h2>مركز عمليات الجرد الميداني</h2>
-                    <p class="text-muted small">جرد منظم وهرمي: جلسة ⬅️ أماكن ⬅️ تصنيفات ⬅️ أدوية</p>
+                    <h2>مركز عمليات الجرد</h2>
                 </div>
                 <button class="btn-primary sm-btn" onclick="window.App.openNewAuditModal()">
                     <i class='bx bx-plus'></i> بدء جرد جديد
@@ -3572,67 +3571,72 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             </div>
 
             <!-- Active / On-Hold Sessions -->
-            <div class="section-title mt-15 mb-10" style="display:flex; justify-content:space-between; align-items:center;">
-                <h3><i class='bx bx-play-circle'></i> الجلسات الجارية والمعلقة (${activeSessions.length})</h3>
+            <div style="margin-bottom: 8px; font-size: 13px; font-weight: 800; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
+                <i class='bx bx-play-circle' style="font-size: 16px; color: var(--primary);"></i>
+                الجلسات الجارية (${activeSessions.length})
             </div>
             
             ${activeSessions.length === 0 ? `
-                <div class="empty-state mb-20" style="padding: 25px; text-align: center; background: var(--surface); border-radius: 16px; border: 1px dashed var(--border-color);">
-                    <i class='bx bx-clipboard' style="font-size: 38px; color: var(--primary); opacity: 0.6;"></i>
-                    <h3 style="margin: 8px 0 4px 0; font-size: 15px;">لا توجد جلسة جرد جارية حالياً</h3>
-                    <p class="text-muted small mb-12">ابدأ جرد جديد مستقل وحدد الأماكن لبدء العد الميداني النظيف</p>
-                    <button class="btn-primary sm-btn" onclick="window.App.openNewAuditModal()">+ بدء جرد جديد الآن</button>
+                <div style="padding: 30px; text-align: center; background: var(--surface); border-radius: 16px; border: 1px dashed var(--border-color); margin-bottom: 24px;">
+                    <i class='bx bx-clipboard' style="font-size: 38px; color: var(--primary); opacity: 0.5;"></i>
+                    <h3 style="margin: 8px 0 4px; font-size: 14px;">لا توجد جلسة جارية</h3>
+                    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">ابدأ جرد جديد الآن</p>
+                    <button class="btn-primary sm-btn" onclick="window.App.openNewAuditModal()">+ بدء جرد</button>
                 </div>
             ` : `
-                <div class="sessions-list mb-25" style="display: flex; flex-direction: column; gap: 12px;">
+                <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px;">
                     ${activeSessions.map(s => {
                         const isHold = s.status === 'on_hold';
                         const countKeys = Object.keys(s.counts || {}).length;
+                        const totalLocs = (s.locationIds || []).length;
                         return `
-                            <div class="card p-15" style="background: var(--surface); border-radius: 16px; border: 1px solid var(--border-color); box-shadow: var(--shadow-sm);">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="badge ${isHold ? 'bg-soft text-warning' : 'bg-primary text-white'}" style="padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: bold;">
-                                            ${isHold ? '⏸️ معلقة' : '🟢 جارية'}
-                                        </span>
-                                        <span class="badge ${s.type === 'group' ? 'bg-info' : 'bg-secondary'}" style="padding: 3px 8px; border-radius: 6px; font-size: 11px;">
-                                            ${s.type === 'group' ? '👥 جماعي' : '👤 فردي'}
-                                        </span>
-                                        <h3 style="margin: 0; font-size: 15px; font-weight: 800;">${Utils.escapeHTML(s.name)}</h3>
+                            <div style="background: var(--surface); border-radius: 16px; border: 1px solid var(--border-color); box-shadow: var(--shadow-sm); overflow: hidden;">
+                                <!-- Session Header -->
+                                <div style="padding: 14px 16px; border-bottom: 1px solid var(--border-color);">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                            <span style="padding: 3px 10px; border-radius: 8px; font-size: 11px; font-weight: 800; ${isHold ? 'background: #fef3c7; color: #92400e;' : 'background: rgba(16,185,129,0.12); color: #065f46;'}">
+                                                ${isHold ? '⏸️ معلقة' : '🟢 جارية'}
+                                            </span>
+                                            <strong style="font-size: 15px;">${Utils.escapeHTML(s.name)}</strong>
+                                        </div>
+                                        <span style="font-size: 11px; color: var(--text-muted);">${new Date(s.startedAt).toLocaleDateString('ar-EG')}</span>
                                     </div>
-                                    <span style="font-size: 11px; color: var(--text-muted);">${new Date(s.startedAt).toLocaleDateString('ar-EG')}</span>
+                                    <div style="display: flex; gap: 12px; margin-top: 6px; font-size: 11px; color: var(--text-muted); font-weight: 600;">
+                                        <span><i class='bx bx-check-circle' style="color: var(--secondary);"></i> ${countKeys} صنف</span>
+                                        <span><i class='bx bx-map' style="color: var(--primary);"></i> ${totalLocs} مكان</span>
+                                        <span>${s.type === 'group' ? '👥 جماعي' : '👤 فردي'}</span>
+                                    </div>
                                 </div>
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; flex-wrap: wrap; gap: 8px;">
-                                    <span style="font-size: 12px; font-weight: 700; color: var(--text-muted);">
-                                        <i class='bx bx-check-circle' style="color: var(--secondary)"></i> تم إحصاء: <strong>${countKeys} صنف</strong>
-                                    </span>
-                                    <div style="display: flex; gap: 6px; align-items: center;">
-                                        <button class="btn-primary sm-btn" onclick="window.App.openAuditSession('${s.id}')" title="متابعة العد">
-                                            ▶️ متابعة الجرد
-                                        </button>
-                                        <button class="btn-ghost sm-btn" onclick="window.App.openExportOptionsModal('${s.id}')" title="تصدير إكسيل">
-                                            <i class='bx bx-download'></i> Excel
-                                        </button>
+                                <!-- Session Actions -->
+                                <div style="padding: 10px 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                                    <button class="btn-primary sm-btn" onclick="window.App.openAuditSession('${s.id}')" style="flex: 1; min-width: 120px;">
+                                        ▶️ متابعة الجرد
+                                    </button>
+                                    <button class="btn-ghost sm-btn" onclick="window.App.openExportOptionsModal('${s.id}')" title="تصدير Excel">
+                                        <i class='bx bx-download'></i> Excel
+                                    </button>
+                                    <div style="display: flex; gap: 4px; margin-right: auto;">
                                         ${!isHold ? `
-                                            <button class="btn-ghost sm-btn" onclick="window.App.holdAuditSession('${s.id}')" title="تعليق مؤقت">
-                                                ⏸️
+                                            <button class="icon-btn" onclick="window.App.holdAuditSession('${s.id}')" title="تعليق" style="width:34px; height:34px;">
+                                                <i class='bx bx-pause' style="font-size:16px; color: var(--accent);"></i>
                                             </button>
                                         ` : `
-                                            <button class="btn-ghost sm-btn" onclick="window.App.resumeAuditSession('${s.id}')" title="استئناف">
-                                                ▶️
+                                            <button class="icon-btn" onclick="window.App.resumeAuditSession('${s.id}')" title="استئناف" style="width:34px; height:34px;">
+                                                <i class='bx bx-play' style="font-size:16px; color: var(--secondary);"></i>
                                             </button>
                                         `}
-                                        <button class="btn-ghost sm-btn text-danger" onclick="window.App.finalizeAuditSession('${s.id}')" title="إنهاء واعتماد وتحديث المستودع">
-                                            🏁
+                                        <button class="icon-btn" onclick="window.App.finalizeAuditSession('${s.id}')" title="إنهاء واعتماد" style="width:34px; height:34px;">
+                                            <i class='bx bx-check-double' style="font-size:16px; color: var(--secondary);"></i>
                                         </button>
-                                        <button class="icon-btn" onclick="window.App.openEditAuditSessionModal('${s.id}')" title="تعديل بيانات الجلسة" style="padding: 4px;">
-                                            <i class='bx bx-edit-alt' style="font-size: 16px;"></i>
+                                        <button class="icon-btn" onclick="window.App.openEditAuditSessionModal('${s.id}')" title="تعديل" style="width:34px; height:34px;">
+                                            <i class='bx bx-edit-alt' style="font-size:14px;"></i>
                                         </button>
-                                        <button class="icon-btn text-warning" onclick="window.App.archiveAuditSession('${s.id}')" title="أرشفة الجلسة" style="padding: 4px;">
-                                            <i class='bx bx-archive-in' style="font-size: 16px; color: var(--accent);"></i>
+                                        <button class="icon-btn" onclick="window.App.archiveAuditSession('${s.id}')" title="أرشفة" style="width:34px; height:34px;">
+                                            <i class='bx bx-archive-in' style="font-size:14px; color: var(--accent);"></i>
                                         </button>
-                                        <button class="icon-btn text-danger" onclick="window.App.deleteAuditSession('${s.id}')" title="حذف الجلسة نهائياً" style="padding: 4px;">
-                                            <i class='bx bx-trash' style="font-size: 16px; color: var(--danger);"></i>
+                                        <button class="icon-btn" onclick="window.App.deleteAuditSession('${s.id}')" title="حذف" style="width:34px; height:34px;">
+                                            <i class='bx bx-trash' style="font-size:14px; color: var(--danger);"></i>
                                         </button>
                                     </div>
                                 </div>
@@ -3643,51 +3647,54 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             `}
 
             <!-- Closed / Completed / Archived Sessions -->
-            <div class="section-title mb-10" style="display:flex; justify-content:space-between; align-items:center;">
-                <h3><i class='bx bx-archive'></i> أرشيف الجلسات المعتمدة والسابقة (${closedSessions.length})</h3>
+            <div style="margin-bottom: 8px; font-size: 13px; font-weight: 800; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
+                <i class='bx bx-archive' style="font-size: 16px; color: var(--accent);"></i>
+                الأرشيف والمعتمدة (${closedSessions.length})
             </div>
             ${closedSessions.length > 0 ? `
-                <div class="sessions-list" style="display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; flex-direction: column; gap: 10px;">
                     ${closedSessions.map(s => {
                         const countKeys = Object.keys(s.counts || {}).length;
                         const isFinal = s.status === 'finalized';
                         return `
-                            <div class="card p-12" style="background: var(--surface); border: 1px solid var(--border-color); border-radius: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-                                <div>
-                                    <div style="display: flex; align-items: center; gap: 6px;">
-                                        <span class="badge ${isFinal ? 'bg-success' : 'bg-secondary'}" style="font-size: 10px; padding: 2px 6px; border-radius: 4px;">
-                                            ${isFinal ? 'معتمد 🏁' : 'مؤرشف 📦'}
-                                        </span>
-                                        <strong style="font-size: 14px;">${Utils.escapeHTML(s.name)}</strong>
+                            <div style="background: var(--surface); border-radius: 14px; border: 1px solid var(--border-color); padding: 14px 16px;">
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
+                                    <div style="flex: 1; min-width: 0;">
+                                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                                            <span style="padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 800; ${isFinal ? 'background: rgba(16,185,129,0.12); color: #065f46;' : 'background: var(--bg-secondary); color: var(--text-muted);'}">
+                                                ${isFinal ? '✅ معتمد' : '📦 مؤرشف'}
+                                            </span>
+                                            <strong style="font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${Utils.escapeHTML(s.name)}</strong>
+                                        </div>
+                                        <div style="font-size: 11px; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap;">
+                                            <span><i class='bx bx-user'></i> ${s.host || 'النظام'}</span>
+                                            <span>•</span>
+                                            <span>${countKeys} صنف</span>
+                                            <span>•</span>
+                                            <span>${new Date(s.finalizedAt || s.startedAt).toLocaleDateString('ar-EG')}</span>
+                                        </div>
                                     </div>
-                                    <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px; display: flex; gap: 8px;">
-                                        <span><i class='bx bx-user'></i> ${s.host || 'النظام'}</span>
-                                        <span>&bull;</span>
-                                        <span><i class='bx bx-layer'></i> ${countKeys} صنف مجرود</span>
-                                        <span>&bull;</span>
-                                        <span><i class='bx bx-calendar'></i> ${new Date(s.finalizedAt || s.startedAt).toLocaleDateString('ar-EG')}</span>
+                                    <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
+                                        <button class="sm-btn btn-ghost" onclick="window.App.openAuditReportModal('${s.id}')" title="عرض" style="padding: 6px 10px; font-size: 12px;">
+                                            <i class='bx bx-show'></i> كشف
+                                        </button>
+                                        <button class="sm-btn btn-ghost" onclick="window.App.openExportOptionsModal('${s.id}')" title="Excel" style="padding: 6px 10px; font-size: 12px;">
+                                            <i class='bx bx-download'></i> Excel
+                                        </button>
+                                        <button class="icon-btn" onclick="window.App.unarchiveAuditSession('${s.id}')" title="استعادة" style="width:30px; height:30px;">
+                                            <i class='bx bx-undo' style="font-size:14px;"></i>
+                                        </button>
+                                        <button class="icon-btn" onclick="window.App.deleteAuditSession('${s.id}')" title="حذف" style="width:30px; height:30px;">
+                                            <i class='bx bx-trash' style="font-size:14px; color: var(--danger);"></i>
+                                        </button>
                                     </div>
-                                </div>
-                                <div style="display: flex; gap: 6px; align-items: center;">
-                                    <button class="btn-ghost sm-btn" onclick="window.App.openAuditReportModal('${s.id}')" title="عرض تفاصيل الجرد">
-                                        <i class='bx bx-show'></i> عرض الكشف
-                                    </button>
-                                    <button class="btn-ghost sm-btn" onclick="window.App.openExportOptionsModal('${s.id}')" title="تصدير كملف إكسيل">
-                                        <i class='bx bx-download'></i> Excel
-                                    </button>
-                                    <button class="icon-btn text-warning" onclick="window.App.unarchiveAuditSession('${s.id}')" title="استعادة للنشط" style="padding: 4px;">
-                                        <i class='bx bx-undo' style="font-size: 16px;"></i>
-                                    </button>
-                                    <button class="icon-btn text-danger" onclick="window.App.deleteAuditSession('${s.id}')" title="حذف نهائياً" style="padding: 4px;">
-                                        <i class='bx bx-trash' style="font-size: 16px; color: var(--danger);"></i>
-                                    </button>
                                 </div>
                             </div>
                         `;
                     }).join('')}
                 </div>
             ` : `
-                <p class="text-muted small" style="text-align: center; padding: 15px;">لا توجد جلسات مؤرشفة أو معتمدة سابقة حتى الآن</p>
+                <p style="text-align: center; padding: 20px; font-size: 12px; color: var(--text-muted);">لا توجد جلسات مؤرشفة</p>
             `}
         `;
     },
