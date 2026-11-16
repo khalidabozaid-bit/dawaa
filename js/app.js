@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.6.5)
+ * Dawaa App Orchestrator (v18.6.6)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.6.5', // Universal Sovereign v18.6.5
+    VERSION: '18.6.6', // Universal Sovereign v18.6.6
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1834,7 +1834,7 @@ App.handleBackup = async function() {
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.6.5'
+            version: '18.6.6'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });

@@ -137,6 +137,12 @@ export const Inventory = {
 
     async getEntriesByAudit(auditId) {
         if (!auditId) return [];
+        try {
+            if (DB.getAllByIndex) {
+                const indexed = await DB.getAllByIndex('inventory', 'by_audit_id', auditId);
+                if (indexed && indexed.length > 0) return indexed;
+            }
+        } catch (e) {}
         const entries = (await DB.getAll('inventory')) || [];
         return entries.filter(e => e.auditId === auditId);
     },

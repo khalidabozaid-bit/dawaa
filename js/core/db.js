@@ -148,6 +148,22 @@ export const DB = {
         });
     },
 
+    async getAllByIndex(storeName, indexName, key) {
+        const db = await this.init();
+        if (!db.objectStoreNames.contains(storeName)) return [];
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction([storeName], 'readonly');
+            const store = tx.objectStore(storeName);
+            if (!store.indexNames.contains(indexName)) {
+                return resolve([]);
+            }
+            const index = store.index(indexName);
+            const request = (key !== undefined) ? index.getAll(key) : index.getAll();
+            request.onsuccess = () => resolve(request.result || []);
+            request.onerror = (e) => reject(e.target.error);
+        });
+    },
+
     async delete(storeName, id) {
         const db = await this.init();
         if (!db.objectStoreNames.contains(storeName)) return;

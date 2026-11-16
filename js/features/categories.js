@@ -155,6 +155,15 @@ export const Categories = {
     // --- Search & Retrieval (v6.6.2 Sorted) ---
 
     async getMedicinesByCategoryId(catId) {
+        if (!catId) return [];
+        try {
+            if (DB.getAllByIndex) {
+                const indexed = await DB.getAllByIndex('medicineMaster', 'by_category_id', catId);
+                if (indexed && indexed.length > 0) {
+                    return indexed.sort((a, b) => (a.nameEN || '').localeCompare(b.nameEN || ''));
+                }
+            }
+        } catch (e) {}
         const all = await DB.getAll('medicineMaster');
         return all
             .filter(m => m.categoryId === catId)
