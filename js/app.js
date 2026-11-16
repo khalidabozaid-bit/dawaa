@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.7.6)
+ * Dawaa App Orchestrator (v18.7.7)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.7.6', // Universal Sovereign v18.7.6
+    VERSION: '18.7.7', // Universal Sovereign v18.7.7
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -858,9 +858,9 @@ const App = {
             
             await DB.put('medicineMaster', med);
             
-            // v16.2.4: Immediate Cloud Sync for Category Transfers
-            if (this.userRole === 'admin') {
-                import('./core/sync.js').then(({ Sync }) => Sync.push(medicineId));
+            // Immediate Cloud Sync for Category Transfers
+            if (typeof Sync !== 'undefined' && Sync.push) {
+                Sync.push(medicineId).catch(() => {});
             }
             
             UI.showToast(`تم نقل ${med.nameEN} بنجاح ✅`, 'success');
@@ -910,7 +910,8 @@ const App = {
 
             // Also check latest audit session for live counts
             const allSessions = (await Audit.getAllSessions()) || [];
-            const openSession = allSessions.find(s => s.status === 'in_progress' || s.status === 'held');
+            const isOpenSession = (s) => !s.isArchived && (s.status === 'active' || s.status === 'in_progress' || s.status === 'on_hold' || s.status === 'held');
+            const openSession = allSessions.find(isOpenSession);
             const finalizedSessions = allSessions.filter(s => s.status === 'finalized').sort((a,b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
             const latestSession = openSession || finalizedSessions[0];
 
@@ -2098,8 +2099,8 @@ const App = {
             const countEl = document.getElementById(`stock-val-${medId}`);
             if (countEl) countEl.textContent = entry.quantity;
 
-            if (this.userRole === 'admin') {
-                Sync.push(medId);
+            if (typeof Sync !== 'undefined' && Sync.pushInventoryEntry) {
+                Sync.pushInventoryEntry(entry).catch(() => {});
             }
 
             const stats = await Inventory.getCurrentStockStats();
@@ -2254,7 +2255,7 @@ App.handleBackup = async function() {
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.7.6'
+            version: '18.7.7'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -3042,11 +3043,14 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
         let catId = id;
         if (!catId) {
-            // Clean slug ID from English name
-            const slug = (nameEnEl && nameEnEl.value.trim()) 
+            let slug = (nameEnEl && nameEnEl.value.trim()) 
                 ? nameEnEl.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') 
                 : '';
-            catId = slug ? `cat_${slug}` : ('cat_' + Date.now().toString(36));
+            if (!slug) {
+                const existingCats = (await DB.getAll('categories')) || [];
+                slug = `cat_${existingCats.length + 1}`;
+            }
+            catId = slug.startsWith('cat_') ? slug : `cat_${slug}`;
         }
 
         const data = {
@@ -3331,6 +3335,15 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         if (this.selectedAuditSessionId === sessionId) {
             this.selectedAuditSessionId = null;
             this.auditLevel = 'sessions';
+        }
+        if (this.activeAudit && this.activeAudit.id === sessionId) {
+            this.activeAudit = null;
+        }
+        if (typeof Sync !== 'undefined' && typeof Sync.broadcastAuditStatus === 'function') {
+            Sync.broadcastAuditStatus(null);
+        }
+        if (typeof TaskManager !== 'undefined' && typeof TaskManager.renderAssignedTaskPrompt === 'function') {
+            TaskManager.renderAssignedTaskPrompt();
         }
         UI.showToast('تم حذف الجلسة وسجلاتها نهائياً 🗑️', 'info');
         this.renderAuditView();

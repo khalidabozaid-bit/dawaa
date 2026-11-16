@@ -165,9 +165,16 @@ export const Locations = {
         const allMeds = (await DB.getAll('medicineMaster')) || [];
         
         return allMeds.filter(m => {
-            const matchLocCat = allowedCatIds.has(m.categoryId);
             const matchSpecificCat = !categoryId || m.categoryId === categoryId;
-            return matchLocCat && matchSpecificCat;
+            if (!matchSpecificCat) return false;
+
+            // 1. Explicit medicine location preference takes highest priority
+            if (m.allowedLocations && Array.isArray(m.allowedLocations) && m.allowedLocations.length > 0) {
+                return m.allowedLocations.includes(locationId);
+            }
+
+            // 2. Fallback to location's allowed category rules
+            return allowedCatIds.has(m.categoryId);
         });
     }
 };

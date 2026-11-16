@@ -202,6 +202,9 @@ export const Audit = {
         if (!id) return false;
         await DB.delete('audit_sessions', id);
         if (this.currentSessionId === id) this.currentSessionId = null;
+        if (typeof Sync !== 'undefined' && Sync.deleteAuditSession) {
+            Sync.deleteAuditSession(id).catch(() => {});
+        }
         return true;
     },
 

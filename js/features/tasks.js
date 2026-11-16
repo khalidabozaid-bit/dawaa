@@ -37,7 +37,8 @@ export const TaskManager = {
         try {
             if (typeof Audit !== 'undefined' && Audit.getAllSessions) {
                 const sessions = (await Audit.getAllSessions()) || [];
-                activeSession = sessions.find(s => !s.isArchived && (s.status === 'in_progress' || s.status === 'held'));
+                const isOpenSession = (s) => !s.isArchived && (s.status === 'active' || s.status === 'in_progress' || s.status === 'on_hold' || s.status === 'held');
+                activeSession = sessions.find(isOpenSession);
             }
         } catch (e) {
             console.warn('Error reading audit sessions for prompt:', e);
@@ -45,7 +46,7 @@ export const TaskManager = {
 
         if (activeSession) {
             const stats = await Audit.getSessionStats(activeSession.id);
-            const isHold = activeSession.status === 'held';
+            const isHold = activeSession.status === 'on_hold' || activeSession.status === 'held';
             container.innerHTML = `
                 <div class="active-inventory-card mt-20" onclick="window.switchView('audit'); window.App.openAuditSession('${activeSession.id}')" style="cursor:pointer;">
                     <div class="card-glow"></div>

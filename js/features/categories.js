@@ -370,6 +370,22 @@ export const Categories = {
     async deleteCategory(id) {
         if (id === 'uncategorized') return false; // Protected system category
         await DB.delete('categories', id);
+
+        // Migrate all medicines belonging to this deleted category to 'uncategorized'
+        try {
+            const allMeds = (await DB.getAll('medicineMaster')) || [];
+            for (const med of allMeds) {
+                if (med.categoryId === id) {
+                    med.categoryId = 'uncategorized';
+                    med.lastUpdated = new Date().toISOString();
+                    await DB.put('medicineMaster', med);
+                    if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+                        window.Sync.push(med.id).catch(() => {});
+                    }
+                }
+            }
+        } catch (me) {}
+
         this.cache = null;
         this._cache = null;
         await this.getAllSorted();
