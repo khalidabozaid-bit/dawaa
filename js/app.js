@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.7.5)
+ * Dawaa App Orchestrator (v18.7.6)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.7.5', // Universal Sovereign v18.7.5
+    VERSION: '18.7.6', // Universal Sovereign v18.7.6
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1164,6 +1164,16 @@ const App = {
             const allInv = (await DB.getAll('inventory')) || [];
             const existing = allInv.find(r => String(r.medicineId) === String(medicineId) && (r.locationId === locId || r.location === locName));
 
+            const targetRecord = existing || {
+                id: 'inv_' + Date.now(),
+                medicineId: String(medicineId),
+                locationId: locId,
+                location: locName,
+                quantity: qty,
+                expiryDate: exp,
+                lastUpdated: new Date().toISOString(),
+                syncStatus: 'local'
+            };
             if (existing) {
                 existing.quantity = qty;
                 if (exp) existing.expiryDate = exp;
@@ -1171,17 +1181,10 @@ const App = {
                 existing.syncStatus = 'local';
                 await DB.put('inventory', existing);
             } else {
-                const newRec = {
-                    id: 'inv_' + Date.now(),
-                    medicineId: String(medicineId),
-                    locationId: locId,
-                    location: locName,
-                    quantity: qty,
-                    expiryDate: exp,
-                    lastUpdated: new Date().toISOString(),
-                    syncStatus: 'local'
-                };
-                await DB.put('inventory', newRec);
+                await DB.put('inventory', targetRecord);
+            }
+            if (typeof Sync !== 'undefined' && Sync.pushInventoryEntry) {
+                Sync.pushInventoryEntry(existing || targetRecord).catch(() => {});
             }
 
             // Also ensure the location is allowed on the medicine
@@ -1544,6 +1547,9 @@ const App = {
                     syncStatus: 'local'
                 };
                 await DB.put('inventory', invRecord);
+                if (typeof Sync !== 'undefined' && Sync.pushInventoryEntry) {
+                    Sync.pushInventoryEntry(invRecord).catch(() => {});
+                }
             }
 
             // Ensure category is allowed in the selected locations
@@ -1623,19 +1629,19 @@ const App = {
             UI.showToast('تم تحديث بيانات الدواء بنجاح ✨', 'success');
             await this.refreshAllViews(updated.categoryId);
 
-            // Background Cloud Upload (v9.9.5 - Ironclad Update)
-            if (file && this.userRole === 'admin') {
+            // Background Cloud Upload
+            if (file && typeof this.uploadImage === 'function') {
                 UI.showToast('جاري تحديث الصورة في السحابة... ☁️', 'info');
                 this.uploadImage(file, id).then(async (url) => {
                     if (url) {
                         const m = await DB.get('medicineMaster', id);
                         m.imagePath = url;
                         await Categories.saveMedicine(m);
-                        Sync.push(id);
+                        if (typeof Sync !== 'undefined' && Sync.push) Sync.push(id);
                         UI.showToast('تم تحديث الصورة السحابية بنجاح ✨', 'success');
                     }
                 });
-            } else if (this.userRole === 'admin') {
+            } else if (typeof Sync !== 'undefined' && Sync.push) {
                 Sync.push(id);
             }
         } catch (err) {
@@ -1860,6 +1866,9 @@ const App = {
         try {
             UI.showToast('جاري حذف الصنف... 🗑️', 'info');
             await Categories.deleteMedicine(id);
+            if (typeof Sync !== 'undefined' && Sync.deleteMedicine) {
+                await Sync.deleteMedicine(id);
+            }
             UI.showToast('تم حذف الصنف والجرد بالكامل 🗑️', 'warning');
             UI.closeModal();
             await this.refreshAllViews();
@@ -2245,7 +2254,7 @@ App.handleBackup = async function() {
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.7.5'
+            version: '18.7.6'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -2437,13 +2446,18 @@ App.handleAuthSubmit = async function() {
         
         // Match or create in local team registry
         let team = Users.getAll();
-        let user = team.find(u => u.id === `user_${payrollNo}` || u.name === name);
+        const norm = (s) => (s || '').replace(/^(د\.?|د\/)\s*/, '').trim().toLowerCase();
+        let user = team.find(u => u.id === `user_${payrollNo}` || norm(u.name) === norm(name));
+        const isKhaled = norm(name) === 'خالد' || norm(name) === 'khaled' || payrollNo === '1001';
         if (!user) {
             user = Users.addUser({
-                name: name,
-                title: 'صيدلي ميداني',
-                role: 'staff'
+                name: isKhaled ? 'د. خالد' : name,
+                title: isKhaled ? 'مدير الصيدلية والنظام' : 'صيدلي ميداني',
+                role: isKhaled ? 'admin' : 'staff'
             });
+        } else if (isKhaled && user.role !== 'admin') {
+            user.role = 'admin';
+            if (typeof Users.saveUser === 'function') Users.saveUser(user);
         }
         if (user) Users.setActive(user);
 

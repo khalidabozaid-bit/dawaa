@@ -35,70 +35,100 @@ export const Sync = {
     },
     
     async pull() {
-        console.log(`Sync: Pulling Master Data (Mode: ${this.isV2Active() ? 'V2' : 'Legacy'})... 🔄`);
-        
+        console.log('Sync: Pulling Complete Cloud State (Medicines, Categories, Locations, Audits, Inventory)... 🔄');
+        const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+        if (!firestore) return;
+
         try {
-            let globalMeds = null;
-            let currentMode = this.isV2Active() ? 'V2' : 'LEGACY';
-
-            // 1. Try V2 Mode via isolated module
-            if (this.isV2Active()) {
-                globalMeds = await SyncV2.pull();
-                // v16.3.1: Only fallback if result is strictly NULL (error), not empty array []
-                if (globalMeds === null) {
-                    await this.log('PULL_FALLBACK', 'WARN', 'V2 technical failure, falling back to Legacy');
-                    currentMode = 'LEGACY';
+            // 1. Pull Medicines (from 'medicines' collection with fallback to CLOUD_PATH)
+            let cloudMeds = [];
+            try {
+                const medSnap = await firestore.collection('medicines').get();
+                if (!medSnap.empty) {
+                    cloudMeds = medSnap.docs.map(d => ({ ...d.data(), id: d.id }));
                 }
+            } catch (me) {}
+
+            if (!cloudMeds || cloudMeds.length === 0) {
+                try {
+                    const doc = await firestore.doc(this.CLOUD_PATH).get();
+                    if (doc.exists) cloudMeds = doc.data().masterData || [];
+                } catch (de) {}
             }
 
-            // 2. Fallback to Legacy logic
-            if (currentMode === 'LEGACY') {
-                const docRef = db.doc(this.CLOUD_PATH);
-                const doc = await docRef.get();
-                if (doc.exists) {
-                    globalMeds = doc.data().masterData || [];
+            if (Array.isArray(cloudMeds) && cloudMeds.length > 0) {
+                let syncCount = 0;
+                for (const med of cloudMeds) {
+                    const localMed = await DB.get('medicineMaster', med.id);
+                    if (localMed && localMed.imagePath?.startsWith('data:image') && (!med.imagePath || med.imagePath === '')) {
+                        med.imagePath = localMed.imagePath;
+                    }
+                    med.v = med.v || (localMed ? localMed.v : 0);
+                    med.syncStatus = 'synced';
+                    await DB.put('medicineMaster', med);
+                    syncCount++;
                 }
+                console.log(`Sync: Pulled ${syncCount} medicines from cloud. ✅`);
             }
 
-            if (!globalMeds || (Array.isArray(globalMeds) && globalMeds.length === 0)) {
-                console.log('Sync: No data to update locally.');
-                return;
-            }
-
-            // 3. Process and Save Locally
-            let syncCount = 0;
-            for (const med of globalMeds) {
-                const localMed = await DB.get('medicineMaster', med.id);
-                
-                if (localMed && localMed.imagePath?.startsWith('data:image') && (!med.imagePath || med.imagePath === '')) {
-                    med.imagePath = localMed.imagePath;
+            // 2. Pull Categories
+            try {
+                const catSnap = await firestore.collection('categories').get();
+                if (!catSnap.empty) {
+                    for (const doc of catSnap.docs) {
+                        await DB.put('categories', { ...doc.data(), id: doc.id });
+                    }
+                    if (typeof Categories !== 'undefined') {
+                        Categories.cache = null;
+                        Categories._cache = null;
+                    }
                 }
+            } catch (ce) {}
 
-                med.v = med.v || (localMed ? localMed.v : 0);
-                med.syncStatus = currentMode === 'V2' ? 'global_v2' : 'global_legacy';
-                
-                await DB.put('medicineMaster', med);
-                syncCount++;
-            }
-            
-            console.log(`Sync: Pulled ${syncCount} items via ${currentMode}. ✅`);
-            if (window.App?.renderMasterData) window.App.renderMasterData();
-            
+            // 3. Pull Locations
+            try {
+                const locSnap = await firestore.collection('locations').get();
+                if (!locSnap.empty) {
+                    for (const doc of locSnap.docs) {
+                        await DB.put('locations', { ...doc.data(), id: doc.id });
+                    }
+                }
+            } catch (le) {}
+
+            // 4. Pull Audit Sessions
+            try {
+                const sessionSnap = await firestore.collection('audit_sessions').get();
+                if (!sessionSnap.empty) {
+                    for (const doc of sessionSnap.docs) {
+                        await DB.put('audit_sessions', { ...doc.data(), id: doc.id });
+                    }
+                }
+            } catch (se) {}
+
+            // 5. Pull Inventory Stock Entries
+            try {
+                const invSnap = await firestore.collection('inventory_sync').get();
+                if (!invSnap.empty) {
+                    for (const doc of invSnap.docs) {
+                        await DB.put('inventory', { ...doc.data(), id: doc.id });
+                    }
+                }
+            } catch (ie) {}
+
+            console.log('Sync: Full cloud state synchronization complete ✅');
+            if (window.App?.refreshAllViews) window.App.refreshAllViews();
+
         } catch (err) {
-            const msg = err.code || err.message || 'خطأ غير معروف';
             console.error('Sync Pull Failed:', err);
-            await this.log('PULL_ERROR', 'CRITICAL', msg, null, { source: 'pull', retryable: true });
         }
     },
 
     async push(medId) {
-        const isAuthUser = (typeof auth !== 'undefined' && auth.currentUser) || window.App?.userRole === 'admin' || (typeof Users !== 'undefined' && Users.getActive()?.role === 'admin');
-        if (!isAuthUser) {
-            console.log('Sync.push: Skipped cloud write (operating in offline / local mode).');
+        const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+        if (!firestore) {
+            console.log('Sync.push: Skipped cloud write (Firestore not initialized).');
             return;
         }
-
-        UI.showToast('جاري التحديث السحابي الشامل 🔥...', 'info');
 
         try {
             const med = await DB.get('medicineMaster', medId);
@@ -107,20 +137,22 @@ export const Sync = {
             med.v = (med.v || 0) + 1;
             med.lastSynced = new Date().toISOString();
             
-            const syncMed = { ...med, syncStatus: 'global' };
+            const syncMed = { ...med, syncStatus: 'global_v2' };
             if (syncMed.imagePath?.startsWith('data:image')) {
                 syncMed.imagePath = ''; 
             }
 
-            const logMeta = { version: med.v, source: 'push' };
+            // 1. V2 Document-per-medicine write for live multi-device listeners
+            await firestore.collection('medicines').doc(med.id).set({
+                ...syncMed,
+                lastUpdatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
 
-            // 1. Legacy Write (Old Structure)
-            let legacySuccess = false;
+            // 2. Legacy Master Array write for backward compatibility
             try {
-                const docRef = db.doc(this.CLOUD_PATH);
+                const docRef = firestore.doc(this.CLOUD_PATH);
                 const doc = await docRef.get();
                 let masterData = doc.exists ? (doc.data().masterData || []) : [];
-                
                 const existingIdx = masterData.findIndex(m => m.id === med.id);
                 if (existingIdx > -1) masterData[existingIdx] = syncMed;
                 else masterData.push(syncMed);
@@ -129,40 +161,104 @@ export const Sync = {
                     masterData,
                     updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
                 }, { merge: true });
-                legacySuccess = true;
             } catch (lex) {
-                console.warn('Sync: Legacy push failed...', lex);
+                console.warn('Sync: Legacy master array write warning:', lex.message);
             }
 
-            // 2. V2 Write via isolated SyncV2 module
-            let v2Success = false;
-            if (this.isV2Active()) {
-                v2Success = await SyncV2.push(syncMed);
-            }
-
-            // 3. Enriched Logging Matrix (Observability)
-            if (legacySuccess && v2Success) {
-                await this.log('PUSH_DUAL_SUCCESS', 'SUCCESS', `Synced version ${med.v} to both layers`, med.id, logMeta);
-            } else if (legacySuccess && !v2Success) {
-                const status = this.isV2Active() ? 'FAIL' : 'WARN';
-                await this.log('PUSH_PARTIAL_SUCCESS_V2_FAIL', status, 'Legacy OK, V2 failed', med.id, { ...logMeta, retryable: true });
-            } else if (!legacySuccess && v2Success) {
-                await this.log('PUSH_PARTIAL_SUCCESS_LEGACY_FAIL', 'WARN', 'Legacy failed, V2 OK', med.id, { ...logMeta, retryable: true });
-            } else {
-                await this.log('PUSH_TOTAL_FAIL', 'CRITICAL', 'Both Legacy and V2 writes failed', med.id, { ...logMeta, retryable: true });
-                throw new Error('Cloud push failed completely');
-            }
-
-            med.syncStatus = v2Success ? 'global_v2' : 'global_legacy';
+            med.syncStatus = 'global_v2';
             await DB.put('medicineMaster', med);
-            
-            UI.showToast(`تم تأمين "${med.nameEN}" سحابياً ✅`, 'success');
-            if (window.App?.renderMasterData) window.App.renderMasterData();
+            console.log(`Sync: Medicine "${med.nameEN || med.id}" pushed to cloud ☁️✅`);
             
         } catch (err) {
-            const msg = err.code || err.message || 'خطأ غير معروف';
-            UI.showToast(`فشل التحديث السحابي: ${msg}`, 'danger');
-            await this.log('PUSH_ERROR', 'CRITICAL', msg, medId, { source: 'push', retryable: true });
+            console.error('Sync Push Error:', err);
+        }
+    },
+
+    async deleteMedicine(medId) {
+        const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+        if (!firestore || !medId) return;
+
+        try {
+            // 1. Delete from 'medicines' collection
+            await firestore.collection('medicines').doc(medId).delete();
+
+            // 2. Remove from legacy array
+            try {
+                const docRef = firestore.doc(this.CLOUD_PATH);
+                const doc = await docRef.get();
+                if (doc.exists) {
+                    let masterData = doc.data().masterData || [];
+                    masterData = masterData.filter(m => m.id !== medId);
+                    await docRef.set({
+                        masterData,
+                        updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+                    }, { merge: true });
+                }
+            } catch (lex) {}
+
+            // 3. Delete any stock entries in cloud for this medicine
+            try {
+                const invSnap = await firestore.collection('inventory_sync').where('medicineId', '==', medId).get();
+                const batch = firestore.batch();
+                invSnap.docs.forEach(d => batch.delete(d.ref));
+                await batch.commit();
+            } catch (ix) {}
+
+            console.log(`Sync: Medicine "${medId}" deleted from cloud 🗑️`);
+        } catch (err) {
+            console.error('Sync deleteMedicine error:', err);
+        }
+    },
+
+    // --- Audit Sessions Cloud Sync ---
+    async pushAuditSession(session) {
+        const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+        if (!firestore || !session || !session.id) return;
+        try {
+            await firestore.collection('audit_sessions').doc(session.id).set({
+                ...session,
+                updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            console.log(`Sync: Audit Session "${session.id}" pushed to cloud ☁️`);
+        } catch (e) {
+            console.warn('Sync pushAuditSession notice:', e.message);
+        }
+    },
+
+    async deleteAuditSession(id) {
+        const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+        if (!firestore || !id) return;
+        try {
+            await firestore.collection('audit_sessions').doc(id).delete();
+            console.log(`Sync: Audit Session "${id}" deleted from cloud 🗑️`);
+        } catch (e) {
+            console.warn('Sync deleteAuditSession notice:', e.message);
+        }
+    },
+
+    // --- Inventory Stock Entries Cloud Sync ---
+    async pushInventoryEntry(entry) {
+        const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+        if (!firestore || !entry || !entry.id) return;
+        try {
+            await firestore.collection('inventory_sync').doc(entry.id).set({
+                ...entry,
+                updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            console.log(`Sync: Inventory Entry "${entry.id}" pushed to cloud ☁️`);
+        } catch (e) {
+            console.warn('Sync pushInventoryEntry notice:', e.message);
+        }
+    },
+
+    async deleteInventoryEntry(id) {
+        const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+        if (!firestore || !id) return;
+        try {
+            await firestore.collection('inventory_sync').doc(id).delete();
+            console.log(`Sync: Inventory Entry "${id}" deleted from cloud 🗑️`);
+        } catch (e) {
+            console.warn('Sync deleteInventoryEntry notice:', e.message);
         }
     },
 
@@ -547,6 +643,57 @@ export const Sync = {
                 }
             }, err => console.warn('Sync Live locations notice:', err.message));
             this._liveListeners.push(unsubLocs);
+        } catch (e) {}
+
+        // 5. Live Audit Sessions Collection
+        try {
+            const unsubSessions = firestore.collection('audit_sessions').onSnapshot(async (snapshot) => {
+                const changes = snapshot.docChanges();
+                let updated = false;
+                for (const change of changes) {
+                    if (change.type === 'added' || change.type === 'modified') {
+                        const session = { ...change.doc.data(), id: change.doc.id };
+                        await DB.put('audit_sessions', session);
+                        updated = true;
+                    } else if (change.type === 'removed') {
+                        await DB.delete('audit_sessions', change.doc.id);
+                        updated = true;
+                    }
+                }
+                if (updated) {
+                    console.log('Sync Live: Audit sessions synced from cloud 📡');
+                    if (window.App?.renderAuditView && UI.currentView === 'audit') {
+                        window.App.renderAuditView();
+                    }
+                    if (window.App?.renderActiveAuditCard) {
+                        window.App.renderActiveAuditCard();
+                    }
+                }
+            }, err => console.warn('Sync Live audit_sessions notice:', err.message));
+            this._liveListeners.push(unsubSessions);
+        } catch (e) {}
+
+        // 6. Live Inventory Sync Collection
+        try {
+            const unsubInv = firestore.collection('inventory_sync').onSnapshot(async (snapshot) => {
+                const changes = snapshot.docChanges();
+                let updated = false;
+                for (const change of changes) {
+                    if (change.type === 'added' || change.type === 'modified') {
+                        const entry = { ...change.doc.data(), id: change.doc.id };
+                        await DB.put('inventory', entry);
+                        updated = true;
+                    } else if (change.type === 'removed') {
+                        await DB.delete('inventory', change.doc.id);
+                        updated = true;
+                    }
+                }
+                if (updated) {
+                    console.log('Sync Live: Inventory entries synced from cloud 📡');
+                    if (window.App?.refreshAllViews) window.App.refreshAllViews();
+                }
+            }, err => console.warn('Sync Live inventory_sync notice:', err.message));
+            this._liveListeners.push(unsubInv);
         } catch (e) {}
     },
 

@@ -42,6 +42,10 @@ export const Audit = {
         session.updatedAt = new Date().toISOString();
         await DB.put('audit_sessions', session);
         
+        // Push session to cloud database for cross-device synchronization
+        if (typeof Sync !== 'undefined' && Sync.pushAuditSession) {
+            Sync.pushAuditSession(session).catch(() => {});
+        }
         // Broadcast in team mode
         if (session.type === 'group') {
             Sync.broadcastAuditStatus(session);
@@ -136,6 +140,9 @@ export const Audit = {
                 const pairKey = `${itemLocId}___${item.medicineId}`;
                 if (sessionCountedKeys.has(pairKey)) {
                     await DB.delete('inventory', item.id);
+                    if (typeof Sync !== 'undefined' && Sync.deleteInventoryEntry) {
+                        Sync.deleteInventoryEntry(item.id).catch(() => {});
+                    }
                 }
             }
 
@@ -154,7 +161,7 @@ export const Audit = {
                     const bQty = parseFloat(b.quantity) || 0;
                     if (bQty <= 0) continue; // Clean inventory: 0 quantity means out-of-stock
 
-                    await DB.put('inventory', {
+                    const invRecord = {
                         id: `inv_audit_${session.id}_${medId}_${locId}_${bIndex}`,
                         medicineId: medId,
                         location: locName,
@@ -165,7 +172,11 @@ export const Audit = {
                         auditId: session.id,
                         userName: record.userName || session.host,
                         timestamp: record.countedAt || new Date().toISOString()
-                    });
+                    };
+                    await DB.put('inventory', invRecord);
+                    if (typeof Sync !== 'undefined' && Sync.pushInventoryEntry) {
+                        Sync.pushInventoryEntry(invRecord).catch(() => {});
+                    }
                 }
             }
 

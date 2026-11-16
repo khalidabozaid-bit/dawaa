@@ -460,7 +460,15 @@ export const Categories = {
         // Also cleanup inventory for this medicine
         const inv = await DB.getAll('inventory');
         for (const item of inv) {
-            if (item.medicineId === id) await DB.delete('inventory', item.id);
+            if (item.medicineId === id) {
+                await DB.delete('inventory', item.id);
+                if (typeof window.Sync !== 'undefined' && window.Sync.deleteInventoryEntry) {
+                    window.Sync.deleteInventoryEntry(item.id).catch(() => {});
+                }
+            }
+        }
+        if (typeof window.Sync !== 'undefined' && window.Sync.deleteMedicine) {
+            window.Sync.deleteMedicine(id).catch(() => {});
         }
         return true;
     }

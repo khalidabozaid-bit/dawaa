@@ -30,12 +30,18 @@ export const Inventory = {
         };
 
         await DB.put('inventory', entry);
+        if (typeof window.Sync !== 'undefined' && window.Sync.pushInventoryEntry) {
+            window.Sync.pushInventoryEntry(entry).catch(() => {});
+        }
         this.notify();
         return true;
     },
 
     async deleteEntry(id) {
         await DB.delete('inventory', id);
+        if (typeof window.Sync !== 'undefined' && window.Sync.deleteInventoryEntry) {
+            window.Sync.deleteInventoryEntry(id).catch(() => {});
+        }
         this.notify();
         return true;
     },
