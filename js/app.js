@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.7.0)
+ * Dawaa App Orchestrator (v18.7.1)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.7.0', // Universal Sovereign v18.7.0
+    VERSION: '18.7.1', // Universal Sovereign v18.7.1
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -706,7 +706,7 @@ const App = {
                         const imgSrc = Categories.getMedicineImage(m);
                         return `
                             <div class="med-card-btn">
-                                <div class="med-card-main" onclick="window.App.openEntryForm('${m.id}')">
+                                <div class="med-card-main" onclick="window.App.openMedicineDetails('${m.id}')">
                                     <div class="med-image">
                                         <img src="${imgSrc}" onerror="this.src='assets/icons/default-med.png'">
                                     </div>
@@ -820,65 +820,198 @@ const App = {
         }, 100);
     },
 
-    async openEntryForm(medicineId) {
+    async openMedicineDetails(medicineId) {
         try {
             const med = await DB.get('medicineMaster', medicineId);
-            const entries = await DB.getAll('inventory');
-            const mEntries = entries.filter(e => e.medicineId === medicineId);
-            
-            // Calculate Current Balances (v10.3.0 Guardian Logic)
-            const getLocQty = (loc) => mEntries.filter(e => e.location === loc).reduce((sum, e) => sum + e.quantity, 0);
+            if (!med) {
+                return UI.showToast('تعذر العثور على بيانات هذا الدواء', 'warning');
+            }
+
+            const cat = med.categoryId ? await Categories.getInfo(med.categoryId) : null;
+            const catName = cat ? cat.nameAR : (med.categoryId || 'عام');
+            const catIcon = cat?.icon || 'bx-purchase-tag-alt';
+            const catColor = cat?.color || 'var(--primary)';
+            const imgSrc = (typeof Categories !== 'undefined' && Categories.getMedicineImage) ? Categories.getMedicineImage(med) : (med.imagePath || 'assets/icons/default-med.png');
+
+            // Language preference: 'en' | 'ar' | 'both'
+            const langPref = localStorage.getItem('dawaa_med_lang_pref') || 'en';
+            let primaryName = med.nameEN || med.nameAR || 'دواء';
+            let secondaryName = (med.nameAR && med.nameAR !== med.nameEN) ? med.nameAR : '';
+
+            if (langPref === 'ar') {
+                primaryName = med.nameAR || med.nameEN || 'دواء';
+                secondaryName = (med.nameEN && med.nameEN !== med.nameAR) ? med.nameEN : '';
+            }
+
+            const safePrimary = (typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(primaryName) : primaryName;
+            const safeSecondary = (typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(secondaryName) : secondaryName;
+            const safeActive = (med.activeIngredient && typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(med.activeIngredient) : (med.activeIngredient || '');
+            const safeBarcode = med.barcode || med.id || '';
+
+            // Fetch live storage locations & real inventory counts
+            const allLocations = (await Locations.getAll()) || [];
+            const allInv = (await DB.getAll('inventory')) || [];
+            const medInv = allInv.filter(r => String(r.medicineId) === String(medicineId));
+
+            // Also check latest audit session for live counts
+            const allSessions = (await Audit.getAllSessions()) || [];
+            const openSession = allSessions.find(s => s.status === 'in_progress' || s.status === 'held');
+            const finalizedSessions = allSessions.filter(s => s.status === 'finalized').sort((a,b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+            const latestSession = openSession || finalizedSessions[0];
+
+            let grandTotal = 0;
+            const locationRows = allLocations.map(loc => {
+                let locQty = 0;
+                let batches = [];
+
+                // Check latest audit count for this location + medicine
+                const countKey = `${loc.id}___${medicineId}`;
+                const auditCount = latestSession?.counts?.[countKey];
+
+                if (auditCount && auditCount.quantity !== undefined) {
+                    locQty = parseFloat(auditCount.quantity) || 0;
+                    batches = (auditCount.batches && auditCount.batches.length > 0)
+                        ? auditCount.batches
+                        : (auditCount.expiryDate ? [{ quantity: auditCount.quantity, expiryDate: auditCount.expiryDate }] : []);
+                } else {
+                    // Check finalized inventory records
+                    const locRecords = medInv.filter(r => (r.locationId === loc.id) || (r.location === loc.nameAR));
+                    locRecords.forEach(r => {
+                        const q = parseFloat(r.quantity) || 0;
+                        locQty += q;
+                        if (r.expiryDate) batches.push({ quantity: q, expiryDate: r.expiryDate });
+                    });
+                }
+
+                grandTotal += locQty;
+
+                return {
+                    loc,
+                    qty: locQty,
+                    batches: batches,
+                    hasAudit: !!auditCount
+                };
+            });
+
+            const hasStock = grandTotal > 0;
 
             UI.showModal(`
                 <div class="sheet-handle"></div>
-                <div class="modal-header"><h2>إضافة جرد جديد ( Stock Entry )</h2></div>
-                <div class="balance-notification clickable-locations" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:center; padding:12px 15px; background:var(--bg-soft); border-radius:15px; margin-bottom:15px;">
-                    ${['صيدلية', 'مخزن', 'ثلاجة', 'دولاب الطوارئ', 'دولاب الاستقبال', 'إسعاف'].map(loc => `
-                        <div class="loc-badge-btn" onclick="document.getElementById('entry-location-main').value='${loc}'">
-                            <span class="loc-name">${loc}</span>
-                            <strong class="loc-qty">${getLocQty(loc)}</strong>
+
+                <!-- Hero Section: Image + Names + Category -->
+                <div style="display:flex; gap:14px; align-items:flex-start; margin-bottom:14px; border-bottom:1px solid var(--border-color); padding-bottom:14px;">
+                    <div style="width:72px; height:72px; border-radius:14px; overflow:hidden; flex-shrink:0; background:rgba(59,130,246,0.08); border:1.5px solid var(--border-color); box-shadow:0 2px 8px rgba(0,0,0,0.06); display:flex; align-items:center; justify-content:center;">
+                        <img src="${imgSrc}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                    </div>
+                    <div style="flex:1; min-width:0;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:4px;">
+                            <span class="badge" style="background:${catColor}18; color:${catColor}; font-size:11px; padding:3px 8px; border-radius:6px; font-weight:bold; display:inline-flex; align-items:center; gap:4px;">
+                                <i class='bx ${catIcon}'></i> ${catName}
+                            </span>
+                            <span style="font-size:10.5px; color:var(--text-muted); font-family:monospace; background:var(--bg-secondary); padding:2px 6px; border-radius:4px;">
+                                #${Utils.escapeHTML(med.id)}
+                            </span>
                         </div>
-                    `).join('')}
+                        <h2 style="font-size:17px; font-weight:800; margin:0 0 2px 0; color:var(--text-main); line-height:1.25; word-break:break-word;">
+                            ${safePrimary}
+                        </h2>
+                        ${safeSecondary ? `<div style="font-size:13px; color:var(--text-muted); font-weight:600; margin-bottom:4px; line-height:1.2;">${safeSecondary}</div>` : ''}
+                        ${safeActive ? `
+                            <div style="font-size:11.5px; color:var(--primary); font-weight:600; display:inline-flex; align-items:center; gap:4px; margin-top:2px;">
+                                <i class='bx bx-dna'></i> <span>${safeActive}</span>
+                            </div>
+                        ` : ''}
+                    </div>
                 </div>
-                <form id="form-inventory" onsubmit="event.preventDefault(); window.App.saveEntry('${medicineId}');">
-                    <div class="form-group">
-                        <label class="form-label">الصنف المختبر:</label>
-                        <input type="text" class="form-input" value="${med.nameEN}" readonly>
-                        <button type="button" class="text-btn" style="text-align:right" onclick="window.App.openEditMedicine('${medicineId}')">⚙️ تعديل بيانات الصنف الرئيسي</button>
-                    </div>
-                    
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">مكان الجرد (إجباري):</label>
-                            <select id="entry-location-main" class="form-select" required>
-                                <option value="صيدلية">🏥 الصيدلية</option>
-                                <option value="مخزن">📦 المخزن</option>
-                                <option value="ثلاجة">❄️ الثلاجة</option>
-                                <option value="دولاب الطوارئ">🚨 دولاب الطوارئ</option>
-                                <option value="دولاب الاستقبال">🛋️ دولاب الاستقبال</option>
-                                <option value="إسعاف">🚑 سيارة الإسعاف</option>
-                            </select>
+
+                <!-- Stock Summary Badge Bar -->
+                <div style="display:flex; justify-content:space-between; align-items:center; background:${hasStock ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)'}; border:1px solid ${hasStock ? '#10b98144' : '#ef444444'}; border-radius:12px; padding:10px 14px; margin-bottom:14px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <div style="width:32px; height:32px; border-radius:8px; background:${hasStock ? '#10b981' : '#ef4444'}; color:white; display:flex; align-items:center; justify-content:center; font-size:18px;">
+                            <i class='bx ${hasStock ? 'bx-cube' : 'bx-error-circle'}'></i>
                         </div>
-                        <div class="form-group">
-                            <label class="form-label">الكمية الجديدة:</label>
-                            <input type="number" id="entry-qty" class="form-input" placeholder="0" required>
+                        <div>
+                            <span style="font-size:11px; color:var(--text-muted); font-weight:bold; display:block;">إجمالي الرصيد بالمستودع:</span>
+                            <strong style="font-size:15px; color:${hasStock ? '#10b981' : '#ef4444'};">${grandTotal} وحدة</strong>
                         </div>
                     </div>
+                    ${safeBarcode ? `
+                        <button type="button" class="btn-ghost sm-btn" onclick="navigator.clipboard.writeText('${safeBarcode}'); window.UI.showToast('تم نسخ الباركود: ${safeBarcode} 📋', 'info');" style="font-size:11px; padding:4px 8px; border-radius:6px; border:1px solid var(--border-color); display:flex; align-items:center; gap:4px;" title="نسخ الباركود">
+                            <i class='bx bx-barcode'></i> <span>${safeBarcode}</span>
+                        </button>
+                    ` : ''}
+                </div>
 
-                    <div class="form-group">
-                        <label class="form-label">تاريخ الصلاحية (اختياري):</label>
-                        <input type="month" id="entry-expiry" class="form-input">
+                <!-- Real Locations Breakdown -->
+                <div style="margin-bottom:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <strong style="font-size:13px; color:var(--text-main); display:flex; align-items:center; gap:6px;">
+                            <i class='bx bx-map-pin' style="color:var(--primary);"></i> التواجد الفعلي في أماكن التخزين:
+                        </strong>
+                        <span style="font-size:10.5px; color:var(--text-muted);">بناءً على آخر جرد ميداني</span>
                     </div>
 
-                    <div class="form-actions mt-20">
-                        <button type="submit" class="btn-primary">حفظ في الجرد الحالي</button>
-                        <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+                    <div style="display:flex; flex-direction:column; gap:6px; max-height:210px; overflow-y:auto; padding:2px;">
+                        ${locationRows.map(row => {
+                            const isAvailable = row.qty > 0;
+                            const batchesHtml = row.batches.length > 0
+                                ? row.batches.map(b => {
+                                    const badge = window.App.calcExpiryBadge(b.expiryDate);
+                                    return `
+                                        <span class="batch-exterior-pill" style="display:inline-flex; align-items:center; gap:2px; font-size:9.5px; font-weight:bold; padding:1px 6px; border-radius:4px; background:${badge.bg}; color:${badge.color}; border:1px solid ${badge.color}33; white-space:nowrap;">
+                                            <i class='bx ${badge.icon}'></i>
+                                            <span>${b.quantity} &times; ${b.expiryDate}</span>
+                                        </span>
+                                    `;
+                                }).join('')
+                                : '';
+
+                            return `
+                                <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:var(--surface); border:1px solid var(--border-color); border-radius:10px; transition:all 0.2s ease;">
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <i class='bx ${row.loc.icon || 'bx-map-pin'}' style="font-size:17px; color:${row.loc.color || 'var(--primary)'};"></i>
+                                        <strong style="font-size:12.5px; color:var(--text-main);">${Utils.escapeHTML(row.loc.nameAR)}</strong>
+                                    </div>
+                                    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;">
+                                        ${isAvailable ? `
+                                            <strong style="font-size:13px; color:#10b981; font-weight:800;">${row.qty} وحدة</strong>
+                                            ${batchesHtml ? `<div style="display:flex; gap:3px; flex-wrap:wrap; justify-content:flex-end;">${batchesHtml}</div>` : ''}
+                                        ` : `
+                                            <span style="font-size:11px; color:var(--text-muted); opacity:0.8;">غير متوفر (0)</span>
+                                        `}
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
                     </div>
-                </form>
+                </div>
+
+                <!-- Quick Action Buttons -->
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:14px; border-top:1px solid var(--border-color); padding-top:14px;">
+                    <button type="button" class="btn-primary sm-btn" onclick="window.UI.closeModal(); window.App.openEditMedicine('${med.id}');" style="font-size:12px; font-weight:bold; display:flex; align-items:center; justify-content:center; gap:6px; padding:10px;">
+                        <i class='bx bx-edit-alt'></i> <span>تعديل بيانات الدواء ✏️</span>
+                    </button>
+                    <button type="button" class="btn-ghost sm-btn" onclick="window.UI.closeModal(); window.App.openMoveCategoryModal('${med.id}');" style="font-size:12px; font-weight:bold; display:flex; align-items:center; justify-content:center; gap:6px; padding:10px; border:1px solid var(--border-color);">
+                        <i class='bx bx-transfer'></i> <span>نقل لتصنيف آخر ⇄</span>
+                    </button>
+                </div>
+                <div style="display:flex; gap:8px; margin-top:8px;">
+                    <button type="button" class="btn-ghost sm-btn w-100" onclick="window.UI.closeModal()" style="font-size:12px; padding:8px;">
+                        إغلاق
+                    </button>
+                    <button type="button" class="btn-ghost sm-btn text-danger" onclick="window.UI.closeModal(); window.App.deleteMasterMedicine('${med.id}');" style="font-size:12px; padding:8px; border:1px solid rgba(239,68,68,0.2);" title="حذف الدواء">
+                        <i class='bx bx-trash'></i>
+                    </button>
+                </div>
             `);
         } catch (err) {
-            UI.showToast('خطأ في تحميل النموذج', 'danger');
+            console.error('Error opening medicine details:', err);
+            UI.showToast('خطأ في تحميل تفاصيل الدواء', 'danger');
         }
+    },
+
+    async openEntryForm(medicineId) {
+        return this.openMedicineDetails(medicineId);
     },
 
     async saveEntry(medicineId) {
@@ -1472,7 +1605,7 @@ const App = {
                 </div>
             `;
             html += masterResults.map(m => `
-                <div class="inventory-card" style="opacity: 0.8; border-style: dashed;" onclick="window.App.openEntryForm('${m.id}')">
+                <div class="inventory-card" style="opacity: 0.8; border-style: dashed;" onclick="window.App.openMedicineDetails('${m.id}')">
                     <div class="card-icon"><i class='bx bx-plus-circle'></i></div>
                     <div class="card-info">
                         <h3>${m.nameEN} / ${m.nameAR || ''}</h3>
@@ -1501,6 +1634,8 @@ const App = {
     async openQuickAdd() {
         try {
             const cats = await Categories.getAllSorted();
+            const allLocs = (await Locations.getAll()) || [];
+
             UI.showModal(`
                 <div class="sheet-handle"></div>
                 <div class="modal-header">
@@ -1515,33 +1650,49 @@ const App = {
                         <input type="text" id="qa-name-en" class="form-input" placeholder="اكتب أول حرفين مثل: Panadol أو بنادول أو سرنجة..." required autofocus autocomplete="off" oninput="window.App.handleDrugCatalogSearch(this.value, 'qa')">
                         <div id="qa-catalog-suggestions" class="catalog-suggestions-dropdown" style="display:none;"></div>
                     </div>
+
                     <div class="form-group" style="margin-bottom:12px;">
                         <label class="form-label">الاسم بالعربية:</label>
                         <input type="text" id="qa-name-ar" class="form-input" placeholder="مثال: بنادول إكسترا">
                     </div>
-                    <div class="form-group" style="margin-bottom:12px;">
+
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:12px;">
+                        <div class="form-group">
+                            <label class="form-label">المادة الفعالة (اختياري):</label>
+                            <input type="text" id="qa-active" class="form-input" placeholder="مثال: Paracetamol">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">الباركود (اختياري):</label>
+                            <input type="text" id="qa-barcode" class="form-input" placeholder="الباركود إن وجد">
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom:14px;">
                         <label class="form-label">القسم / التصنيف:</label>
                         <select id="qa-category" class="form-select" required>
                             <option value="">اختر القسم...</option>
                             ${cats.map(c => `<option value="${c.id}">${c.nameAR || c.id}</option>`).join('')}
                         </select>
                     </div>
-                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:12px;">
-                        <div class="form-group">
-                            <label class="form-label">الكمية المتوفرة:</label>
-                            <input type="number" id="qa-qty" class="form-input" value="10" min="0" required>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">تاريخ الصلاحية:</label>
-                            <input type="month" id="qa-expiry" class="form-input" value="${(typeof Utils !== 'undefined' && Utils.getDefaultExpiry) ? Utils.getDefaultExpiry() : (new Date().getFullYear() + 2) + '-12'}" required>
+
+                    <!-- Storage Locations Selection (Multi-select check boxes) -->
+                    <div class="form-group" style="margin-bottom:16px;">
+                        <label class="form-label" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span><i class='bx bx-map-pin'></i> أماكن التخزين المتاحة لهذا الدواء:</span>
+                            <small style="color:var(--text-muted); font-size:11px;">(يمكنك اختيار أكثر من مكان)</small>
+                        </label>
+                        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap:8px; max-height:160px; overflow-y:auto; background:var(--bg-secondary); padding:10px; border-radius:10px; border:1px solid var(--border-color);">
+                            ${allLocs.map(l => `
+                                <label style="display:flex; align-items:center; gap:8px; background:var(--surface); padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); cursor:pointer; font-size:12px; font-weight:600;">
+                                    <input type="checkbox" name="qa-locations" value="${l.id}" checked style="width:16px; height:16px; accent-color:var(--primary); cursor:pointer;">
+                                    <span><i class='bx ${l.icon || 'bx-map-pin'}' style="color:var(--primary);"></i> ${Utils.escapeHTML(l.nameAR)}</span>
+                                </label>
+                            `).join('')}
                         </div>
                     </div>
-                    <div class="form-group" style="margin-bottom:15px;">
-                        <label class="form-label">مكان التخزين / الرف:</label>
-                        <input type="text" id="qa-location" class="form-input" placeholder="مثال: الرف A-1">
-                    </div>
+
                     <div class="form-actions" style="display:flex; gap:10px; margin-top:20px;">
-                        <button type="submit" class="btn-primary" style="flex:1;">💾 حفظ الدواء في المستودع</button>
+                        <button type="submit" class="btn-primary" style="flex:1;">حفظ</button>
                         <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
                     </div>
                 </form>
@@ -1603,9 +1754,11 @@ const App = {
             const nameEnEl = document.getElementById('qa-name-en');
             const nameArEl = document.getElementById('qa-name-ar');
             const catEl = document.getElementById('qa-category');
+            const activeEl = document.getElementById('qa-active');
 
             if (nameEnEl) nameEnEl.value = item.nameEN;
             if (nameArEl) nameArEl.value = item.nameAR;
+            if (activeEl && item.active) activeEl.value = item.active;
             if (catEl) {
                 catEl.value = item.categoryId;
                 if (!catEl.value) {
@@ -1643,44 +1796,51 @@ const App = {
             const nameEN = document.getElementById('qa-name-en').value.trim();
             const nameAR = document.getElementById('qa-name-ar').value.trim() || nameEN;
             const categoryId = document.getElementById('qa-category').value;
-            const qty = Number(document.getElementById('qa-qty').value) || 0;
-            const expiry = document.getElementById('qa-expiry').value || ((typeof Utils !== 'undefined' && Utils.getDefaultExpiry) ? Utils.getDefaultExpiry() : (new Date().getFullYear() + 2) + '-12');
-            const location = document.getElementById('qa-location').value.trim() || 'المستودع الرئيسي';
+            const barcode = (document.getElementById('qa-barcode')?.value || '').trim();
+            const activeIngredient = (document.getElementById('qa-active')?.value || '').trim();
+
+            const selectedLocIds = [];
+            document.querySelectorAll('input[name="qa-locations"]:checked').forEach(cb => {
+                selectedLocIds.push(cb.value);
+            });
 
             if (!nameEN || !categoryId) {
-                UI.showToast('يرجى ملء الاسم والقسم', 'warning');
+                UI.showToast('يرجى ملء اسم الدواء واختيار القسم', 'warning');
                 return;
             }
 
-            const medId = 'med_' + Date.now();
+            const medId = barcode || ('med_' + Date.now());
             const now = new Date().toISOString();
 
-            await DB.add('medicineMaster', {
+            await DB.put('medicineMaster', {
                 id: medId,
                 nameEN,
                 nameAR,
+                activeIngredient,
                 categoryId,
+                barcode,
                 type: 'medicine',
+                allowedLocations: selectedLocIds.length > 0 ? selectedLocIds : null,
                 imagePath: 'assets/icons/default-med.png',
                 syncStatus: 'local',
                 createdAt: now
             });
 
-            await DB.add('inventory', {
-                id: 'inv_' + medId,
-                medicineId: medId,
-                quantity: qty,
-                expiryDate: expiry,
-                location,
-                syncStatus: 'local',
-                lastUpdated: now
-            });
+            // Ensure category is allowed in the selected locations
+            if (selectedLocIds.length > 0 && typeof Locations !== 'undefined') {
+                for (const locId of selectedLocIds) {
+                    try {
+                        await Locations.addCategoryToLocation(locId, categoryId);
+                    } catch (e) {}
+                }
+            }
 
             UI.closeModal();
-            UI.showToast(`تمت إضافة «${nameEN}» برصيد ${qty} بنجاح ✨`, 'success');
+            UI.showToast(`تم حفظ الدواء «${nameEN}» بنجاح ✨`, 'success');
 
             await this.renderDashboard();
-            await this.renderInventory('detailed');
+            if (typeof this.renderInventory === 'function') await this.renderInventory();
+            if (typeof this.renderWarehouseCategories === 'function') await this.renderWarehouseCategories();
             window.switchView('inventory');
 
             if (this.userRole === 'admin') {
@@ -1866,7 +2026,7 @@ App.handleBackup = async function() {
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.7.0'
+            version: '18.7.1'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
