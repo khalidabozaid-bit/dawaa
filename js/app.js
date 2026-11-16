@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.6.7)
+ * Dawaa App Orchestrator (v18.7.0)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.6.7', // Universal Sovereign v18.6.7
+    VERSION: '18.7.0', // Universal Sovereign v18.7.0
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -148,6 +148,8 @@ const App = {
             console.log("BOOT: [STEP 6] UI/TaskManager Init");
             UI.init();
             TaskManager.init();
+            const medLangSelect = document.getElementById('med-lang-select');
+            if (medLangSelect) medLangSelect.value = localStorage.getItem('dawaa_med_lang_pref') || 'en';
             this.initNetworkMonitor();
             this.registerServiceWorker();
 
@@ -173,7 +175,37 @@ const App = {
                 const container = document.getElementById('modal-container');
                 if (container && container.classList.contains('show')) {
                     UI.closeModal();
-                    history.pushState(event.state, "", window.location.hash);
+                    return;
+                }
+                if (event.state && event.state.viewId === 'view-audit') {
+                    if (UI.currentView !== 'audit') {
+                        UI.switchView('view-audit', false);
+                    }
+                    if (event.state.auditLevel === 'medicines') {
+                        this.selectedAuditSessionId = event.state.sessionId;
+                        this.selectedAuditLocationId = event.state.locationId;
+                        this.selectedAuditCategoryId = event.state.categoryId;
+                        this.auditLevel = 'medicines';
+                        this.renderAuditView();
+                    } else if (event.state.auditLevel === 'categories') {
+                        this.selectedAuditSessionId = event.state.sessionId;
+                        this.selectedAuditLocationId = event.state.locationId;
+                        this.selectedAuditCategoryId = null;
+                        this.auditLevel = 'categories';
+                        this.renderAuditView();
+                    } else if (event.state.auditLevel === 'locations') {
+                        this.selectedAuditSessionId = event.state.sessionId;
+                        this.selectedAuditLocationId = null;
+                        this.selectedAuditCategoryId = null;
+                        this.auditLevel = 'locations';
+                        this.renderAuditView();
+                    } else {
+                        this.selectedAuditSessionId = null;
+                        this.selectedAuditLocationId = null;
+                        this.selectedAuditCategoryId = null;
+                        this.auditLevel = 'sessions';
+                        this.renderAuditView();
+                    }
                     return;
                 }
                 if (event.state && event.state.viewId) {
@@ -1834,7 +1866,7 @@ App.handleBackup = async function() {
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.6.7'
+            version: '18.7.0'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -1897,6 +1929,14 @@ App.handleRestore = async function(input) {
     } catch (err) {
         UI.showToast('خطأ في العملية: ' + err.message, 'danger');
     }
+};
+
+App.setMedicineLanguagePreference = function(lang) {
+    localStorage.setItem('dawaa_med_lang_pref', lang);
+    UI.showToast('تم تحديث لغة عرض الأدوية بنجاح ✨', 'success');
+    if (typeof this.renderInventory === 'function') this.renderInventory();
+    if (typeof this.renderDashboard === 'function') this.renderDashboard();
+    if (typeof this.renderAuditView === 'function') this.renderAuditView();
 };
 
 App.fullReset = async function() {
@@ -3052,6 +3092,29 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         if (!loc) return this.auditBackToLocations();
 
         const categories = await Locations.getCategoriesForLocation(loc.id);
+        const allLocMeds = await Audit.getMedicinesWithAuditStatus(session.id, loc.id, null);
+
+        const totalCount = allLocMeds.length;
+        const uncountedCount = allLocMeds.filter(m => !m.isCounted).length;
+        const countedCount = allLocMeds.filter(m => m.isCounted).length;
+        const progressPct = totalCount > 0 ? Math.round((countedCount / totalCount) * 100) : 0;
+
+        const hasSearch = !!(this.auditLocSearch && this.auditLocSearch.trim().length > 0);
+        const viewMode = hasSearch ? 'all-meds' : (this.auditLocViewMode || 'categories');
+        const currentLocFilter = this.auditLocFilter || 'all';
+        const sortMode = this.auditSortMode || 'status';
+
+        let displayedMeds = allLocMeds;
+        if (currentLocFilter === 'uncounted') {
+            displayedMeds = displayedMeds.filter(m => !m.isCounted);
+        } else if (currentLocFilter === 'counted') {
+            displayedMeds = displayedMeds.filter(m => m.isCounted);
+        }
+
+        if (hasSearch) {
+            displayedMeds = this.filterAuditMedicines(displayedMeds, this.auditLocSearch);
+        }
+        displayedMeds = this.sortAuditMedicines(displayedMeds, sortMode);
 
         container.innerHTML = `
             <!-- Breadcrumbs Bar -->
@@ -3062,30 +3125,109 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 <div class="breadcrumbs-trail">
                     <span onclick="window.App.auditBackToSessions()" style="cursor:pointer">الجلسات</span>
                     <i class='bx bx-chevron-left'></i>
-                    <span onclick="window.App.auditBackToLocations()" style="cursor:pointer">${loc.nameAR}</span>
-                    <i class='bx bx-chevron-left'></i>
-                    <span class="active">التصنيفات</span>
+                    <span class="active">${Utils.escapeHTML(loc.nameAR)}</span>
                 </div>
             </div>
 
-            <div class="section-title mb-12">
-                <h3><i class='bx ${loc.icon || 'bx-map-pin'}'></i> أقسام الأدوية في "${loc.nameAR}":</h3>
-                <p class="text-muted small">اختر القسم لاستعراض الأدوية وتسجيل الأرصدة</p>
+            <!-- Location Progress Bar -->
+            <div style="background:var(--surface); border:1px solid var(--border-color); border-radius:12px; padding:10px 14px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <i class='bx ${loc.icon || 'bx-map-pin'}' style="font-size:20px; color:var(--primary);"></i>
+                    <div>
+                        <strong style="font-size:14px; color:var(--text-main);">${Utils.escapeHTML(loc.nameAR)}</strong>
+                        <div style="font-size:11px; color:var(--text-muted);">${totalCount} صنف دواء إجمالي</div>
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div style="text-align:left;">
+                        <span style="font-size:12px; font-weight:bold; color:var(--text-main);">${countedCount} / ${totalCount}</span>
+                        <div style="font-size:10px; color:var(--text-muted);">تم عد (${progressPct}%)</div>
+                    </div>
+                    <div style="width:50px; height:6px; background:var(--border-color); border-radius:3px; overflow:hidden;">
+                        <div style="width:${progressPct}%; height:100%; background:#10b981; border-radius:3px;"></div>
+                    </div>
+                </div>
             </div>
 
-            <!-- Square Categories Grid -->
-            <div class="audit-square-grid">
-                ${await Promise.all(categories.map(async (cat) => {
-                    const meds = await Locations.getMedicinesForLocation(loc.id, cat.id);
-                    return `
-                        <div class="square-card" onclick="window.App.openAuditCategory('${cat.id}')">
-                            <i class='bx ${cat.icon || 'bx-category'} square-icon' style="color: ${cat.color || 'var(--primary)'}"></i>
-                            <h3>${cat.nameAR}</h3>
-                            <span class="square-meta">${meds.length} صنف دواء</span>
-                        </div>
-                    `;
-                })).then(cards => cards.join(''))}
+            <!-- In-Location Search Bar -->
+            <div class="audit-toolbar" style="margin-bottom:10px;">
+                <div class="audit-search-wrapper" style="width:100%;">
+                    <i class='bx bx-search'></i>
+                    <input type="text" id="audit-loc-search" class="audit-search-input" placeholder="🔍 ابحث عن دواء في ${Utils.escapeHTML(loc.nameAR)} (عربي / إنجليزي)..." value="${this.auditLocSearch || ''}" oninput="window.App.handleAuditLocSearch(this.value)">
+                    ${hasSearch ? `
+                        <button type="button" onclick="window.App.handleAuditLocSearch('')" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:flex; align-items:center;">
+                            <i class='bx bx-x' style="font-size:18px;"></i>
+                        </button>
+                    ` : ''}
+                </div>
             </div>
+
+            <!-- View Mode Switch & Sort Options Row -->
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+                <div style="display:flex; background:var(--bg-secondary); border-radius:10px; padding:3px; gap:4px; border:1px solid var(--border-color);">
+                    <button type="button" class="btn-ghost sm-btn" onclick="window.App.setAuditLocViewMode('categories')" style="font-size:11.5px; padding:5px 10px; border-radius:7px; ${viewMode === 'categories' ? 'background:var(--primary); color:white; font-weight:bold;' : 'color:var(--text-muted);'}">
+                        <i class='bx bx-folder'></i> حسب الأقسام (${categories.length})
+                    </button>
+                    <button type="button" class="btn-ghost sm-btn" onclick="window.App.setAuditLocViewMode('all-meds')" style="font-size:11.5px; padding:5px 10px; border-radius:7px; ${viewMode === 'all-meds' ? 'background:var(--primary); color:white; font-weight:bold;' : 'color:var(--text-muted);'}">
+                        <i class='bx bx-list-ul'></i> كل الأدوية (${totalCount})
+                    </button>
+                </div>
+
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-size:11px; color:var(--text-muted); font-weight:bold;">الترتيب:</span>
+                    <select class="form-input" onchange="window.App.setAuditSortMode(this.value)" style="padding:3px 8px; font-size:11px; border-radius:8px; width:auto; height:30px; background:var(--surface);">
+                        <option value="status" ${sortMode === 'status' ? 'selected' : ''}>⏳ غير المعدود أولاً</option>
+                        <option value="en" ${sortMode === 'en' ? 'selected' : ''}>🔤 أبجدي A-Z</option>
+                        <option value="ar" ${sortMode === 'ar' ? 'selected' : ''}>🔤 أبجدي أ-ي</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Content Area: Categories Grid OR All Medicines Grid -->
+            ${viewMode === 'categories' ? `
+                <div class="audit-square-grid">
+                    ${categories.map(cat => {
+                        const catMeds = allLocMeds.filter(m => m.categoryId === cat.id);
+                        const catCounted = catMeds.filter(m => m.isCounted).length;
+                        const isCatDone = catMeds.length > 0 && catCounted === catMeds.length;
+                        return `
+                            <div class="square-card ${isCatDone ? 'counted' : ''}" onclick="window.App.openAuditCategory('${cat.id}')" style="cursor:pointer;">
+                                ${isCatDone ? `<span class="badge-done"><i class='bx bx-check'></i> مكتمل</span>` : ''}
+                                <i class='bx ${cat.icon || 'bx-category'} square-icon' style="color: ${cat.color || 'var(--primary)'}"></i>
+                                <h3 style="font-size:12px; margin:4px 0 2px 0;">${cat.nameAR}</h3>
+                                <span class="square-meta" style="font-size:10.5px; font-weight:600;">${catCounted} / ${catMeds.length} صنف</span>
+                                <div style="width: 80%; height: 3px; background: var(--border-color); border-radius: 2px; margin-top: 6px; overflow: hidden;">
+                                    <div style="width: ${catMeds.length > 0 ? Math.round((catCounted/catMeds.length)*100) : 0}%; height: 100%; background: #10b981; border-radius: 2px;"></div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            ` : `
+                <!-- All-Meds Filter Chips (When in all medicines view) -->
+                <div class="audit-filters-row" style="margin-bottom:10px;">
+                    <button type="button" class="audit-filter-chip ${currentLocFilter === 'all' ? 'active' : ''}" onclick="window.App.setAuditLocFilter('all')">
+                        الكل (${totalCount})
+                    </button>
+                    <button type="button" class="audit-filter-chip ${currentLocFilter === 'uncounted' ? 'active' : ''}" onclick="window.App.setAuditLocFilter('uncounted')">
+                        ⏳ بانتظار العد (${uncountedCount})
+                    </button>
+                    <button type="button" class="audit-filter-chip ${currentLocFilter === 'counted' ? 'active' : ''}" onclick="window.App.setAuditLocFilter('counted')">
+                        ✅ تم العد (${countedCount})
+                    </button>
+                </div>
+
+                ${displayedMeds.length === 0 ? `
+                    <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
+                        <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
+                        <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة لبحثك في هذا المكان</p>
+                    </div>
+                ` : `
+                    <div class="audit-square-grid">
+                        ${displayedMeds.map(med => this.renderAuditMedicineCard(med)).join('')}
+                    </div>
+                `}
+            `}
         `;
     },
 
@@ -3342,6 +3484,133 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         this.renderAuditView();
     },
 
+    setAuditLocViewMode(mode) {
+        this.auditLocViewMode = mode;
+        this.renderAuditView();
+    },
+
+    handleAuditLocSearch(query) {
+        this.auditLocSearch = query;
+        this.renderAuditView();
+    },
+
+    setAuditSortMode(mode) {
+        this.auditSortMode = mode;
+        this.renderAuditView();
+    },
+
+    setAuditLocFilter(filterType) {
+        this.auditLocFilter = filterType;
+        this.renderAuditView();
+    },
+
+    sortAuditMedicines(meds, sortMode = 'status') {
+        const langPref = localStorage.getItem('dawaa_med_lang_pref') || 'en';
+        return meds.slice().sort((a, b) => {
+            if (sortMode === 'status') {
+                if (a.isCounted !== b.isCounted) {
+                    return a.isCounted ? 1 : -1; // uncounted first
+                }
+                const aName = (langPref === 'ar' ? (a.nameAR || a.nameEN) : (a.nameEN || a.nameAR)) || '';
+                const bName = (langPref === 'ar' ? (b.nameAR || b.nameEN) : (b.nameEN || b.nameAR)) || '';
+                return aName.localeCompare(bName, langPref === 'ar' ? 'ar' : 'en');
+            } else if (sortMode === 'ar') {
+                const aName = a.nameAR || a.nameEN || '';
+                const bName = b.nameAR || b.nameEN || '';
+                return aName.localeCompare(bName, 'ar');
+            } else {
+                // 'en'
+                const aName = a.nameEN || a.nameAR || '';
+                const bName = b.nameEN || b.nameAR || '';
+                return aName.localeCompare(bName, 'en', { sensitivity: 'base' });
+            }
+        });
+    },
+
+    filterAuditMedicines(meds, query) {
+        if (!query) return meds;
+        const q = query.trim().toLowerCase();
+        const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(q) : q;
+
+        return meds.filter(m => {
+            const en = (m.nameEN || '').toLowerCase();
+            const ar = (m.nameAR || '').toLowerCase();
+            const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
+            const active = (m.activeIngredient || '').toLowerCase();
+            const id = (m.id || '').toLowerCase();
+
+            return en.includes(q) || ar.includes(q) || arNorm.includes(qNorm) || active.includes(q) || id.includes(q);
+        });
+    },
+
+    renderAuditMedicineCard(med) {
+        const langPref = localStorage.getItem('dawaa_med_lang_pref') || 'en';
+        let primaryName = med.nameEN || med.nameAR || 'دواء';
+        let secondaryName = (med.nameAR && med.nameAR !== med.nameEN) ? med.nameAR : '';
+
+        if (langPref === 'ar') {
+            primaryName = med.nameAR || med.nameEN || 'دواء';
+            secondaryName = (med.nameEN && med.nameEN !== med.nameAR) ? med.nameEN : '';
+        } else if (langPref === 'both') {
+            primaryName = med.nameEN || med.nameAR || 'دواء';
+            secondaryName = (med.nameAR && med.nameAR !== primaryName) ? med.nameAR : '';
+        }
+
+        const safePrimary = (typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(primaryName) : primaryName;
+        const safeSecondary = (secondaryName && secondaryName !== primaryName && typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(secondaryName) : (secondaryName && secondaryName !== primaryName ? secondaryName : '');
+        const safeActive = (med.activeIngredient && typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(med.activeIngredient) : (med.activeIngredient || '');
+        const imgUrl = (typeof Categories !== 'undefined' && Categories.getMedicineImage) ? Categories.getMedicineImage(med) : (med.imagePath || 'assets/icons/default-med.png');
+
+        if (med.isCounted) {
+            const batchesHtml = (med.batches && med.batches.length > 0)
+                ? med.batches.map(b => {
+                    const badge = this.calcExpiryBadge(b.expiryDate);
+                    return `
+                        <span class="batch-exterior-pill" style="display:inline-flex; align-items:center; justify-content:center; gap:2px; font-size:9px; font-weight:bold; padding:1px 5px; border-radius:4px; background:${badge.bg}; color:${badge.color}; border:1px solid ${badge.color}33; white-space:nowrap;">
+                            <i class='bx ${badge.icon}' style="font-size:10px;"></i>
+                            <span>${b.quantity} &times; ${b.expiryDate}</span>
+                        </span>
+                    `;
+                }).join('')
+                : `<small style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${med.countedExpiry || ''}</small>`;
+
+            return `
+                <div class="square-card counted" onclick="window.App.openCountModal('${med.id}')" title="انقر لتعديل العد" style="cursor:pointer;">
+                    <span class="badge-done">
+                        <i class='bx bx-check'></i> تم
+                    </span>
+                    <div style="width: 38px; height: 38px; border-radius: 8px; overflow: hidden; margin-bottom: 4px; flex-shrink: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <img src="${imgUrl}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                    </div>
+                    <h3 style="font-size: 11.5px; font-weight: 800; margin: 0 0 2px 0; line-height: 1.25; word-break: break-word;">${safePrimary}</h3>
+                    ${safeSecondary ? `<div style="font-size: 10px; color: var(--text-muted); margin-bottom: 2px; line-height: 1.2; word-break: break-word;">${safeSecondary}</div>` : ''}
+                    ${safeActive ? `<div style="font-size: 9px; color: var(--primary); opacity: 0.9; margin-bottom: 3px; display:flex; align-items:center; gap:3px;"><i class='bx bx-dna'></i> ${safeActive}</div>` : ''}
+                    <div class="counted-qty-tag" style="font-size: 11px; font-weight: 800; background: rgba(16,185,129,0.15); color: var(--secondary); padding: 2px 8px; border-radius: 6px; margin: 2px 0;">
+                        إجمالي: ${med.countedQty}
+                    </div>
+                    <div class="card-batches-breakdown" style="display: flex; flex-direction: column; gap: 2px; width: 100%; margin-top: 2px;">
+                        ${batchesHtml}
+                    </div>
+                    <small style="font-size:9px; color:var(--text-muted); margin-top:auto; padding-top:4px; display:flex; align-items:center; gap:2px;">
+                        <i class='bx bx-user'></i> ${med.countedBy || 'صيدلي'}
+                    </small>
+                </div>
+            `;
+        } else {
+            return `
+                <div class="square-card" onclick="window.App.openCountModal('${med.id}')" title="انقر لتسجيل العد" style="cursor:pointer;">
+                    <div style="width: 38px; height: 38px; border-radius: 8px; overflow: hidden; margin-bottom: 4px; background: rgba(59,130,246,0.06); display:flex; align-items:center; justify-content:center; flex-shrink: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+                        <img src="${imgUrl}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                    </div>
+                    <h3 style="font-size: 11.5px; font-weight: 800; margin: 0 0 2px 0; line-height: 1.25; word-break: break-word;">${safePrimary}</h3>
+                    ${safeSecondary ? `<div style="font-size: 10px; color: var(--text-muted); margin-bottom: 2px; line-height: 1.2; word-break: break-word;">${safeSecondary}</div>` : ''}
+                    ${safeActive ? `<div style="font-size: 9px; color: var(--primary); opacity: 0.9; margin-bottom: 3px; display:flex; align-items:center; gap:3px;"><i class='bx bx-dna'></i> ${safeActive}</div>` : ''}
+                    <span class="square-meta" style="color: var(--primary); font-size: 10px; margin-top: auto; font-weight:700;">بانتظار العد ⏳</span>
+                </div>
+            `;
+        }
+    },
+
     async renderAuditMedicinesLevel(container, session) {
         const loc = await Locations.get(this.selectedAuditLocationId);
         const cat = await Categories.getInfo(this.selectedAuditCategoryId);
@@ -3353,9 +3622,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const countedCount = allMedicines.filter(m => m.isCounted).length;
         const progressPct = totalCount > 0 ? Math.round((countedCount / totalCount) * 100) : 0;
 
-        // Apply Live Filters & Search
+        // Apply Live Filters & Search & Sort
         const currentFilter = this.auditMedFilter || 'all';
-        const currentSearch = (this.auditMedSearch || '').trim().toLowerCase();
+        const sortMode = this.auditSortMode || 'status';
 
         let filteredMedicines = allMedicines;
         if (currentFilter === 'uncounted') {
@@ -3364,13 +3633,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             filteredMedicines = filteredMedicines.filter(m => m.isCounted);
         }
 
-        if (currentSearch) {
-            filteredMedicines = filteredMedicines.filter(m =>
-                (m.nameEN && m.nameEN.toLowerCase().includes(currentSearch)) ||
-                (m.nameAR && m.nameAR.includes(currentSearch)) ||
-                (m.id && m.id.toLowerCase().includes(currentSearch))
-            );
+        if (this.auditMedSearch && this.auditMedSearch.trim()) {
+            filteredMedicines = this.filterAuditMedicines(filteredMedicines, this.auditMedSearch);
         }
+        filteredMedicines = this.sortAuditMedicines(filteredMedicines, sortMode);
 
         const activeUser = Users.getActive();
 
@@ -3381,11 +3647,11 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     <i class='bx bx-right-arrow-alt'></i>
                 </button>
                 <div class="breadcrumbs-trail">
-                    <span onclick="window.App.auditBackToLocations()" style="cursor:pointer">${loc.nameAR}</span>
+                    <span onclick="window.App.auditBackToSessions()" style="cursor:pointer">الجلسات</span>
                     <i class='bx bx-chevron-left'></i>
-                    <span onclick="window.App.auditBackToCategories()" style="cursor:pointer">${cat.nameAR}</span>
+                    <span onclick="window.App.auditBackToCategories()" style="cursor:pointer">${Utils.escapeHTML(loc.nameAR)}</span>
                     <i class='bx bx-chevron-left'></i>
-                    <span class="active">الأدوية (${totalCount})</span>
+                    <span class="active">${Utils.escapeHTML(cat.nameAR)} (${totalCount})</span>
                 </div>
             </div>
 
@@ -3393,7 +3659,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
                 <div style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-muted);">
                     <i class='bx bx-user-check' style="color:var(--primary); font-size:15px;"></i>
-                    <span>الصيدلي القائم بالعد: <strong style="color:var(--text-main);">${activeUser.name}</strong></span>
+                    <span>الصيدلي القائم بالعد: <strong style="color:var(--text-main);">${Utils.escapeHTML(activeUser.name)}</strong></span>
                 </div>
 
                 <div style="font-size:11px; font-weight:700; color:var(--text-muted); display:flex; align-items:center; gap:8px;">
@@ -3411,7 +3677,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         <strong style="color:#0284c7;"><i class='bx bx-group'></i> الفريق المشارك:</strong>
                         <div style="display:flex; gap:4px; flex-wrap:wrap;">
                             ${(session.participants || []).map(p => `
-                                <span class="badge bg-info" style="font-size:10px; padding:2px 6px; border-radius:4px;">${p}</span>
+                                <span class="badge bg-info" style="font-size:10px; padding:2px 6px; border-radius:4px;">${Utils.escapeHTML(p)}</span>
                             `).join('')}
                         </div>
                     </div>
@@ -3423,22 +3689,38 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             ` : ''}
 
-            <!-- Toolbar: Quick Search & Filter Chips -->
-            <div class="audit-toolbar">
-                <div class="audit-search-wrapper">
+            <!-- Toolbar: Quick Search & Filter Chips & Sort -->
+            <div class="audit-toolbar" style="margin-bottom:12px;">
+                <div class="audit-search-wrapper" style="width:100%;">
                     <i class='bx bx-search'></i>
                     <input type="text" id="audit-med-search" class="audit-search-input" placeholder="بحث سريع باسم الدواء الإنجليزي أو العربي..." value="${this.auditMedSearch || ''}" oninput="window.App.handleAuditMedSearch(this.value)">
+                    ${this.auditMedSearch ? `
+                        <button type="button" onclick="window.App.handleAuditMedSearch('')" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:flex; align-items:center;">
+                            <i class='bx bx-x' style="font-size:18px;"></i>
+                        </button>
+                    ` : ''}
                 </div>
-                <div class="audit-filters-row">
-                    <button type="button" class="audit-filter-chip ${currentFilter === 'all' ? 'active' : ''}" onclick="window.App.setAuditFilter('all')">
-                        الكل (${totalCount})
-                    </button>
-                    <button type="button" class="audit-filter-chip ${currentFilter === 'uncounted' ? 'active' : ''}" onclick="window.App.setAuditFilter('uncounted')">
-                        ⏳ بانتظار العد (${uncountedCount})
-                    </button>
-                    <button type="button" class="audit-filter-chip ${currentFilter === 'counted' ? 'active' : ''}" onclick="window.App.setAuditFilter('counted')">
-                        ✅ تم العد (${countedCount})
-                    </button>
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-top:8px;">
+                    <div class="audit-filters-row">
+                        <button type="button" class="audit-filter-chip ${currentFilter === 'all' ? 'active' : ''}" onclick="window.App.setAuditFilter('all')">
+                            الكل (${totalCount})
+                        </button>
+                        <button type="button" class="audit-filter-chip ${currentFilter === 'uncounted' ? 'active' : ''}" onclick="window.App.setAuditFilter('uncounted')">
+                            ⏳ بانتظار العد (${uncountedCount})
+                        </button>
+                        <button type="button" class="audit-filter-chip ${currentFilter === 'counted' ? 'active' : ''}" onclick="window.App.setAuditFilter('counted')">
+                            ✅ تم العد (${countedCount})
+                        </button>
+                    </div>
+
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <span style="font-size:11px; color:var(--text-muted); font-weight:bold;">الترتيب:</span>
+                        <select class="form-input" onchange="window.App.setAuditSortMode(this.value)" style="padding:3px 8px; font-size:11px; border-radius:8px; width:auto; height:30px; background:var(--surface);">
+                            <option value="status" ${sortMode === 'status' ? 'selected' : ''}>⏳ غير المعدود أولاً</option>
+                            <option value="en" ${sortMode === 'en' ? 'selected' : ''}>🔤 أبجدي A-Z</option>
+                            <option value="ar" ${sortMode === 'ar' ? 'selected' : ''}>🔤 أبجدي أ-ي</option>
+                        </select>
+                    </div>
                 </div>
             </div>
 
@@ -3450,53 +3732,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             ` : `
                 <div class="audit-square-grid">
-                    ${filteredMedicines.map(med => {
-                        const imgUrl = Categories.getMedicineImage(med);
-                        if (med.isCounted) {
-                            const batchesHtml = (med.batches && med.batches.length > 0)
-                                ? med.batches.map(b => {
-                                    const badge = window.App.calcExpiryBadge(b.expiryDate);
-                                    return `
-                                        <span class="batch-exterior-pill" style="display:inline-flex; align-items:center; justify-content:center; gap:2px; font-size:9px; font-weight:bold; padding:1px 5px; border-radius:4px; background:${badge.bg}; color:${badge.color}; border:1px solid ${badge.color}33; white-space:nowrap;">
-                                            <i class='bx ${badge.icon}' style="font-size:10px;"></i>
-                                            <span>${b.quantity} &times; ${b.expiryDate}</span>
-                                        </span>
-                                    `;
-                                }).join('')
-                                : `<small style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${med.countedExpiry || ''}</small>`;
-
-                            return `
-                                <div class="square-card counted" onclick="window.App.openCountModal('${med.id}')" title="انقر لتعديل العد">
-                                    <span class="badge-done">
-                                        <i class='bx bx-check'></i> تم
-                                    </span>
-                                    <div style="width: 34px; height: 34px; border-radius: 6px; overflow: hidden; margin-bottom: 3px; flex-shrink: 0;">
-                                        <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover;">
-                                    </div>
-                                    <h3 style="font-size: 11px; font-weight: 800; margin: 0 0 3px 0; line-height: 1.2; word-break: break-word;">${med.nameEN || med.nameAR}</h3>
-                                    <div class="counted-qty-tag" style="font-size: 11px; font-weight: 800; background: rgba(16,185,129,0.15); color: var(--secondary); padding: 2px 8px; border-radius: 6px; margin: 2px 0;">
-                                        إجمالي: ${med.countedQty}
-                                    </div>
-                                    <div class="card-batches-breakdown" style="display: flex; flex-direction: column; gap: 2px; width: 100%; margin-top: 2px;">
-                                        ${batchesHtml}
-                                    </div>
-                                    <small style="font-size:9px; color:var(--text-muted); margin-top:auto; padding-top:2px; display:flex; align-items:center; gap:2px;">
-                                        <i class='bx bx-user'></i> ${med.countedBy || 'صيدلي'}
-                                    </small>
-                                </div>
-                            `;
-                        } else {
-                            return `
-                                <div class="square-card" onclick="window.App.openCountModal('${med.id}')" title="انقر لتسجيل العد">
-                                    <div style="width: 34px; height: 34px; border-radius: 6px; overflow: hidden; margin-bottom: 4px; background: rgba(59,130,246,0.06); display:flex; align-items:center; justify-content:center; flex-shrink: 0;">
-                                        <img src="${imgUrl}" onerror="this.src='assets/icons/default-med.png'" style="width:100%; height:100%; object-fit:cover;">
-                                    </div>
-                                    <h3 style="font-size: 11px; font-weight: 800; margin: 0 0 4px 0; line-height: 1.2; word-break: break-word;">${med.nameEN || med.nameAR}</h3>
-                                    <span class="square-meta" style="color: var(--primary); font-size: 10px; margin-top: auto;">بانتظار العد ⏳</span>
-                                </div>
-                            `;
-                        }
-                    }).join('')}
+                    ${filteredMedicines.map(med => this.renderAuditMedicineCard(med)).join('')}
                 </div>
             `}
         `;
@@ -3507,6 +3743,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         this.selectedAuditSessionId = id;
         Audit.currentSessionId = id;
         this.auditLevel = 'locations';
+        this.auditLocSearch = '';
+        this.auditMedSearch = '';
+        try { history.pushState({ viewId: 'view-audit', auditLevel: 'locations', sessionId: id }, "", "#audit/locations"); } catch (e) {}
         this.renderAuditView();
     },
 
@@ -3514,6 +3753,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         this.selectedAuditLocationId = locId;
         Audit.currentLocationId = locId;
         this.auditLevel = 'categories';
+        this.auditLocSearch = '';
+        this.auditLocFilter = 'all';
+        try { history.pushState({ viewId: 'view-audit', auditLevel: 'categories', sessionId: this.selectedAuditSessionId, locationId: locId }, "", "#audit/categories"); } catch (e) {}
         this.renderAuditView();
     },
 
@@ -3521,24 +3763,38 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         this.selectedAuditCategoryId = catId;
         Audit.currentCategoryId = catId;
         this.auditLevel = 'medicines';
+        this.auditMedSearch = '';
+        this.auditMedFilter = 'all';
+        try { history.pushState({ viewId: 'view-audit', auditLevel: 'medicines', sessionId: this.selectedAuditSessionId, locationId: this.selectedAuditLocationId, categoryId: catId }, "", "#audit/medicines"); } catch (e) {}
         this.renderAuditView();
     },
 
     auditBackToSessions() {
         this.auditLevel = 'sessions';
         this.selectedAuditSessionId = null;
+        this.selectedAuditLocationId = null;
+        this.selectedAuditCategoryId = null;
+        this.auditLocSearch = '';
+        this.auditMedSearch = '';
+        try { history.pushState({ viewId: 'view-audit', auditLevel: 'sessions' }, "", "#audit/sessions"); } catch (e) {}
         this.renderAuditView();
     },
 
     auditBackToLocations() {
         this.auditLevel = 'locations';
         this.selectedAuditLocationId = null;
+        this.selectedAuditCategoryId = null;
+        this.auditLocSearch = '';
+        this.auditMedSearch = '';
+        try { history.pushState({ viewId: 'view-audit', auditLevel: 'locations', sessionId: this.selectedAuditSessionId }, "", "#audit/locations"); } catch (e) {}
         this.renderAuditView();
     },
 
     auditBackToCategories() {
         this.auditLevel = 'categories';
         this.selectedAuditCategoryId = null;
+        this.auditMedSearch = '';
+        try { history.pushState({ viewId: 'view-audit', auditLevel: 'categories', sessionId: this.selectedAuditSessionId, locationId: this.selectedAuditLocationId }, "", "#audit/categories"); } catch (e) {}
         this.renderAuditView();
     },
 
@@ -3685,6 +3941,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         this._modalBatches = initialBatches;
         const initialBadge = this.calcExpiryBadge(defaultExpiry);
 
+        try { history.pushState({ modalOpen: true }, "", window.location.hash); } catch (e) {}
         UI.showModal(`
             <div class="modal-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 12px;">
                 <h2 style="font-size:16px; margin:0;"><i class='bx bx-barcode-reader' style="color:var(--primary);"></i> تسجيل الجرد الفعلي والدفعات</h2>

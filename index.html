@@ -77,10 +77,9 @@
             </div>
             <div class="app-logo">
                 <i class='bx bxs-capsule'></i>
-                <h1>دواء <span id="app-version-tag" style="font-size: 10px; opacity: 0.5">v18.6.7</span></h1>
-                <span id="network-status" class="network-status-badge online" title="حالة الاتصال بالسحابة">
-                    <i class='bx bx-wifi'></i>
-                </span>
+                <h1>دواء</h1>
+                <span id="app-version-tag" style="display: none;">v18.7.0</span>
+                <span id="network-status" style="display: none;"></span>
             </div>
             
             <div class="header-actions">
@@ -88,14 +87,8 @@
                     <i class='bx bx-bell'></i>
                     <span id="notif-badge" class="notif-badge" style="display: none;">0</span>
                 </button>
-                <button class="icon-btn" onclick="window.App.openAuditHub()" title="مركز عمليات الجرد (Command Center)">
-                    <i class='bx bx-command'></i>
-                </button>
                 <button class="icon-btn" onclick="window.toggleTheme()" title="تبديل الوضع">
                     <i class='bx bx-moon' id="theme-icon"></i>
-                </button>
-                <button class="icon-btn text-danger" onclick="window.App.handleLogout()" title="تسجيل الخروج والرجوع لشاشة الدخول" style="color: var(--danger, #ef4444);">
-                    <i class='bx bx-log-out'></i>
                 </button>
             </div>
         </div>
@@ -298,12 +291,17 @@
                 <h3><i class='bx bxs-cog'></i> التحكم والنظام</h3>
             </div>
             <div class="settings-grid">
-                <div class="setting-card primary-accent" onclick="window.switchView('audit'); window.App.openNewAuditModal();">
-                    <div class="setting-icon bg-sync"><i class='bx bx-clipboard'></i></div>
-                    <div class="setting-info">
-                        <h3>بدء جلسة جرد جديدة</h3>
-                        <p>إنشاء جرد فردي أو جماعي بالأماكن</p>
+                <div class="setting-card" style="cursor: default;">
+                    <div class="setting-icon bg-info"><i class='bx bx-font'></i></div>
+                    <div class="setting-info" style="flex: 1;">
+                        <h3>لغة عرض أسماء الأدوية</h3>
+                        <p>تحديد الاسم الأساسي المعروض للأدوية في القوائم</p>
                     </div>
+                    <select id="med-lang-select" class="form-select" style="width: auto; padding: 6px 12px; font-weight: bold; border-radius: 8px; font-size: 13px; cursor: pointer;" onchange="window.App.setMedicineLanguagePreference(this.value)">
+                        <option value="en">الإنجليزية (English)</option>
+                        <option value="ar">العربية (عربي أولاً)</option>
+                        <option value="both">كلاهما معاً (ثنائي)</option>
+                    </select>
                 </div>
 
                 <div class="setting-card" onclick="window.App.openExpiryMonitorModal()">
@@ -407,7 +405,7 @@
 
     <!-- App Scripts -->
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/app.js?v=18.6.7"></script>
+    <script type="module" src="js/app.js?v=18.7.0"></script>
     
     <!-- Navigation Logic managed by js/app.js -->
 </body>

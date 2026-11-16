@@ -157,73 +157,42 @@ export const Inventory = {
         if (!m) return '';
         const imgUrl = Categories ? Categories.getMedicineImage(m) : (m.imagePath || 'assets/icons/default-med.png');
         const medId = item.medicineId || item.id || m.id;
-        
-        const DICT = {
-            'antibiotics': 'مضادات حيوية',
-            'antibiotic': 'مضادات حيوية',
-            'analgesics': 'مسكنات وحرارة',
-            'nsaid': 'مسكنات وحرارة',
-            'respiratory': 'برد وصدر وحساسية',
-            'anti-flu': 'برد وصدر وحساسية',
-            'flu': 'برد وصدر وحساسية',
-            'cold': 'برد وصدر وحساسية',
-            'laryng.': 'برد وصدر وحساسية',
-            'laryng': 'برد وصدر وحساسية',
-            'antihistamines': 'برد وصدر وحساسية',
-            'gastro': 'معدة وجهاز هضمي',
-            'git prep': 'معدة وجهاز هضمي',
-            'git': 'معدة وجهاز هضمي',
-            'chronic': 'أمراض مزمنة',
-            'injections': 'حقن ومحاليل وأمصال',
-            'injection': 'حقن ومحاليل وأمصال',
-            'serum': 'حقن ومحاليل وأمصال',
-            'emergency': 'حقن ومحاليل وأمصال',
-            'topical': 'مراهم وقطرات',
-            'local prep': 'مراهم وقطرات',
-            'local': 'مراهم وقطرات',
-            'dermatology': 'مراهم وقطرات',
-            'eye-ear-nose': 'مراهم وقطرات',
-            'eye-ear': 'مراهم وقطرات',
-            'consumables': 'مستلزمات وغيار طبي'
-        };
 
-        const cleanCat = (m.categoryId || '').toString().trim().toLowerCase();
-        let catName = DICT[cleanCat] || (CATEGORY_MAP && CATEGORY_MAP[m.categoryId] ? CATEGORY_MAP[m.categoryId].ar : (m.categoryId || 'عام'));
-        let catIcon = (CATEGORY_MAP && CATEGORY_MAP[m.categoryId]?.icon) || 'bx-purchase-tag-alt';
-        if (cleanCat.includes('antibiotic')) catIcon = 'bx-dna';
-        else if (cleanCat.includes('nsaid')) catIcon = 'bx-plus-medical';
-        else if (cleanCat.includes('flu') || cleanCat.includes('cold')) catIcon = 'bx-wind';
-        else if (cleanCat.includes('laryng')) catIcon = 'bx-microphone-off';
-        else if (cleanCat.includes('git') || cleanCat.includes('gastro')) catIcon = 'bx-dish';
-        else if (cleanCat.includes('local')) catIcon = 'bx-spray-can';
-        else if (cleanCat.includes('respir')) catIcon = 'bx-mask';
-        else if (cleanCat.includes('eye')) catIcon = 'bx-bullseye';
-        else if (cleanCat.includes('inject')) catIcon = 'bx-injection';
-        else if (cleanCat.includes('consum')) catIcon = 'bx-package';
-        
+        // Language preference: 'en' | 'ar' | 'both'
+        const langPref = localStorage.getItem('dawaa_med_lang_pref') || 'en';
+        let primaryName = m.nameEN || m.nameAR || 'دواء';
+        let secondaryName = (m.nameAR && m.nameAR !== m.nameEN) ? m.nameAR : '';
+
+        if (langPref === 'ar') {
+            primaryName = m.nameAR || m.nameEN || 'دواء';
+            secondaryName = (m.nameEN && m.nameEN !== m.nameAR) ? m.nameEN : '';
+        }
+
+        const safePrimary = (typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(primaryName) : primaryName;
+        const safeSecondary = (typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(secondaryName) : secondaryName;
+        const safeActive = (m.activeIngredient && typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(m.activeIngredient) : (m.activeIngredient || '');
+
         return `
-            <div class="inventory-card master-catalog-card" data-med-id="${medId}" style="display:flex; align-items:center; gap:12px; padding:12px 16px; margin-bottom:12px; border-radius:16px; background:var(--surface); border:1px solid var(--border-color); box-shadow:var(--shadow-sm); transition:all 0.2s ease;">
-                <div class="card-img" style="width:48px; height:48px; border-radius:10px; overflow:hidden; flex-shrink:0; background:rgba(59,130,246,0.08); display:flex; align-items:center; justify-content:center;">
+            <div class="inventory-card master-catalog-card" data-med-id="${medId}" style="display:flex; align-items:center; gap:12px; padding:12px 16px; margin-bottom:10px; border-radius:16px; background:var(--surface); border:1px solid var(--border-color); box-shadow:var(--shadow-sm); transition:all 0.2s ease;">
+                <div class="card-img" onclick="window.App.openEntryForm('${medId}')" style="cursor:pointer; width:48px; height:48px; border-radius:12px; overflow:hidden; flex-shrink:0; background:rgba(59,130,246,0.08); display:flex; align-items:center; justify-content:center;">
                     <img src="${imgUrl}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                 </div>
-                <div class="card-info" style="flex:1; min-width:0;">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <h3 style="font-size:14px; font-weight:800; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-main);">${m.nameEN || m.nameAR}</h3>
-                        ${m.nameAR && m.nameAR !== m.nameEN ? `<span style="font-size:12px; color:var(--text-muted); font-weight:normal;">(${m.nameAR})</span>` : ''}
+                <div class="card-info" onclick="window.App.openEntryForm('${medId}')" style="flex:1; min-width:0; cursor:pointer;">
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                        <h3 style="font-size:15px; font-weight:800; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-main);">${safePrimary}</h3>
+                        ${safeSecondary ? `<span style="font-size:12px; color:var(--text-muted); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${safeSecondary}</span>` : ''}
                     </div>
-                    <div class="card-meta" style="display:flex; align-items:center; gap:10px; font-size:11px; margin-top:4px;">
-                        <span class="badge-cat" style="background:rgba(59,130,246,0.1); color:var(--primary); padding:2px 8px; border-radius:6px; font-weight:bold; display:inline-flex; align-items:center; gap:4px;">
-                            <i class='bx ${catIcon}'></i> ${catName}
-                        </span>
-                        ${m.activeIngredient ? `<span style="color:var(--text-muted);"><i class='bx bx-dna'></i> ${m.activeIngredient}</span>` : ''}
-                    </div>
+                    ${safeActive ? `
+                        <div class="card-meta" style="margin-top:4px;">
+                            <span style="font-size:11px; color:var(--primary); font-weight:600; display:inline-flex; align-items:center; gap:4px;">
+                                <i class='bx bx-dna'></i> ${safeActive}
+                            </span>
+                        </div>
+                    ` : ''}
                 </div>
-                <div class="card-actions" style="display:flex; align-items:center; gap:6px;">
-                    <button class="btn-ghost sm-btn" onclick="window.App.openMoveCategoryModal('${medId}')" title="نقل إلى تصنيف آخر" style="font-size:11px; padding:6px 10px; border-radius:8px; border:1px solid var(--border-color); display:flex; align-items:center; gap:4px;">
-                        <i class='bx bx-transfer'></i> <span>نقل</span>
-                    </button>
-                    <button class="icon-btn" onclick="window.App.openMasterMedicineMenu('${medId}')" title="خيارات إضافية" style="flex-shrink:0; opacity:0.8; padding:6px;">
-                        <i class='bx bx-dots-vertical-rounded' style="font-size:18px;"></i>
+                <div class="card-actions" style="display:flex; align-items:center; flex-shrink:0;">
+                    <button class="icon-btn" onclick="event.stopPropagation(); window.App.openMasterMedicineMenu('${medId}')" title="خيارات الدواء" style="padding:8px; font-size:20px; color:var(--text-muted); border-radius:8px;">
+                        <i class='bx bx-dots-vertical-rounded'></i>
                     </button>
                 </div>
             </div>
