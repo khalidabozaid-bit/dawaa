@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.11.1', // Fix XLSX CDN, redesign audit sessions UI
+    VERSION: '18.11.2', // Professional Excel export — grouped by category, column per location, expiry summary
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -4032,40 +4032,40 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         UI.showModal(`
             <div class="modal-header">
                 <h2><i class='bx bx-download'></i> خيارات تصدير الإكسيل</h2>
-                <p class="text-muted" style="font-size:12px; margin-top:4px;">اختر طريقة التصدير المناسبة لاحتياجك</p>
+                <p class="text-muted" style="font-size:12px; margin-top:4px;">اختر طريقة التصدير المناسبة</p>
             </div>
 
             <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 12px;">
-                
-                <button onclick="window.App.exportAuditSession('${sessionId}', {}); window.UI.closeModal();"
-                    class="action-card-btn" style="text-align: right; width: 100%;">
-                    <i class='bx bx-table' style="font-size: 32px; color: var(--primary);"></i>
+
+                <button onclick="window.App.exportAuditProfessional('${sessionId}'); window.UI.closeModal();"
+                    class="action-card-btn" style="text-align: right; width: 100%; border-color: var(--primary); background: rgba(59,130,246,0.04);">
+                    <i class='bx bx-spreadsheet' style="font-size: 32px; color: var(--primary);"></i>
                     <div>
-                        <strong>📋 تصدير تفصيلي (كل سطر لوحده)</strong>
+                        <strong>⭐ كشف جرد احترافي (موصّى به)</strong>
                         <small style="display:block; color: var(--text-muted); margin-top:2px;">
-                            كل دوا في كل مكان وكل صلاحية في سطر مستقل — مع تجميع الصلاحيات المتكررة
+                            مجمّع بالفئات — عمود لكل مكان تخزين — إجمالي — صلاحيات مع كمياتها
                         </small>
                     </div>
                 </button>
-
-                <button onclick="window.App.exportAuditSession('${sessionId}', {mergeLocations: true}); window.UI.closeModal();"
+                
+                <button onclick="window.App.exportAuditSession('${sessionId}', {}); window.UI.closeModal();"
                     class="action-card-btn" style="text-align: right; width: 100%;">
-                    <i class='bx bx-merge' style="font-size: 32px; color: var(--secondary);"></i>
+                    <i class='bx bx-table' style="font-size: 32px; color: var(--text-muted);"></i>
                     <div>
-                        <strong>🏪 تجميع بالأماكن</strong>
+                        <strong>📋 تصدير تفصيلي (كل سطر لوحده)</strong>
                         <small style="display:block; color: var(--text-muted); margin-top:2px;">
-                            لو نفس الدوا في الدولاب والصيدلية بنفس الصلاحية — يتجمعوا في سطر واحد
+                            كل دوا في كل مكان وكل صلاحية في سطر مستقل
                         </small>
                     </div>
                 </button>
 
                 <button onclick="window.App.exportAuditSession('${sessionId}', {mergeAll: true}); window.UI.closeModal();"
                     class="action-card-btn" style="text-align: right; width: 100%;">
-                    <i class='bx bx-customize' style="font-size: 32px; color: var(--accent);"></i>
+                    <i class='bx bx-customize' style="font-size: 32px; color: var(--text-muted);"></i>
                     <div>
                         <strong>📊 ملخص مجمع (دوا = سطر واحد)</strong>
                         <small style="display:block; color: var(--text-muted); margin-top:2px;">
-                            كل دوا في سطر واحد بإجمالي الكمية من كل الأماكن — أبسط صورة ممكنة
+                            كل دوا في سطر واحد بإجمالي الكمية — أبسط صورة
                         </small>
                     </div>
                 </button>
@@ -4075,6 +4075,188 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 <button class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
             </div>
         `);
+    },
+
+    async exportAuditProfessional(sessionId) {
+        try {
+            const session = await Audit.getSession(sessionId);
+            if (!session) return;
+            const masterMeds = (await DB.getAll('medicineMaster')) || [];
+            const masterMap = new Map(masterMeds.map(m => [m.id, m]));
+            const allLocs = (await Locations.getAll()) || [];
+            const locMap = new Map(allLocs.map(l => [l.id, l]));
+            const allCats = (await Categories.getAllSorted()) || [];
+            const catMap = new Map(allCats.map(c => [c.id, c]));
+
+            const counts = session.counts || {};
+            if (Object.keys(counts).length === 0) {
+                UI.showToast('لا توجد بيانات لتصديرها', 'warning');
+                return;
+            }
+
+            // --- Step 1: Collect all unique location names used in this session ---
+            const sessionLocNames = new Set();
+            for (const key of Object.keys(counts)) {
+                const [locId] = key.split('___');
+                const loc = locMap.get(locId);
+                sessionLocNames.add(loc ? loc.nameAR : 'المستودع');
+            }
+            const locColumns = Array.from(sessionLocNames).sort();
+
+            // --- Step 2: Build medicine data map ---
+            // medId → { nameEN, nameAR, categoryId, locations: { locName: qty }, expiries: { "YYYY-MM": qty }, total }
+            const medData = new Map();
+
+            for (const [key, record] of Object.entries(counts)) {
+                const [locId, medId] = key.split('___');
+                const med = masterMap.get(medId) || { nameEN: 'Unknown', nameAR: 'غير معروف', categoryId: 'uncategorized' };
+                const loc = locMap.get(locId);
+                const locName = loc ? loc.nameAR : 'المستودع';
+                const batches = (record.batches && record.batches.length > 0)
+                    ? record.batches
+                    : [{ quantity: record.quantity, expiryDate: record.expiryDate }];
+
+                if (!medData.has(medId)) {
+                    medData.set(medId, {
+                        medId,
+                        nameEN: med.nameEN || '',
+                        nameAR: med.nameAR || '',
+                        categoryId: med.categoryId || 'uncategorized',
+                        locations: {},
+                        expiries: {},
+                        total: 0
+                    });
+                }
+
+                const d = medData.get(medId);
+                for (const b of batches) {
+                    const qty = parseFloat(b.quantity) || 0;
+                    // Sum per location
+                    d.locations[locName] = (d.locations[locName] || 0) + qty;
+                    // Sum per expiry
+                    const exp = b.expiryDate || 'غير محدد';
+                    d.expiries[exp] = (d.expiries[exp] || 0) + qty;
+                    // Total
+                    d.total += qty;
+                }
+            }
+
+            // --- Step 3: Group by category ---
+            const catGroups = new Map();
+            for (const [medId, d] of medData) {
+                const catId = d.categoryId;
+                if (!catGroups.has(catId)) {
+                    catGroups.set(catId, []);
+                }
+                catGroups.get(catId).push(d);
+            }
+
+            // Sort medicines within each category
+            for (const [catId, meds] of catGroups) {
+                meds.sort((a, b) => (a.nameEN || a.nameAR).localeCompare(b.nameEN || b.nameAR));
+            }
+
+            // Sort categories: known categories first, then uncategorized
+            const sortedCatIds = Array.from(catGroups.keys()).sort((a, b) => {
+                if (a === 'uncategorized') return 1;
+                if (b === 'uncategorized') return -1;
+                const catA = catMap.get(a);
+                const catB = catMap.get(b);
+                return (catA?.name || a).localeCompare(catB?.name || b);
+            });
+
+            // --- Step 4: Build rows array-of-arrays for XLSX ---
+            // Header row
+            const headers = ['اسم الدواء (EN)', 'اسم الدواء (AR)', ...locColumns, 'الإجمالي', 'الصلاحيات'];
+            const aoa = [headers];
+            const categoryRowIndices = []; // Track category header rows for styling
+            let grandTotal = 0;
+
+            for (const catId of sortedCatIds) {
+                const cat = catMap.get(catId);
+                const catName = cat ? cat.name : (catId === 'uncategorized' ? 'بدون تصنيف' : catId);
+                const meds = catGroups.get(catId);
+                const catTotal = meds.reduce((s, m) => s + m.total, 0);
+
+                // Category header row
+                const catRow = [`◼ ${catName} (${meds.length} صنف — ${catTotal} وحدة)`];
+                // Fill remaining columns with empty
+                for (let i = 1; i < headers.length; i++) catRow.push('');
+                categoryRowIndices.push(aoa.length); // 0-based index
+                aoa.push(catRow);
+
+                // Medicine rows
+                for (const m of meds) {
+                    const row = [m.nameEN, m.nameAR];
+                    // Location columns
+                    for (const locName of locColumns) {
+                        row.push(m.locations[locName] || 0);
+                    }
+                    // Total
+                    row.push(m.total);
+                    // Expiries formatted: "2025-06: 5 | 2025-12: 3"
+                    const expiryParts = Object.entries(m.expiries)
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([exp, qty]) => `${exp}: ${qty}`);
+                    row.push(expiryParts.join(' | '));
+                    aoa.push(row);
+                }
+
+                grandTotal += catTotal;
+            }
+
+            // Grand total row
+            const totalRow = ['', 'الإجمالي الكلي'];
+            for (const locName of locColumns) {
+                const locTotal = Array.from(medData.values()).reduce((s, m) => s + (m.locations[locName] || 0), 0);
+                totalRow.push(locTotal);
+            }
+            totalRow.push(grandTotal);
+            totalRow.push('');
+            aoa.push([]);  // Empty row separator
+            aoa.push(totalRow);
+
+            // --- Step 5: Export with XLSX ---
+            if (!window.XLSX) {
+                UI.showToast('مكتبة تصدير Excel غير متوفرة — جاري إعادة التحميل...', 'warning');
+                return;
+            }
+
+            const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+            // Auto column widths
+            ws['!cols'] = headers.map((h, i) => {
+                let maxLen = h.length;
+                for (const row of aoa) {
+                    const cellLen = String(row[i] || '').length;
+                    if (cellLen > maxLen) maxLen = cellLen;
+                }
+                return { wch: Math.min(maxLen + 3, 50) };
+            });
+
+            // Merge category header rows across all columns
+            const merges = [];
+            for (const rowIdx of categoryRowIndices) {
+                merges.push({
+                    s: { r: rowIdx + 1, c: 0 },  // +1 because aoa index 0 = header row 1
+                    e: { r: rowIdx + 1, c: headers.length - 1 }
+                });
+            }
+            // Don't set merges if not supported (some XLSX versions)
+            if (merges.length > 0) {
+                ws['!merges'] = merges;
+            }
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'كشف الجرد');
+            const fileName = `كشف_جرد_${session.name.replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '_')}.xlsx`;
+            XLSX.writeFile(wb, fileName);
+            UI.showToast(`تم تصدير كشف الجرد الاحترافي (${medData.size} صنف) ✅`, 'success');
+
+        } catch (err) {
+            console.error('Professional export error:', err);
+            UI.showToast('فشل تصدير الإكسيل', 'danger');
+        }
     },
 
     async renderAuditLocationsLevel(container, session) {
