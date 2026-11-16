@@ -117,12 +117,26 @@ export const Locations = {
             updatedAt: new Date().toISOString()
         };
         await DB.put('locations', loc);
+        try {
+            if (typeof window.Sync !== 'undefined' && window.Sync.pushLocation) {
+                window.Sync.pushLocation(loc);
+            }
+        } catch (e) {
+            console.warn('Sync pushLocation notice:', e);
+        }
         return loc;
     },
 
     async delete(id) {
         if (!id) return false;
         await DB.delete('locations', id);
+        try {
+            if (typeof window.Sync !== 'undefined' && window.Sync.deleteLocation) {
+                window.Sync.deleteLocation(id);
+            }
+        } catch (e) {
+            console.warn('Sync deleteLocation notice:', e);
+        }
         return true;
     },
 

@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.7.2)
+ * Dawaa App Orchestrator (v18.7.3)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.7.2', // Universal Sovereign v18.7.2
+    VERSION: '18.7.3', // Universal Sovereign v18.7.3
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -350,6 +350,7 @@ const App = {
             // v16.3.0: Data Restructure Safety Init
             if (Sync.initV2) Sync.initV2();
             Sync.pull();
+            if (Sync.startLiveSync) Sync.startLiveSync();
             
         } catch (err) {
             console.error('Session Error:', err);
@@ -411,6 +412,44 @@ const App = {
 
     // Service Worker update logic moved to App.checkUpdate (v9.9.7 Architect)
 
+
+    // --- Central View Refresh & Live Sync Coordination (v18.7.3) ---
+    async refreshAllViews(targetCatId = null) {
+        try {
+            if (typeof this.renderInventory === 'function') await this.renderInventory();
+            if (typeof this.renderWarehouseCategories === 'function') await this.renderWarehouseCategories();
+            if (typeof this.renderWarehouseLocations === 'function') await this.renderWarehouseLocations();
+            if (typeof this.renderCategoryChips === 'function') await this.renderCategoryChips();
+            if (typeof this.renderDashboard === 'function') await this.renderDashboard();
+            
+            // If in Audit view or if an audit session is open
+            if (typeof this.renderAuditView === 'function') {
+                const auditContainer = document.getElementById('view-audit');
+                if (auditContainer && (auditContainer.classList.contains('active') || this.selectedAuditSessionId)) {
+                    await this.renderAuditView();
+                }
+            }
+
+            // If a category modal was open or requested, refresh it dynamically with updated medicines
+            const catIdToReopen = targetCatId || this._activeCategoryModalId;
+            if (catIdToReopen && typeof this.openCategoryDetailModal === 'function') {
+                const container = document.getElementById('modal-container');
+                if (container && container.classList.contains('show') && this._activeCategoryModalId) {
+                    await this.openCategoryDetailModal(catIdToReopen);
+                }
+            }
+        } catch (e) {
+            console.warn('Error refreshing views:', e);
+        }
+    },
+
+    async triggerCloudSync() {
+        if (typeof Sync !== 'undefined' && Sync.pullAll) {
+            await Sync.pullAll();
+        } else {
+            UI.showToast('محرك السحابة غير جاهز حالياً', 'warning');
+        }
+    },
 
     // --- View Renderers ---
 
@@ -812,12 +851,8 @@ const App = {
     },
 
     openAddMedicineWithCat(catId) {
-        this.openAddMedicine();
-        // Set the select value after modal renders
-        setTimeout(() => {
-            const sel = document.getElementById('m-category');
-            if (sel) sel.value = catId;
-        }, 100);
+        this._activeCategoryModalId = catId;
+        this.openAddMedicine(catId);
     },
 
     async openMedicineDetails(medicineId) {
@@ -1289,12 +1324,13 @@ const App = {
                 }
             }
 
+            const sourceCat = this._pendingSourceCatId;
+            this._pendingSourceCatId = null;
+
             UI.closeModal();
             UI.showToast(`تم حفظ الدواء «${nameEN}» بنجاح ✨`, 'success');
 
-            if (typeof this.renderInventory === 'function') await this.renderInventory();
-            if (typeof this.renderWarehouseCategories === 'function') await this.renderWarehouseCategories();
-            if (typeof this.renderDashboard === 'function') await this.renderDashboard();
+            await this.refreshAllViews(sourceCat);
 
             // Background Cloud Upload if requested
             if (file && shouldSync && typeof this.uploadImage === 'function') {
@@ -1346,7 +1382,8 @@ const App = {
 
             await Categories.saveMedicine(updated);
             UI.closeModal();
-            this.renderInventory(); this.renderDashboard();
+            UI.showToast('تم تحديث بيانات الدواء بنجاح ✨', 'success');
+            await this.refreshAllViews(updated.categoryId);
 
             // Background Cloud Upload (v9.9.5 - Ironclad Update)
             if (file && this.userRole === 'admin') {
@@ -1587,10 +1624,7 @@ const App = {
             await Categories.deleteMedicine(id);
             UI.showToast('تم حذف الصنف والجرد بالكامل 🗑️', 'warning');
             UI.closeModal();
-            if (this.selectedCategoryId) this.openCategory(this.selectedCategoryId);
-            if (this.renderInventory) await this.renderInventory();
-            if (this.renderDashboard) this.renderDashboard();
-            if (this.warehouseSegment && this.renderWarehouseSegment) this.renderWarehouseSegment();
+            await this.refreshAllViews();
         } catch (err) {
             UI.showToast('فشل الحذف: ' + err.message, 'danger');
         }
@@ -1965,7 +1999,7 @@ App.handleBackup = async function() {
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.7.2'
+            version: '18.7.3'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -2307,6 +2341,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     // --- Interactive Category Drill-Down & Management ---
     async openCategoryDetailModal(catId) {
         try {
+            this._activeCategoryModalId = catId;
             const cat = await Categories.getInfo(catId);
             const allMeds = (await DB.getAll('medicineMaster')) || [];
             const medsInCat = allMeds.filter(m => m.categoryId === catId);
@@ -2437,11 +2472,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             UI.showToast(`تم نقل ${med.nameEN || med.nameAR} إلى ${newCat?.nameAR || targetCatId} بنجاح ✅`, 'success');
 
             if (sourceCatId) {
-                this.openCategoryDetailModal(sourceCatId);
+                await this.refreshAllViews(sourceCatId);
             } else {
                 UI.closeModal();
-                this.renderInventory();
-                this.renderWarehouseCategories();
+                await this.refreshAllViews(targetCatId);
             }
         } catch (err) {
             console.error('Error saving moved category:', err);
@@ -2742,10 +2776,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         await Categories.saveCategory(data);
         UI.closeModal();
         UI.showToast('تم حفظ التصنيف بنجاح ✨', 'success');
-        if (typeof this.renderWarehouseCategories === 'function') this.renderWarehouseCategories();
-        if (typeof this.renderCategoryChips === 'function') this.renderCategoryChips();
-        if (typeof this.renderInventory === 'function') this.renderInventory();
-        if (typeof this.renderAuditView === 'function') this.renderAuditView();
+        await this.refreshAllViews(catId);
     },
 
     async deleteCategoryConfirm(id) {
@@ -2753,9 +2784,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         await Categories.deleteCategory(id);
         UI.closeModal();
         UI.showToast('تم حذف التصنيف', 'info');
-        if (typeof this.renderWarehouseCategories === 'function') this.renderWarehouseCategories();
-        if (typeof this.renderCategoryChips === 'function') this.renderCategoryChips();
-        if (typeof this.renderInventory === 'function') this.renderInventory();
+        await this.refreshAllViews();
     },
 
     // =========================================================================

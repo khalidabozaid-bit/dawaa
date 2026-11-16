@@ -92,8 +92,9 @@ export const Sync = {
     },
 
     async push(medId) {
-        if (window.App?.userRole !== 'admin') {
-            UI.showToast('صلاحيات المدير مطلوبة للنشر', 'danger');
+        const isAuthUser = (typeof auth !== 'undefined' && auth.currentUser) || window.App?.userRole === 'admin' || (typeof Users !== 'undefined' && Users.getActive()?.role === 'admin');
+        if (!isAuthUser) {
+            console.log('Sync.push: Skipped cloud write (operating in offline / local mode).');
             return;
         }
 
@@ -366,6 +367,224 @@ export const Sync = {
                 const tasks = snapshot.docs.map(doc => doc.data());
                 callback(tasks);
             });
+    },
+
+    // --- Bi-Directional Cloud Categories Sync ---
+    async pushCategory(cat) {
+        try {
+            const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+            if (!firestore || !cat || !cat.id) return;
+            await firestore.collection('categories').doc(cat.id).set({
+                id: cat.id,
+                nameAR: cat.nameAR,
+                nameEN: cat.nameEN || cat.id,
+                icon: cat.icon || 'bx-category',
+                color: cat.color || '#3b82f6',
+                updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            console.log(`Sync: Category ${cat.id} pushed to cloud ☁️`);
+        } catch (e) {
+            console.warn('Sync Category Push notice:', e.message);
+        }
+    },
+
+    async deleteCategory(id) {
+        try {
+            const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+            if (!firestore || !id) return;
+            await firestore.collection('categories').doc(id).delete();
+            console.log(`Sync: Category ${id} deleted from cloud ☁️`);
+        } catch (e) {
+            console.warn('Sync Category Delete notice:', e.message);
+        }
+    },
+
+    // --- Bi-Directional Cloud Storage Locations Sync ---
+    async pushLocation(loc) {
+        try {
+            const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+            if (!firestore || !loc || !loc.id) return;
+            await firestore.collection('locations').doc(loc.id).set({
+                id: loc.id,
+                nameAR: loc.nameAR,
+                nameEN: loc.nameEN || loc.nameAR || '',
+                icon: loc.icon || 'bx-map-pin',
+                color: loc.color || '#3b82f6',
+                allowedCategories: loc.allowedCategories || ['all'],
+                description: loc.description || '',
+                updatedAt: (window.firebase || firebase).firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            console.log(`Sync: Location ${loc.id} pushed to cloud ☁️`);
+        } catch (e) {
+            console.warn('Sync Location Push notice:', e.message);
+        }
+    },
+
+    async deleteLocation(id) {
+        try {
+            const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+            if (!firestore || !id) return;
+            await firestore.collection('locations').doc(id).delete();
+            console.log(`Sync: Location ${id} deleted from cloud ☁️`);
+        } catch (e) {
+            console.warn('Sync Location Delete notice:', e.message);
+        }
+    },
+
+    // --- Live Real-Time Multi-Device Sync Stream (v18.7.3) ---
+    _liveListeners: [],
+    startLiveSync() {
+        if (this._liveListeners.length > 0) return; // Already active
+        console.log('Sync: Initializing real-time cross-device sync streams... 📡⚡');
+        const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+        if (!firestore) return;
+
+        // 1. Live Master Data (Legacy Single-Pharmacy Document)
+        try {
+            const unsubMaster = firestore.doc(this.CLOUD_PATH).onSnapshot(async (doc) => {
+                if (!doc.exists) return;
+                const cloudMeds = doc.data()?.masterData;
+                if (!Array.isArray(cloudMeds) || cloudMeds.length === 0) return;
+
+                let updatedCount = 0;
+                for (const med of cloudMeds) {
+                    const localMed = await DB.get('medicineMaster', med.id);
+                    if (!localMed || (med.v && med.v > (localMed.v || 0)) || (!localMed.v && med.lastSynced && med.lastSynced !== localMed.lastSynced)) {
+                        if (localMed && localMed.imagePath?.startsWith('data:image') && (!med.imagePath || med.imagePath === '')) {
+                            med.imagePath = localMed.imagePath;
+                        }
+                        med.syncStatus = 'synced';
+                        await DB.put('medicineMaster', med);
+                        updatedCount++;
+                    }
+                }
+                if (updatedCount > 0) {
+                    console.log(`Sync Live: ${updatedCount} medicines synchronized from cloud.`);
+                    if (window.App?.refreshAllViews) window.App.refreshAllViews();
+                }
+            }, err => console.warn('Sync Live master notice:', err.message));
+            this._liveListeners.push(unsubMaster);
+        } catch (e) {}
+
+        // 2. Live Master Medicines Collection (V2)
+        try {
+            const unsubMeds = firestore.collection('medicines').onSnapshot(async (snapshot) => {
+                const changes = snapshot.docChanges();
+                let updated = false;
+                for (const change of changes) {
+                    if (change.type === 'added' || change.type === 'modified') {
+                        const med = { ...change.doc.data(), id: change.doc.id };
+                        const local = await DB.get('medicineMaster', med.id);
+                        if (!local || (med.v && med.v > (local.v || 0))) {
+                            if (local && local.imagePath?.startsWith('data:image') && !med.imagePath) {
+                                med.imagePath = local.imagePath;
+                            }
+                            await DB.put('medicineMaster', med);
+                            updated = true;
+                        }
+                    } else if (change.type === 'removed') {
+                        await DB.delete('medicineMaster', change.doc.id);
+                        updated = true;
+                    }
+                }
+                if (updated && window.App?.refreshAllViews) {
+                    window.App.refreshAllViews();
+                }
+            }, err => console.warn('Sync Live medicines V2 notice:', err.message));
+            this._liveListeners.push(unsubMeds);
+        } catch (e) {}
+
+        // 3. Live Categories Collection
+        try {
+            const unsubCats = firestore.collection('categories').onSnapshot(async (snapshot) => {
+                const changes = snapshot.docChanges();
+                let updated = false;
+                for (const change of changes) {
+                    if (change.type === 'added' || change.type === 'modified') {
+                        const cat = { ...change.doc.data(), id: change.doc.id };
+                        const local = await DB.get('categories', cat.id);
+                        if (!local || local.nameAR !== cat.nameAR || local.nameEN !== cat.nameEN || local.icon !== cat.icon || local.color !== cat.color) {
+                            await DB.put('categories', cat);
+                            updated = true;
+                        }
+                    } else if (change.type === 'removed') {
+                        await DB.delete('categories', change.doc.id);
+                        updated = true;
+                    }
+                }
+                if (updated) {
+                    if (typeof Categories !== 'undefined') {
+                        Categories.cache = null;
+                        Categories._cache = null;
+                        await Categories.getAllSorted();
+                    }
+                    if (window.App?.refreshAllViews) window.App.refreshAllViews();
+                }
+            }, err => console.warn('Sync Live categories notice:', err.message));
+            this._liveListeners.push(unsubCats);
+        } catch (e) {}
+
+        // 4. Live Locations Collection
+        try {
+            const unsubLocs = firestore.collection('locations').onSnapshot(async (snapshot) => {
+                const changes = snapshot.docChanges();
+                let updated = false;
+                for (const change of changes) {
+                    if (change.type === 'added' || change.type === 'modified') {
+                        const loc = { ...change.doc.data(), id: change.doc.id };
+                        const local = await DB.get('locations', loc.id);
+                        if (!local || local.nameAR !== loc.nameAR || local.nameEN !== loc.nameEN || local.icon !== loc.icon) {
+                            await DB.put('locations', loc);
+                            updated = true;
+                        }
+                    } else if (change.type === 'removed') {
+                        await DB.delete('locations', change.doc.id);
+                        updated = true;
+                    }
+                }
+                if (updated && window.App?.refreshAllViews) {
+                    window.App.refreshAllViews();
+                }
+            }, err => console.warn('Sync Live locations notice:', err.message));
+            this._liveListeners.push(unsubLocs);
+        } catch (e) {}
+    },
+
+    // --- On-Demand Full Cloud Sync (One-Click) ---
+    async pullAll() {
+        UI.showToast('جاري سحب ومزامنة البيانات من السحابة... 🔄', 'info');
+        try {
+            await this.pull();
+            const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+            let catCount = 0;
+            let locCount = 0;
+
+            if (firestore) {
+                const catSnap = await firestore.collection('categories').get();
+                for (const doc of catSnap.docs) {
+                    await DB.put('categories', { ...doc.data(), id: doc.id });
+                    catCount++;
+                }
+                if (catCount > 0 && typeof Categories !== 'undefined') {
+                    Categories.cache = null;
+                    Categories._cache = null;
+                    await Categories.getAllSorted();
+                }
+
+                const locSnap = await firestore.collection('locations').get();
+                for (const doc of locSnap.docs) {
+                    await DB.put('locations', { ...doc.data(), id: doc.id });
+                    locCount++;
+                }
+            }
+
+            const allMeds = (await DB.getAll('medicineMaster')) || [];
+            if (window.App?.refreshAllViews) await window.App.refreshAllViews();
+            UI.showToast(`تمت مزامنة كامل البيانات مع السحابة (${allMeds.length} دواء) ☁️✅`, 'success');
+        } catch (err) {
+            console.error('PullAll Error:', err);
+            UI.showToast(`تعذر سحب البيانات: ${err.message || 'خطأ في الاتصال'}`, 'danger');
+        }
     }
 };
 

@@ -186,6 +186,8 @@ export const UI = {
     showToast(message, type = 'info') {
         const toast = document.createElement('div');
         toast.className = `toast toast-${type}`;
+        toast.setAttribute('role', 'alert');
+        toast.setAttribute('title', 'اسحب أو انقر للإغلاق السريع');
         
         const isError = type === 'danger';
         const iconClass = type === 'success' ? 'bx-check-circle' : (type === 'danger' ? 'bx-error-circle' : 'bx-info-circle');
@@ -204,17 +206,81 @@ export const UI = {
             copyBtn.className = 'toast-copy-btn';
             copyBtn.title = 'نسخ تفاصيل الخطأ';
             copyBtn.innerHTML = "<i class='bx bx-copy'></i>";
-            copyBtn.onclick = () => UI.copyErrorReport(message);
+            copyBtn.onclick = (e) => {
+                e.stopPropagation();
+                UI.copyErrorReport(message);
+            };
             toast.appendChild(copyBtn);
+        } else {
+            const closeHint = document.createElement('span');
+            closeHint.className = 'toast-close-hint';
+            closeHint.innerHTML = "<i class='bx bx-x'></i>";
+            toast.appendChild(closeHint);
         }
 
         document.body.appendChild(toast);
         setTimeout(() => toast.classList.add('show'), 10);
         
-        const duration = isError ? 6000 : 3000;
-        setTimeout(() => {
+        let isDismissed = false;
+        let autoTimer = null;
+        const dismiss = (swipeX = 0, swipeY = 30) => {
+            if (isDismissed) return;
+            isDismissed = true;
+            if (autoTimer) clearTimeout(autoTimer);
+            toast.style.setProperty('--swipe-x', `${swipeX}px`);
+            toast.style.setProperty('--swipe-y', `${swipeY}px`);
             toast.classList.remove('show');
-            setTimeout(() => toast.remove(), 300);
+            toast.classList.add('dismissing');
+            setTimeout(() => toast.remove(), 220);
+        };
+
+        // 1. Click / Tap to dismiss immediately
+        toast.onclick = (e) => {
+            if (e.target.closest('.toast-copy-btn')) return;
+            dismiss(0, -20);
+        };
+
+        // 2. Touch swipe to dismiss (Mobile gestures)
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let touchDeltaX = 0;
+        let touchDeltaY = 0;
+        let isSwiping = false;
+
+        toast.addEventListener('touchstart', (e) => {
+            if (e.touches && e.touches[0]) {
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+                touchDeltaX = 0;
+                touchDeltaY = 0;
+                isSwiping = true;
+            }
+        }, { passive: true });
+
+        toast.addEventListener('touchmove', (e) => {
+            if (!isSwiping || !e.touches || !e.touches[0]) return;
+            touchDeltaX = e.touches[0].clientX - touchStartX;
+            touchDeltaY = e.touches[0].clientY - touchStartY;
+            toast.style.transform = `translateX(calc(-50% + ${touchDeltaX}px)) translateY(${touchDeltaY > 0 ? touchDeltaY : touchDeltaY * 0.7}px)`;
+            const maxDelta = Math.max(Math.abs(touchDeltaX), Math.abs(touchDeltaY));
+            toast.style.opacity = String(Math.max(0.15, 1 - maxDelta / 120));
+        }, { passive: true });
+
+        toast.addEventListener('touchend', () => {
+            if (!isSwiping) return;
+            isSwiping = false;
+            if (Math.abs(touchDeltaX) > 35 || touchDeltaY < -25 || touchDeltaY > 35) {
+                dismiss(touchDeltaX > 0 ? 120 : (touchDeltaX < 0 ? -120 : 0), touchDeltaY < 0 ? -50 : 50);
+            } else {
+                toast.style.transform = '';
+                toast.style.opacity = '';
+            }
+        }, { passive: true });
+
+        // 3. Fast Auto-dismiss (1.8s for info/success, 2.2s for warning, 4.5s for error)
+        const duration = isError ? 4500 : (type === 'warning' ? 2200 : 1800);
+        autoTimer = setTimeout(() => {
+            dismiss(0, 30);
         }, duration);
     },
 

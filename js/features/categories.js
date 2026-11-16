@@ -159,6 +159,13 @@ export const Categories = {
         this.cache = null;
         this._cache = null;
         await this.getAllSorted();
+        try {
+            if (typeof window.Sync !== 'undefined' && window.Sync.pushCategory) {
+                window.Sync.pushCategory(cat);
+            }
+        } catch (e) {
+            console.warn('Sync pushCategory notice:', e);
+        }
         return cat.id;
     },
 
@@ -167,6 +174,13 @@ export const Categories = {
         this.cache = null;
         this._cache = null;
         await this.getAllSorted();
+        try {
+            if (typeof window.Sync !== 'undefined' && window.Sync.deleteCategory) {
+                window.Sync.deleteCategory(id);
+            }
+        } catch (e) {
+            console.warn('Sync deleteCategory notice:', e);
+        }
         return true;
     },
 
