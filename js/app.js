@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.7.7)
+ * Dawaa App Orchestrator (v18.7.8)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.7.7', // Universal Sovereign v18.7.7
+    VERSION: '18.7.8', // Universal Sovereign v18.7.8
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -104,6 +104,22 @@ const App = {
 
             console.log("BOOT: [STEP 2] DB Init");
             await DB.init();
+            // Purge ad-hoc inventory entries that do not belong to real audit sessions
+            try {
+                const allRawInv = (await DB.getAll('inventory')) || [];
+                const badEntries = allRawInv.filter(r => !r.auditId || r.auditId === 'general' || String(r.id).startsWith('inv_100') || !String(r.id).startsWith('inv_audit_'));
+                for (const b of badEntries) {
+                    await DB.delete('inventory', b.id);
+                    if (typeof Sync !== 'undefined' && Sync.deleteInventoryEntry) {
+                        Sync.deleteInventoryEntry(b.id).catch(() => {});
+                    }
+                }
+                if (badEntries.length > 0) {
+                    console.log(`Inventory: Cleaned ${badEntries.length} ad-hoc inventory entries. Stock is now strictly derived from Audit sessions.`);
+                }
+            } catch (ce) {
+                console.warn('Ad-hoc inventory cleanup notice:', ce);
+            }
             
             console.log("BOOT: [STEP 3] Sync Init");
             try {
@@ -878,24 +894,28 @@ const App = {
     async openMedicineDetails(medicineId) {
         try {
             const med = await DB.get('medicineMaster', medicineId);
-            if (!med) {
-                return UI.showToast('تعذر العثور على بيانات هذا الدواء', 'warning');
-            }
+            if (!med) return UI.showToast('تعذر العثور على بيانات الدواء', 'warning');
 
-            const cat = med.categoryId ? await Categories.getInfo(med.categoryId) : null;
-            const catName = cat ? cat.nameAR : (med.categoryId || 'أدوية غير مصنفة');
-            const catIcon = cat?.icon || 'bx-purchase-tag-alt';
-            const catColor = cat?.color || 'var(--primary)';
-            const imgSrc = (typeof Categories !== 'undefined' && Categories.getMedicineImage) ? Categories.getMedicineImage(med) : (med.imagePath || 'assets/icons/default-med.png');
+            const allCats = (await Categories.getAllSorted()) || [];
+            const cat = allCats.find(c => c.id === med.categoryId) || { nameAR: 'أدوية غير مصنفة', icon: 'bx-category', color: '#3b82f6' };
+            const catName = cat.nameAR || med.categoryId;
+            const catIcon = cat.icon || 'bx-category';
+            const catColor = cat.color || '#3b82f6';
 
-            // Language preference: 'en' | 'ar' | 'both'
+            const imgSrc = (typeof Categories !== 'undefined' && Categories.getMedicineImage) 
+                ? Categories.getMedicineImage(med, { icon: 'bx-capsule' }) 
+                : (med.imagePath || 'assets/icons/default-med.png');
+
             const langPref = localStorage.getItem('dawaa_med_lang_pref') || 'en';
-            let primaryName = med.nameEN || med.nameAR || 'دواء';
-            let secondaryName = (med.nameAR && med.nameAR !== med.nameEN) ? med.nameAR : '';
+            let primaryName = med.nameEN || med.nameAR;
+            let secondaryName = med.nameAR || '';
 
             if (langPref === 'ar') {
-                primaryName = med.nameAR || med.nameEN || 'دواء';
-                secondaryName = (med.nameEN && med.nameEN !== med.nameAR) ? med.nameEN : '';
+                primaryName = med.nameAR || med.nameEN;
+                secondaryName = med.nameEN !== primaryName ? med.nameEN : '';
+            } else if (langPref === 'bilingual') {
+                primaryName = med.nameEN;
+                secondaryName = med.nameAR;
             }
 
             const safePrimary = (typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(primaryName) : primaryName;
@@ -903,70 +923,21 @@ const App = {
             const safeActive = (med.activeIngredient && typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(med.activeIngredient) : (med.activeIngredient || '');
             const safeBarcode = med.barcode || med.id || '';
 
-            // Fetch live storage locations & real inventory counts
+            // Fetch physical storage locations in the clinic building
             const allLocations = (await Locations.getAll()) || [];
-            const allInv = (await DB.getAll('inventory')) || [];
-            const medInv = allInv.filter(r => String(r.medicineId) === String(medicineId));
-
-            // Also check latest audit session for live counts
-            const allSessions = (await Audit.getAllSessions()) || [];
-            const isOpenSession = (s) => !s.isArchived && (s.status === 'active' || s.status === 'in_progress' || s.status === 'on_hold' || s.status === 'held');
-            const openSession = allSessions.find(isOpenSession);
-            const finalizedSessions = allSessions.filter(s => s.status === 'finalized').sort((a,b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-            const latestSession = openSession || finalizedSessions[0];
-
             const allowedLocIds = med.allowedLocations || [];
-
-            let grandTotal = 0;
-            const locationRows = allLocations.map(loc => {
-                let locQty = 0;
-                let batches = [];
-
-                // Check latest audit count for this location + medicine
-                const countKey = `${loc.id}___${medicineId}`;
-                const auditCount = latestSession?.counts?.[countKey];
-
-                if (auditCount && auditCount.quantity !== undefined) {
-                    locQty = parseFloat(auditCount.quantity) || 0;
-                    batches = (auditCount.batches && auditCount.batches.length > 0)
-                        ? auditCount.batches
-                        : (auditCount.expiryDate ? [{ quantity: auditCount.quantity, expiryDate: auditCount.expiryDate }] : []);
-                } else {
-                    // Check finalized inventory records
-                    const locRecords = medInv.filter(r => (r.locationId === loc.id) || (r.location === loc.nameAR));
-                    locRecords.forEach(r => {
-                        const q = parseFloat(r.quantity) || 0;
-                        locQty += q;
-                        if (r.expiryDate) batches.push({ quantity: q, expiryDate: r.expiryDate });
-                    });
-                }
-
-                grandTotal += locQty;
-
-                const isAssigned = (allowedLocIds.length === 0) || allowedLocIds.includes(loc.id);
-
-                return {
-                    loc,
-                    qty: locQty,
-                    batches: batches,
-                    hasAudit: !!auditCount,
-                    isAssigned
-                };
-            });
-
-            // Filter relevant locations: show locations with stock, or locations explicitly assigned to this medicine
-            const relevantRows = locationRows.filter(r => r.qty > 0 || r.isAssigned);
-            const displayRows = relevantRows.length > 0 ? relevantRows : locationRows;
-            const hasStock = grandTotal > 0;
+            
+            // Resolve assigned clinic locations
+            const assignedLocs = allLocations.filter(loc => allowedLocIds.includes(loc.id));
 
             const typeLabel = med.type === 'emergency' ? '🚨 طوارئ' : (med.type === 'supply' ? '🩹 مستلزم طبي' : '💊 دواء');
 
             UI.showModal(`
                 <div class="sheet-handle"></div>
 
-                <!-- Hero Section: Image + Names + Category -->
-                <div style="display:flex; gap:16px; align-items:flex-start; margin-bottom:16px; border-bottom:1px solid var(--border-color); padding-bottom:16px;">
-                    <div style="width:80px; height:80px; border-radius:16px; overflow:hidden; flex-shrink:0; background:rgba(59,130,246,0.08); border:1.5px solid var(--border-color); box-shadow:0 4px 12px rgba(0,0,0,0.08); display:flex; align-items:center; justify-content:center;">
+                <!-- Hero Section: Image + Names + Category (Master Catalog Info) -->
+                <div style="display:flex; gap:16px; align-items:flex-start; margin-bottom:18px; border-bottom:1px solid var(--border-color); padding-bottom:16px;">
+                    <div style="width:84px; height:84px; border-radius:18px; overflow:hidden; flex-shrink:0; background:rgba(59,130,246,0.08); border:1.5px solid var(--border-color); box-shadow:0 4px 12px rgba(0,0,0,0.08); display:flex; align-items:center; justify-content:center;">
                         <img src="${imgSrc}" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                     </div>
                     <div style="flex:1; min-width:0;">
@@ -995,86 +966,55 @@ const App = {
                     </div>
                 </div>
 
-                <!-- Stock Summary Badge Bar -->
-                <div style="display:flex; justify-content:space-between; align-items:center; background:${hasStock ? 'rgba(16,185,129,0.08)' : 'rgba(245,158,11,0.08)'}; border:1px solid ${hasStock ? '#10b98144' : 'rgba(245,158,11,0.3)'}; border-radius:12px; padding:12px 14px; margin-bottom:16px;">
-                    <div style="display:flex; align-items:center; gap:10px;">
-                        <div style="width:36px; height:36px; border-radius:10px; background:${hasStock ? '#10b981' : '#f59e0b'}; color:white; display:flex; align-items:center; justify-content:center; font-size:20px;">
-                            <i class='bx ${hasStock ? 'bx-cube' : 'bx-package'}'></i>
-                        </div>
-                        <div>
-                            <span style="font-size:11px; color:var(--text-muted); font-weight:bold; display:block;">إجمالي الرصيد بالمستودع:</span>
-                            <strong style="font-size:16px; color:${hasStock ? '#10b981' : '#f59e0b'};">${grandTotal} وحدة</strong>
-                        </div>
-                    </div>
-                    <div style="display:flex; gap:6px; align-items:center;">
-                        <button type="button" class="btn-primary sm-btn" onclick="window.App.openQuickStockEntry('${med.id}')" style="font-size:11.5px; padding:6px 10px; border-radius:8px; display:flex; align-items:center; gap:4px;" title="تسجيل كمية أو رصيد لهذا الدواء">
-                            <i class='bx bx-plus-circle'></i> <span>+ رصيد</span>
+                <!-- Barcode & Identification Quick Bar -->
+                ${safeBarcode ? `
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px; padding:8px 12px; margin-bottom:16px;">
+                        <span style="font-size:12px; font-weight:bold; color:var(--text-muted); display:flex; align-items:center; gap:6px;">
+                            <i class='bx bx-barcode' style="font-size:16px; color:var(--primary);"></i> الباركود: <code style="color:var(--text-main);">${safeBarcode}</code>
+                        </span>
+                        <button type="button" class="btn-ghost sm-btn" onclick="navigator.clipboard.writeText('${safeBarcode}'); window.UI.showToast('تم نسخ الباركود 📋', 'info');" style="font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--border-color);">
+                            نسخ <i class='bx bx-copy'></i>
                         </button>
-                        ${safeBarcode ? `
-                            <button type="button" class="btn-ghost sm-btn" onclick="navigator.clipboard.writeText('${safeBarcode}'); window.UI.showToast('تم نسخ الباركود: ${safeBarcode} 📋', 'info');" style="font-size:11px; padding:6px 8px; border-radius:8px; border:1px solid var(--border-color); display:flex; align-items:center; gap:4px;" title="نسخ الباركود">
-                                <i class='bx bx-barcode'></i>
-                            </button>
-                        ` : ''}
                     </div>
-                </div>
+                ` : ''}
 
-                <!-- Real Locations Breakdown -->
+                <!-- Physical Clinic Storage Locations (أماكن الحفظ والتواجد في مبنى العيادة) -->
                 <div style="margin-bottom:16px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                         <strong style="font-size:13.5px; color:var(--text-main); display:flex; align-items:center; gap:6px;">
-                            <i class='bx bx-map-pin' style="color:var(--primary);"></i> أماكن التخزين وتفاصيل الرصيد:
+                            <i class='bx bx-map-pin' style="color:var(--primary);"></i> أماكن الحفظ والتواجد المعتمدة في مبنى العيادة:
                         </strong>
-                        <button type="button" onclick="window.App.openQuickStockEntry('${med.id}')" style="background:none; border:none; color:var(--primary); font-size:12px; font-weight:bold; cursor:pointer; display:flex; align-items:center; gap:2px;">
-                            <i class='bx bx-plus'></i> إضافة رصيد
-                        </button>
                     </div>
 
-                    <div style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto; padding:2px;">
-                        ${displayRows.map(row => {
-                            const isAvailable = row.qty > 0;
-                            const batchesHtml = row.batches.length > 0
-                                ? row.batches.map(b => {
-                                    const badge = window.App.calcExpiryBadge(b.expiryDate);
-                                    return `
-                                        <span class="batch-exterior-pill" style="display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:bold; padding:2px 7px; border-radius:5px; background:${badge.bg}; color:${badge.color}; border:1px solid ${badge.color}33; white-space:nowrap;">
-                                            <i class='bx ${badge.icon}'></i>
-                                            <span>${b.quantity} &times; ${b.expiryDate}</span>
-                                        </span>
-                                    `;
-                                }).join('')
-                                : '';
-
-                            return `
-                                <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:var(--surface); border:1px solid var(--border-color); border-radius:12px; transition:all 0.2s ease;">
-                                    <div style="display:flex; align-items:center; gap:10px;">
-                                        <div style="width:32px; height:32px; border-radius:8px; background:rgba(59,130,246,0.08); display:flex; align-items:center; justify-content:center;">
-                                            <i class='bx ${row.loc.icon || 'bx-map-pin'}' style="font-size:18px; color:${row.loc.color || 'var(--primary)'};"></i>
-                                        </div>
-                                        <div>
-                                            <strong style="font-size:13px; color:var(--text-main); display:block;">${Utils.escapeHTML(row.loc.nameAR)}</strong>
-                                            <small style="font-size:10.5px; color:var(--text-muted);">${row.isAssigned ? 'موقع تخزين معتمد' : 'رصيد إضافي'}</small>
-                                        </div>
+                    <div style="display:flex; flex-direction:column; gap:8px;">
+                        ${assignedLocs.length > 0 ? assignedLocs.map(loc => `
+                            <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:var(--surface); border:1px solid var(--border-color); border-radius:12px;">
+                                <div style="display:flex; align-items:center; gap:10px;">
+                                    <div style="width:36px; height:36px; border-radius:10px; background:rgba(59,130,246,0.08); display:flex; align-items:center; justify-content:center;">
+                                        <i class='bx ${loc.icon || 'bx-map-pin'}' style="font-size:20px; color:${loc.color || 'var(--primary)'};"></i>
                                     </div>
-                                    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:3px;">
-                                        ${isAvailable ? `
-                                            <strong style="font-size:14px; color:#10b981; font-weight:800;">${row.qty} وحدة</strong>
-                                            ${batchesHtml ? `<div style="display:flex; gap:3px; flex-wrap:wrap; justify-content:flex-end;">${batchesHtml}</div>` : ''}
-                                        ` : `
-                                            <div style="display:flex; align-items:center; gap:6px;">
-                                                <span style="font-size:11px; color:var(--text-muted);">رصيد 0</span>
-                                                <button type="button" onclick="window.App.openQuickStockEntry('${med.id}', '${row.loc.id}')" style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:6px; font-size:10.5px; padding:2px 6px; cursor:pointer; color:var(--primary); font-weight:bold;">
-                                                    + رصيد
-                                                </button>
-                                            </div>
-                                        `}
+                                    <div>
+                                        <strong style="font-size:13px; color:var(--text-main); display:block;">${Utils.escapeHTML(loc.nameAR)}</strong>
+                                        <small style="font-size:11px; color:var(--text-muted);">${loc.description || 'موقع حفظ معتمد للصنف في العيادة'}</small>
                                     </div>
                                 </div>
-                            `;
-                        }).join('')}
+                                <span style="font-size:11px; font-weight:700; color:#10b981; background:rgba(16,185,129,0.1); padding:4px 8px; border-radius:6px; display:inline-flex; align-items:center; gap:4px;">
+                                    <i class='bx bx-check-circle'></i> معتمد
+                                </span>
+                            </div>
+                        `).join('') : `
+                            <div style="text-align:center; padding:16px; background:var(--bg-secondary); border-radius:12px; border:1px dashed var(--border-color);">
+                                <i class='bx bx-map-pin' style="font-size:26px; color:var(--text-muted);"></i>
+                                <p style="font-size:12.5px; color:var(--text-muted); margin:4px 0 8px 0;">لم يتم تحديد أماكن حفظ معتمدة لهذا الدواء بعد</p>
+                                <button type="button" class="btn-ghost sm-btn" onclick="window.App.openEditMedicine('${med.id}')" style="font-size:11.5px; border:1px solid var(--border-color); font-weight:bold;">
+                                    تحديد أماكن الحفظ الآن ✏️
+                                </button>
+                            </div>
+                        `}
                     </div>
                 </div>
 
-                <!-- Action Buttons: Seamless direct transitions without race condition -->
+                <!-- Action Buttons: Clean direct catalog actions -->
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:16px; border-top:1px solid var(--border-color); padding-top:14px;">
                     <button type="button" class="btn-primary sm-btn" onclick="window.App.openEditMedicine('${med.id}');" style="font-size:13px; font-weight:bold; display:flex; align-items:center; justify-content:center; gap:6px; padding:10px 14px;">
                         <i class='bx bx-edit-alt'></i> <span>تعديل بيانات الدواء ✏️</span>
@@ -1095,116 +1035,6 @@ const App = {
         } catch (err) {
             console.error('Error opening medicine details:', err);
             UI.showToast('خطأ في تحميل تفاصيل الدواء', 'danger');
-        }
-    },
-
-    // --- Quick Stock Entry directly from Medicine Sheet ---
-    async openQuickStockEntry(medicineId, preSelectedLocId = null) {
-        try {
-            const med = await DB.get('medicineMaster', medicineId);
-            if (!med) return;
-            const allLocs = (await Locations.getAll()) || [];
-            const allowedLocIds = med.allowedLocations || allLocs.map(l => l.id);
-            const targetLocs = allLocs.filter(l => allowedLocIds.includes(l.id));
-            const displayLocs = targetLocs.length > 0 ? targetLocs : allLocs;
-
-            UI.showModal(`
-                <div class="sheet-handle"></div>
-                <div class="modal-header">
-                    <h2><i class='bx bx-plus-circle'></i> تسجيل رصيد في موقع تخزين</h2>
-                    <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
-                        الدواء: <strong>${med.nameEN || med.nameAR}</strong>
-                    </p>
-                </div>
-                <form onsubmit="event.preventDefault(); window.App.saveQuickStockEntry('${medicineId}');">
-                    <div class="form-group mb-12">
-                        <label class="form-label">مكان التخزين (الموقع):</label>
-                        <select id="qse-location" class="form-select" required>
-                            ${displayLocs.map(l => `<option value="${l.id}" ${preSelectedLocId === l.id ? 'selected' : ''}>${l.nameAR} (${l.nameEN || l.id})</option>`).join('')}
-                        </select>
-                    </div>
-
-                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:14px;">
-                        <div class="form-group">
-                            <label class="form-label">الكمية المسجلة (وحدة):</label>
-                            <input type="number" id="qse-qty" class="form-input" min="0" step="1" placeholder="مثال: 10" required autofocus>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">تاريخ الصلاحية (اختياري):</label>
-                            <input type="month" id="qse-expiry" class="form-input">
-                        </div>
-                    </div>
-
-                    <div class="modal-actions" style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
-                        <button type="submit" class="btn-primary">حفظ الرصيد ✅</button>
-                        <button type="button" class="btn-ghost" onclick="window.App.openMedicineDetails('${medicineId}')">رجوع للدواء</button>
-                    </div>
-                </form>
-            `);
-        } catch (err) {
-            console.error('Error opening quick stock entry:', err);
-            UI.showToast('تعذر فتح نافذة إضافة الرصيد', 'danger');
-        }
-    },
-
-    async saveQuickStockEntry(medicineId) {
-        try {
-            const locId = document.getElementById('qse-location')?.value;
-            const qty = parseFloat(document.getElementById('qse-qty')?.value);
-            const exp = document.getElementById('qse-expiry')?.value || '';
-
-            if (isNaN(qty) || qty < 0) {
-                return UI.showToast('يرجى إدخال كمية صحيحة', 'warning');
-            }
-
-            const allLocs = (await Locations.getAll()) || [];
-            const locObj = allLocs.find(l => l.id === locId);
-            const locName = locObj?.nameAR || locId;
-
-            // Check if record exists for this med + loc
-            const allInv = (await DB.getAll('inventory')) || [];
-            const existing = allInv.find(r => String(r.medicineId) === String(medicineId) && (r.locationId === locId || r.location === locName));
-
-            const targetRecord = existing || {
-                id: 'inv_' + Date.now(),
-                medicineId: String(medicineId),
-                locationId: locId,
-                location: locName,
-                quantity: qty,
-                expiryDate: exp,
-                lastUpdated: new Date().toISOString(),
-                syncStatus: 'local'
-            };
-            if (existing) {
-                existing.quantity = qty;
-                if (exp) existing.expiryDate = exp;
-                existing.lastUpdated = new Date().toISOString();
-                existing.syncStatus = 'local';
-                await DB.put('inventory', existing);
-            } else {
-                await DB.put('inventory', targetRecord);
-            }
-            if (typeof Sync !== 'undefined' && Sync.pushInventoryEntry) {
-                Sync.pushInventoryEntry(existing || targetRecord).catch(() => {});
-            }
-
-            // Also ensure the location is allowed on the medicine
-            const med = await DB.get('medicineMaster', medicineId);
-            if (med) {
-                const allowed = new Set(med.allowedLocations || []);
-                allowed.add(locId);
-                med.allowedLocations = Array.from(allowed);
-                med.lastUpdated = new Date().toISOString();
-                await DB.put('medicineMaster', med);
-                if (typeof Sync !== 'undefined' && Sync.push) Sync.push(medicineId);
-            }
-
-            UI.showToast(`تم تسجيل ${qty} وحدة في ${locName} بنجاح ✅`, 'success');
-            await this.refreshAllViews();
-            await this.openMedicineDetails(medicineId);
-        } catch (err) {
-            console.error('Error saving quick stock:', err);
-            UI.showToast('فشل حفظ الرصيد: ' + err.message, 'danger');
         }
     },
 
@@ -1321,7 +1151,7 @@ const App = {
                     <!-- Storage Locations Multi-select -->
                     <div class="form-group" style="margin-bottom:14px;">
                         <label class="form-label" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                            <span><i class='bx bx-map-pin'></i> أماكن تواجد الدواء (حدد أين يُخزن الدواء):</span>
+                            <span><i class='bx bx-map-pin'></i> أماكن الحفظ والتواجد في مبنى العيادة:</span>
                             <small style="color:var(--text-muted); font-size:11px;">(يمكن اختيار أكثر من مكان)</small>
                         </label>
                         <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap:8px; max-height:140px; overflow-y:auto; background:var(--bg-secondary); padding:10px; border-radius:10px; border:1px solid var(--border-color);">
@@ -1331,32 +1161,6 @@ const App = {
                                     <span><i class='bx ${l.icon || 'bx-map-pin'}' style="color:var(--primary);"></i> ${Utils.escapeHTML(l.nameAR)}</span>
                                 </label>
                             `).join('')}
-                        </div>
-                    </div>
-
-                    <!-- Optional Opening Stock Entry -->
-                    <div class="form-group" style="background:rgba(59,130,246,0.05); border:1px dashed rgba(59,130,246,0.3); border-radius:12px; padding:12px; margin-bottom:14px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                            <label class="form-label" style="margin:0; font-size:13px; font-weight:bold; color:var(--primary);">
-                                <i class='bx bx-box'></i> تسجيل رصيد أولي الآن؟ (اختياري)
-                            </label>
-                            <span style="font-size:11px; color:var(--text-muted);">يمكن تركه 0 والاعتماد على الجرد</span>
-                        </div>
-                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:8px;">
-                            <div>
-                                <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">الكمية الأولية (وحدة):</label>
-                                <input type="number" id="m-init-qty" class="form-input" placeholder="0" min="0" step="1" style="padding:6px 10px; font-size:13px;">
-                            </div>
-                            <div>
-                                <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">في موقع التخزين:</label>
-                                <select id="m-init-loc" class="form-select" style="padding:6px 10px; font-size:13px;">
-                                    ${allLocs.map(l => `<option value="${l.id}">${l.nameAR}</option>`).join('')}
-                                </select>
-                            </div>
-                        </div>
-                        <div>
-                            <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">تاريخ الصلاحية (اختياري):</label>
-                            <input type="month" id="m-init-exp" class="form-input" style="padding:6px 10px; font-size:13px;">
                         </div>
                     </div>
 
@@ -1528,30 +1332,6 @@ const App = {
             };
 
             await DB.put('medicineMaster', data);
-
-            // Save initial stock if provided by user
-            const initQty = parseFloat(document.getElementById('m-init-qty')?.value) || 0;
-            const initLocId = document.getElementById('m-init-loc')?.value;
-            const initExp = document.getElementById('m-init-exp')?.value || '';
-
-            if (initQty > 0 && initLocId) {
-                const allLocsList = (await Locations.getAll()) || [];
-                const locObj = allLocsList.find(l => l.id === initLocId);
-                const invRecord = {
-                    id: 'inv_' + Date.now(),
-                    medicineId: medId,
-                    locationId: initLocId,
-                    location: locObj?.nameAR || initLocId,
-                    quantity: initQty,
-                    expiryDate: initExp,
-                    lastUpdated: now,
-                    syncStatus: 'local'
-                };
-                await DB.put('inventory', invRecord);
-                if (typeof Sync !== 'undefined' && Sync.pushInventoryEntry) {
-                    Sync.pushInventoryEntry(invRecord).catch(() => {});
-                }
-            }
 
             // Ensure category is allowed in the selected locations
             if (selectedLocIds.length > 0 && typeof Locations !== 'undefined') {
@@ -2255,7 +2035,7 @@ App.handleBackup = async function() {
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.7.7'
+            version: '18.7.8'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
