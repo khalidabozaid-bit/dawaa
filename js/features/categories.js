@@ -77,13 +77,13 @@ export const Categories = {
 
     getCategoryNameAR(catId) {
         if (!catId) return 'عام';
-        if (CATEGORY_MAP[catId] && CATEGORY_MAP[catId].ar) {
-            return CATEGORY_MAP[catId].ar;
-        }
         const cache = this.cache || this._cache;
         if (cache) {
             const found = cache.find(c => c.id === catId);
             if (found && found.nameAR) return found.nameAR;
+        }
+        if (CATEGORY_MAP[catId] && CATEGORY_MAP[catId].ar) {
+            return CATEGORY_MAP[catId].ar;
         }
         // Common translations mapping - 8 Simplified Core Categories
         const aliases = {
@@ -112,29 +112,45 @@ export const Categories = {
 
     getCategoryIcon(catId) {
         if (!catId) return 'bx-category';
-        if (CATEGORY_MAP[catId] && CATEGORY_MAP[catId].icon) {
-            return CATEGORY_MAP[catId].icon;
-        }
         const cache = this.cache || this._cache;
         if (cache) {
             const found = cache.find(c => c.id === catId);
             if (found && found.icon) return found.icon;
         }
+        if (CATEGORY_MAP[catId] && CATEGORY_MAP[catId].icon) {
+            return CATEGORY_MAP[catId].icon;
+        }
         return 'bx-purchase-tag-alt';
     },
 
     async getInfo(id) {
+        if (!id) return { id: '', nameAR: 'عام', nameEN: 'General', icon: 'bx-category', color: '#64748b' };
+        // Check database first so user edits take precedence over default map!
+        try {
+            const fromDb = await DB.get('categories', id);
+            if (fromDb) {
+                return {
+                    id: fromDb.id,
+                    nameAR: fromDb.nameAR || (CATEGORY_MAP[id] && CATEGORY_MAP[id].ar) || id,
+                    nameEN: fromDb.nameEN || id,
+                    icon: fromDb.icon || (CATEGORY_MAP[id] && CATEGORY_MAP[id].icon) || 'bx-category',
+                    color: fromDb.color || (CATEGORY_MAP[id] && CATEGORY_MAP[id].color) || '#3b82f6'
+                };
+            }
+        } catch (e) {
+            console.warn('Error fetching category from DB:', e);
+        }
+
         if (CATEGORY_MAP[id]) {
             return {
                 id: id,
                 nameAR: CATEGORY_MAP[id].ar,
+                nameEN: id,
                 icon: CATEGORY_MAP[id].icon,
                 color: CATEGORY_MAP[id].color
             };
         }
-        const fromDb = await DB.get('categories', id);
-        if (fromDb) return fromDb;
-        return { id: id, nameAR: this.getCategoryNameAR(id), icon: this.getCategoryIcon(id), color: '#64748b' };
+        return { id: id, nameAR: this.getCategoryNameAR(id), nameEN: id, icon: this.getCategoryIcon(id), color: '#64748b' };
     },
 
     async saveCategory(cat) {
@@ -142,6 +158,7 @@ export const Categories = {
         await DB.put('categories', cat);
         this.cache = null;
         this._cache = null;
+        await this.getAllSorted();
         return cat.id;
     },
 
@@ -149,6 +166,7 @@ export const Categories = {
         await DB.delete('categories', id);
         this.cache = null;
         this._cache = null;
+        await this.getAllSorted();
         return true;
     },
 

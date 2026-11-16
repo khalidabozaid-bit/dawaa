@@ -1,6 +1,8 @@
 import { Sync } from '../core/sync.js';
 import { UI } from '../core/ui.js';
 import { DB } from '../core/db.js';
+import { Audit } from './audit.js';
+import { Utils } from '../core/utils.js';
 
 export const TaskManager = {
     activeTasks: [],
@@ -27,34 +29,59 @@ export const TaskManager = {
     },
 
     async renderAssignedTaskPrompt() {
-        // Dashboard Card
         const container = document.getElementById('assigned-task-container');
         if (!container) return;
 
-        if (this.activeTasks.length > 0) {
-            const task = this.activeTasks[this.activeTasks.length - 1]; // Latest active task
+        // Query source of truth from modern Audit engine
+        let activeSession = null;
+        try {
+            if (typeof Audit !== 'undefined' && Audit.getAllSessions) {
+                const sessions = (await Audit.getAllSessions()) || [];
+                activeSession = sessions.find(s => !s.isArchived && (s.status === 'in_progress' || s.status === 'held'));
+            }
+        } catch (e) {
+            console.warn('Error reading audit sessions for prompt:', e);
+        }
+
+        if (activeSession) {
+            const stats = await Audit.getSessionStats(activeSession.id);
+            const isHold = activeSession.status === 'held';
             container.innerHTML = `
-                <div class="active-inventory-card mt-20" onclick="window.App.runTask('${task.id}')">
+                <div class="active-inventory-card mt-20" onclick="window.switchView('audit'); window.App.openAuditSession('${activeSession.id}')" style="cursor:pointer;">
                     <div class="card-glow"></div>
                     <div class="card-content">
-                        <div class="card-header">
-                            <span class="status-badge pulse">جاري الجرد</span>
-                            <h3>📦 جرد نشط: ${task.location_name || (task.location_ids ? task.location_ids.join(' + ') : 'متعدد')}</h3>
+                        <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+                            <span class="status-badge ${isHold ? 'bg-soft text-warning' : 'pulse'}">
+                                ${isHold ? '⏸️ جرد معلق مؤقتاً' : 'جاري الجرد 🚀'}
+                            </span>
+                            <span style="font-size:11px; color:var(--text-muted); font-weight:bold;">
+                                ${activeSession.type === 'group' ? '👥 جرد جماعي' : '👤 جرد فردي'}
+                            </span>
                         </div>
+                        <h3 style="margin:8px 0 6px 0; font-size:15px; color:var(--text-main);">
+                            📦 جلسة نشطة: ${Utils.escapeHTML(activeSession.name)}
+                        </h3>
                         <div class="card-body">
                             <div class="progress-wrap">
-                                <div class="progress-bar" style="width: ${task.progress || 0}%"></div>
+                                <div class="progress-bar" style="width: ${stats.progress || 0}%; background:#10b981;"></div>
                             </div>
-                            <div class="progress-stats">
-                                <span>التقدم: ${task.progress || 0}%</span>
-                                <button class="continue-btn">استكمال العد <i class='bx bx-right-arrow-alt'></i></button>
+                            <div class="progress-stats" style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+                                <span style="font-size:12px; font-weight:bold; color:var(--text-muted);">
+                                    التقدم: ${stats.progress || 0}% (${stats.countedMedicines} صنف تم عده)
+                                </span>
+                                <button type="button" class="continue-btn" style="padding:6px 14px; border-radius:8px; font-weight:bold; display:flex; align-items:center; gap:4px;">
+                                    استكمال الجرد <i class='bx bx-left-arrow-alt'></i>
+                                </button>
                             </div>
                         </div>
                     </div>
                 </div>
             `;
         } else {
+            // No active session in database: ALWAYS clear prompt
             container.innerHTML = '';
+            this.activeTasks = [];
+            this.currentTask = null;
         }
     },
 

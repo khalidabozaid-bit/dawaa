@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.7.1)
+ * Dawaa App Orchestrator (v18.7.2)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.7.1', // Universal Sovereign v18.7.1
+    VERSION: '18.7.2', // Universal Sovereign v18.7.2
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1061,12 +1061,14 @@ const App = {
         }
     },
 
-    async openAddMedicine() {
+    async openAddMedicine(preSelectedCatId = null) {
         try {
             const cats = await Categories.getAllSorted();
+            const allLocs = (await Locations.getAll()) || [];
+
             UI.showModal(`
                 <div class="sheet-handle"></div>
-                <div class="modal-header"><h2>إضافة بند جديد للمستودع</h2></div>
+                <div class="modal-header"><h2><i class='bx bx-plus-circle'></i> إضافة دواء جديد للمستودع</h2></div>
                 <form id="form-master-med" onsubmit="event.preventDefault(); window.App.saveMasterMedicine();">
                     <div class="image-upload-wrap">
                         <div class="image-preview" id="m-img-preview"><i class='bx bx-camera'></i></div>
@@ -1074,50 +1076,74 @@ const App = {
                         <input type="file" id="m-file" accept="image/*" style="display:none" onchange="window.App.handleImagePreview(this, 'm-img-preview')">
                     </div>
 
-                    <div class="form-group" style="position:relative;">
+                    <div class="form-group" style="position:relative; margin-bottom:12px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                             <label class="form-label" style="margin:0;">الاسم بالإنجليزية (أو ابحث في الكتالوج المصري):</label>
                             <span style="font-size:10px; color:var(--primary); font-weight:bold;">🇪🇬 اقتراح ذكي فوري</span>
                         </div>
-                        <input type="text" id="m-name-en" class="form-input" placeholder="اكتب أول حرفين مثل: Panadol أو بنادول أو سرنجة..." required autocomplete="off" oninput="window.App.handleDrugCatalogSearch(this.value, 'm')">
+                        <input type="text" id="m-name-en" class="form-input" placeholder="اكتب أول حرفين مثل: Panadol أو بنادول أو سرنجة..." required autofocus autocomplete="off" oninput="window.App.handleDrugCatalogSearch(this.value, 'm')">
                         <div id="m-catalog-suggestions" class="catalog-suggestions-dropdown" style="display:none;"></div>
                     </div>
-                    <div class="form-group">
+
+                    <div class="form-group mb-12">
                         <label class="form-label">الاسم بالعربية:</label>
                         <input type="text" id="m-name-ar" class="form-input" placeholder="مثلاً: بنادول إكسترا">
                     </div>
-                    <div class="form-group">
-                        <label class="form-label">المادة الفعالة (اختياري):</label>
-                        <input type="text" id="m-active" class="form-input" placeholder="Paracetamol">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">فئة البند:</label>
-                        <select id="m-category" class="form-select" required>
-                            <option value="">اختر القسم...</option>
-                            ${cats.map(c => `<option value="${c.id}">${c.nameAR}</option>`).join('')}
-                        </select>
-                    </div>
 
-                    <div class="form-group">
-                        <label class="form-label">نوع البند:</label>
-                        <select id="m-type" class="form-select">
-                            <option value="medicine">دواء عادي</option>
-                            <option value="emergency">دواء طوارئ</option>
-                            <option value="supply">مستلزم طبي</option>
-                        </select>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:12px;">
+                        <div class="form-group">
+                            <label class="form-label">المادة الفعالة (اختياري):</label>
+                            <input type="text" id="m-active" class="form-input" placeholder="Paracetamol">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">الباركود (اختياري):</label>
+                            <input type="text" id="m-barcode" class="form-input" placeholder="الباركود إن وجد">
+                        </div>
                     </div>
 
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:14px;">
+                        <div class="form-group">
+                            <label class="form-label">فئة البند / القسم:</label>
+                            <select id="m-category" class="form-select" required>
+                                <option value="">اختر القسم...</option>
+                                ${cats.map(c => `<option value="${c.id}" ${preSelectedCatId === c.id ? 'selected' : ''}>${c.nameAR || c.id}</option>`).join('')}
+                            </select>
+                        </div>
 
-                    <div class="form-group checkbox-group mt-10" style="display: flex; align-items: center; gap: 8px; background: var(--bg-secondary); padding: 10px; border-radius: 8px;">
+                        <div class="form-group">
+                            <label class="form-label">تصنيف الدواء:</label>
+                            <select id="m-type" class="form-select">
+                                <option value="medicine">💊 دواء عادي</option>
+                                <option value="emergency">🚨 دواء طوارئ</option>
+                                <option value="supply">🩹 مستلزم طبي</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Storage Locations Multi-select -->
+                    <div class="form-group" style="margin-bottom:14px;">
+                        <label class="form-label" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span><i class='bx bx-map-pin'></i> أماكن التخزين المتاحة لهذا الدواء:</span>
+                            <small style="color:var(--text-muted); font-size:11px;">(يمكنك اختيار أكثر من مكان)</small>
+                        </label>
+                        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap:8px; max-height:150px; overflow-y:auto; background:var(--bg-secondary); padding:10px; border-radius:10px; border:1px solid var(--border-color);">
+                            ${allLocs.map(l => `
+                                <label style="display:flex; align-items:center; gap:8px; background:var(--surface); padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); cursor:pointer; font-size:12px; font-weight:600;">
+                                    <input type="checkbox" name="m-locations" value="${l.id}" checked style="width:16px; height:16px; accent-color:var(--primary); cursor:pointer;">
+                                    <span><i class='bx ${l.icon || 'bx-map-pin'}' style="color:var(--primary);"></i> ${Utils.escapeHTML(l.nameAR)}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <div class="form-group checkbox-group mt-10 mb-15" style="display: flex; align-items: center; gap: 8px; background: var(--bg-secondary); padding: 10px; border-radius: 8px;">
                         <input type="checkbox" id="m-sync" checked style="width: 18px; height: 18px;">
                         <label for="m-sync" style="font-size: 13px; font-weight: 700; cursor: pointer;">نشر في السحابة فوراً (Cloud Push) ☁️</label>
                     </div>
 
- 
-                    <div class="form-actions mt-20">
-
-                        <button type="submit" class="btn-primary">حفظ في المستودع</button>
-                        <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">رجوع للجرد</button>
+                    <div class="form-actions mt-15" style="display:flex; gap:10px;">
+                        <button type="submit" class="btn-primary" style="flex:1;">حفظ</button>
+                        <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
                     </div>
                 </form>
             `);
@@ -1209,47 +1235,85 @@ const App = {
 
     async saveMasterMedicine() {
         try {
+            const nameEN = document.getElementById('m-name-en')?.value.trim();
+            const nameAR = document.getElementById('m-name-ar')?.value.trim() || nameEN;
+            const categoryId = document.getElementById('m-category')?.value;
+            const activeIngredient = (document.getElementById('m-active')?.value || '').trim();
+            const barcode = (document.getElementById('m-barcode')?.value || '').trim();
+            const type = document.getElementById('m-type')?.value || 'medicine';
+            const shouldSync = document.getElementById('m-sync')?.checked ?? true;
+
+            const selectedLocIds = [];
+            document.querySelectorAll('input[name="m-locations"]:checked').forEach(cb => {
+                selectedLocIds.push(cb.value);
+            });
+
+            if (!nameEN || !categoryId) {
+                return UI.showToast('يرجى ملء اسم الدواء واختيار القسم', 'warning');
+            }
+
             const fileInput = document.getElementById('m-file');
-            let imgData = ''; // Local base64 for instant preview
+            let imgData = '';
             let file = null;
 
-            if (fileInput.files && fileInput.files[0]) {
+            if (fileInput && fileInput.files && fileInput.files[0]) {
                 file = fileInput.files[0];
                 imgData = await Utils.fileToBase64(file);
             }
 
+            const medId = barcode || (await Categories.generateNextId()) || ('med_' + Date.now());
+            const now = new Date().toISOString();
+
             const data = {
-                nameEN: document.getElementById('m-name-en').value.trim(),
-                nameAR: document.getElementById('m-name-ar').value.trim(),
-                activeIngredient: document.getElementById('m-active').value.trim(),
-                categoryId: document.getElementById('m-category').value,
-                type: document.getElementById('m-type').value,
-                imagePath: imgData,
-                syncStatus: 'local'
+                id: medId,
+                nameEN,
+                nameAR,
+                activeIngredient,
+                categoryId,
+                barcode: barcode || medId,
+                type,
+                allowedLocations: selectedLocIds.length > 0 ? selectedLocIds : null,
+                imagePath: imgData || 'assets/icons/default-med.png',
+                syncStatus: 'local',
+                createdAt: now
             };
 
-            const medId = await Categories.saveMedicine(data);
-            UI.closeModal();
-            this.renderInventory();
-            this.renderDashboard();
+            await DB.put('medicineMaster', data);
 
-            // Background Cloud Upload (v9.9.5 - Ironclad)
-            if (file && this.userRole === 'admin') {
-                UI.showToast('جاري رفع صورة الدواء للسحابة... ☁️', 'info');
+            // Ensure category is allowed in the selected locations
+            if (selectedLocIds.length > 0 && typeof Locations !== 'undefined') {
+                for (const locId of selectedLocIds) {
+                    try {
+                        await Locations.addCategoryToLocation(locId, categoryId);
+                    } catch (e) {}
+                }
+            }
+
+            UI.closeModal();
+            UI.showToast(`تم حفظ الدواء «${nameEN}» بنجاح ✨`, 'success');
+
+            if (typeof this.renderInventory === 'function') await this.renderInventory();
+            if (typeof this.renderWarehouseCategories === 'function') await this.renderWarehouseCategories();
+            if (typeof this.renderDashboard === 'function') await this.renderDashboard();
+
+            // Background Cloud Upload if requested
+            if (file && shouldSync && typeof this.uploadImage === 'function') {
                 this.uploadImage(file, medId).then(async (url) => {
                     if (url) {
-                        const med = await DB.get('medicineMaster', medId);
-                        med.imagePath = url; // Cloud Link
-                        await Categories.saveMedicine(med);
-                        Sync.push(medId); // Push with URL
-                        UI.showToast('تم حفظ الصورة في السحابة بنجاح ✨', 'success');
+                        const m = await DB.get('medicineMaster', medId);
+                        if (m) {
+                            m.imagePath = url;
+                            await DB.put('medicineMaster', m);
+                            if (typeof Sync !== 'undefined' && Sync.push) Sync.push(medId);
+                        }
                     }
-                });
-            } else if (this.userRole === 'admin') {
+                }).catch(e => console.warn('Cloud upload failed:', e));
+            } else if (shouldSync && typeof Sync !== 'undefined' && Sync.push) {
                 Sync.push(medId);
             }
 
         } catch (err) {
+            console.error('Error saving master medicine:', err);
             UI.showToast('فشل حفظ الدواء', 'danger');
         }
     },
@@ -1631,76 +1695,8 @@ const App = {
         }
     },
 
-    async openQuickAdd() {
-        try {
-            const cats = await Categories.getAllSorted();
-            const allLocs = (await Locations.getAll()) || [];
-
-            UI.showModal(`
-                <div class="sheet-handle"></div>
-                <div class="modal-header">
-                    <h2><i class='bx bx-plus-circle'></i> إضافة دواء جديد للمستودع</h2>
-                </div>
-                <form id="form-quick-add" onsubmit="event.preventDefault(); window.App.saveQuickAddMedicine();">
-                    <div class="form-group" style="margin-bottom:12px; position:relative;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                            <label class="form-label" style="margin:0;">الاسم بالإنجليزية (أو ابحث في الكتالوج المصري):</label>
-                            <span style="font-size:10px; color:var(--primary); font-weight:bold;">🇪🇬 اقتراح ذكي فوري</span>
-                        </div>
-                        <input type="text" id="qa-name-en" class="form-input" placeholder="اكتب أول حرفين مثل: Panadol أو بنادول أو سرنجة..." required autofocus autocomplete="off" oninput="window.App.handleDrugCatalogSearch(this.value, 'qa')">
-                        <div id="qa-catalog-suggestions" class="catalog-suggestions-dropdown" style="display:none;"></div>
-                    </div>
-
-                    <div class="form-group" style="margin-bottom:12px;">
-                        <label class="form-label">الاسم بالعربية:</label>
-                        <input type="text" id="qa-name-ar" class="form-input" placeholder="مثال: بنادول إكسترا">
-                    </div>
-
-                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:12px;">
-                        <div class="form-group">
-                            <label class="form-label">المادة الفعالة (اختياري):</label>
-                            <input type="text" id="qa-active" class="form-input" placeholder="مثال: Paracetamol">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">الباركود (اختياري):</label>
-                            <input type="text" id="qa-barcode" class="form-input" placeholder="الباركود إن وجد">
-                        </div>
-                    </div>
-
-                    <div class="form-group" style="margin-bottom:14px;">
-                        <label class="form-label">القسم / التصنيف:</label>
-                        <select id="qa-category" class="form-select" required>
-                            <option value="">اختر القسم...</option>
-                            ${cats.map(c => `<option value="${c.id}">${c.nameAR || c.id}</option>`).join('')}
-                        </select>
-                    </div>
-
-                    <!-- Storage Locations Selection (Multi-select check boxes) -->
-                    <div class="form-group" style="margin-bottom:16px;">
-                        <label class="form-label" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                            <span><i class='bx bx-map-pin'></i> أماكن التخزين المتاحة لهذا الدواء:</span>
-                            <small style="color:var(--text-muted); font-size:11px;">(يمكنك اختيار أكثر من مكان)</small>
-                        </label>
-                        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap:8px; max-height:160px; overflow-y:auto; background:var(--bg-secondary); padding:10px; border-radius:10px; border:1px solid var(--border-color);">
-                            ${allLocs.map(l => `
-                                <label style="display:flex; align-items:center; gap:8px; background:var(--surface); padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); cursor:pointer; font-size:12px; font-weight:600;">
-                                    <input type="checkbox" name="qa-locations" value="${l.id}" checked style="width:16px; height:16px; accent-color:var(--primary); cursor:pointer;">
-                                    <span><i class='bx ${l.icon || 'bx-map-pin'}' style="color:var(--primary);"></i> ${Utils.escapeHTML(l.nameAR)}</span>
-                                </label>
-                            `).join('')}
-                        </div>
-                    </div>
-
-                    <div class="form-actions" style="display:flex; gap:10px; margin-top:20px;">
-                        <button type="submit" class="btn-primary" style="flex:1;">حفظ</button>
-                        <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
-                    </div>
-                </form>
-            `);
-        } catch (err) {
-            console.error('Quick Add Error:', err);
-            UI.showToast('خطأ في فتح النافذة', 'danger');
-        }
+    openQuickAdd(catId = null) {
+        return this.openAddMedicine(catId);
     },
 
     // --- Egyptian Drug Catalog Auto-Complete (v18.6.0) ---
@@ -1792,64 +1788,7 @@ const App = {
     },
 
     async saveQuickAddMedicine() {
-        try {
-            const nameEN = document.getElementById('qa-name-en').value.trim();
-            const nameAR = document.getElementById('qa-name-ar').value.trim() || nameEN;
-            const categoryId = document.getElementById('qa-category').value;
-            const barcode = (document.getElementById('qa-barcode')?.value || '').trim();
-            const activeIngredient = (document.getElementById('qa-active')?.value || '').trim();
-
-            const selectedLocIds = [];
-            document.querySelectorAll('input[name="qa-locations"]:checked').forEach(cb => {
-                selectedLocIds.push(cb.value);
-            });
-
-            if (!nameEN || !categoryId) {
-                UI.showToast('يرجى ملء اسم الدواء واختيار القسم', 'warning');
-                return;
-            }
-
-            const medId = barcode || ('med_' + Date.now());
-            const now = new Date().toISOString();
-
-            await DB.put('medicineMaster', {
-                id: medId,
-                nameEN,
-                nameAR,
-                activeIngredient,
-                categoryId,
-                barcode,
-                type: 'medicine',
-                allowedLocations: selectedLocIds.length > 0 ? selectedLocIds : null,
-                imagePath: 'assets/icons/default-med.png',
-                syncStatus: 'local',
-                createdAt: now
-            });
-
-            // Ensure category is allowed in the selected locations
-            if (selectedLocIds.length > 0 && typeof Locations !== 'undefined') {
-                for (const locId of selectedLocIds) {
-                    try {
-                        await Locations.addCategoryToLocation(locId, categoryId);
-                    } catch (e) {}
-                }
-            }
-
-            UI.closeModal();
-            UI.showToast(`تم حفظ الدواء «${nameEN}» بنجاح ✨`, 'success');
-
-            await this.renderDashboard();
-            if (typeof this.renderInventory === 'function') await this.renderInventory();
-            if (typeof this.renderWarehouseCategories === 'function') await this.renderWarehouseCategories();
-            window.switchView('inventory');
-
-            if (this.userRole === 'admin') {
-                Sync.push(medId);
-            }
-        } catch (err) {
-            console.error('Save Quick Add Error:', err);
-            UI.showToast('فشل حفظ الدواء', 'danger');
-        }
+        return this.saveMasterMedicine();
     },
 
     async adjustStock(medId, delta) {
@@ -2026,7 +1965,7 @@ App.handleBackup = async function() {
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.7.1'
+            version: '18.7.2'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -2694,30 +2633,38 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     // --- Categories CRUD Modals ---
     openAddCategoryModal() {
         UI.showModal(`
+            <div class="sheet-handle"></div>
             <div class="modal-header"><h2>إضافة تصنيف علاجي جديد</h2></div>
             <form onsubmit="event.preventDefault(); window.App.saveCategoryForm();">
                 <div class="form-group mb-12">
-                    <label class="form-label">اسم التصنيف (بالعربية):</label>
-                    <input type="text" id="cat-name-ar" class="form-input" placeholder="مثال: أدوية عيون، قطرات..." required>
+                    <label class="form-label">اسم التصنيف بالعربية (إجباري):</label>
+                    <input type="text" id="cat-name-ar" class="form-input" placeholder="مثال: أدوية عيون، قطرات..." required autofocus>
+                </div>
+                <div class="form-group mb-12">
+                    <label class="form-label">اسم التصنيف بالإنجليزية (اختياري):</label>
+                    <input type="text" id="cat-name-en" class="form-input" placeholder="مثال: Eye Drops & Ointments">
                 </div>
                 <div class="form-group mb-12">
                     <label class="form-label">أيقونة التصنيف:</label>
                     <select id="cat-icon" class="form-select">
                         <option value="bx-capsule">💊 كبسولة</option>
                         <option value="bx-plus-medical">🩺 طبي / عام</option>
-                        <option value="bx-injection">💉 حقن</option>
+                        <option value="bx-shield">🛡️ مضادات حيوية</option>
+                        <option value="bx-injection">💉 حقن ومحاليل</option>
                         <option value="bx-wind">🌬️ جهاز تنفسي</option>
                         <option value="bx-droplet">💧 قطرات / سوائل</option>
-                        <option value="bx-heart">❤️ قلب وأوعية</option>
-                        <option value="bx-band-aid">🩹 إسعافات</option>
+                        <option value="bx-dish">🍽️ معدة وجهاز هضمي</option>
+                        <option value="bx-pulse">💓 أمراض مزمنة / قلب</option>
+                        <option value="bx-spray-can">🧴 مراهم وبخاخ</option>
+                        <option value="bx-first-aid">🩹 إسعافات وغيار طبي</option>
                     </select>
                 </div>
                 <div class="form-group mb-15">
                     <label class="form-label">لون التمييز:</label>
                     <input type="color" id="cat-color" class="form-input" value="#3b82f6" style="height:40px; padding:2px;">
                 </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn-primary">حفظ التصنيف</button>
+                <div class="form-actions" style="display:flex; gap:10px;">
+                    <button type="submit" class="btn-primary" style="flex:1;">حفظ</button>
                     <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
                 </div>
             </form>
@@ -2727,28 +2674,38 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     async openEditCategoryModal(id) {
         const cat = await Categories.getInfo(id);
         UI.showModal(`
-            <div class="modal-header"><h2>تعديل التصنيف: ${cat.nameAR}</h2></div>
+            <div class="sheet-handle"></div>
+            <div class="modal-header"><h2>تعديل التصنيف: ${Utils.escapeHTML(cat.nameAR)}</h2></div>
             <form onsubmit="event.preventDefault(); window.App.saveCategoryForm('${id}');">
                 <div class="form-group mb-12">
-                    <label class="form-label">اسم التصنيف:</label>
-                    <input type="text" id="cat-name-ar" class="form-input" value="${cat.nameAR}" required>
+                    <label class="form-label">اسم التصنيف بالعربية:</label>
+                    <input type="text" id="cat-name-ar" class="form-input" value="${Utils.escapeHTML(cat.nameAR)}" required>
+                </div>
+                <div class="form-group mb-12">
+                    <label class="form-label">اسم التصنيف بالإنجليزية:</label>
+                    <input type="text" id="cat-name-en" class="form-input" value="${Utils.escapeHTML(cat.nameEN || cat.id || '')}">
                 </div>
                 <div class="form-group mb-12">
                     <label class="form-label">الأيقونة:</label>
                     <select id="cat-icon" class="form-select">
                         <option value="bx-capsule" ${cat.icon === 'bx-capsule' ? 'selected' : ''}>💊 كبسولة</option>
                         <option value="bx-plus-medical" ${cat.icon === 'bx-plus-medical' ? 'selected' : ''}>🩺 طبي / عام</option>
-                        <option value="bx-injection" ${cat.icon === 'bx-injection' ? 'selected' : ''}>💉 حقن</option>
+                        <option value="bx-shield" ${cat.icon === 'bx-shield' ? 'selected' : ''}>🛡️ مضادات حيوية</option>
+                        <option value="bx-injection" ${cat.icon === 'bx-injection' ? 'selected' : ''}>💉 حقن ومحاليل</option>
                         <option value="bx-wind" ${cat.icon === 'bx-wind' ? 'selected' : ''}>🌬️ تنفسي</option>
                         <option value="bx-droplet" ${cat.icon === 'bx-droplet' ? 'selected' : ''}>💧 قطرات</option>
+                        <option value="bx-dish" ${cat.icon === 'bx-dish' ? 'selected' : ''}>🍽️ معدة وهضم</option>
+                        <option value="bx-pulse" ${cat.icon === 'bx-pulse' ? 'selected' : ''}>💓 مزمن / قلب</option>
+                        <option value="bx-spray-can" ${cat.icon === 'bx-spray-can' ? 'selected' : ''}>🧴 مراهم وبخاخ</option>
+                        <option value="bx-first-aid" ${cat.icon === 'bx-first-aid' ? 'selected' : ''}>🩹 إسعافات</option>
                     </select>
                 </div>
                 <div class="form-group mb-15">
                     <label class="form-label">اللون:</label>
                     <input type="color" id="cat-color" class="form-input" value="${cat.color || '#3b82f6'}" style="height:40px; padding:2px;">
                 </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn-primary">حفظ التعديلات</button>
+                <div class="form-actions" style="display:flex; gap:10px;">
+                    <button type="submit" class="btn-primary" style="flex:1;">حفظ</button>
                     <button type="button" class="btn-ghost" style="color:var(--danger)" onclick="window.App.deleteCategoryConfirm('${id}')">حذف التصنيف</button>
                     <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
                 </div>
@@ -2757,14 +2714,28 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     },
 
     async saveCategoryForm(id = null) {
-        const nameEl = document.getElementById('cat-name-ar');
+        const nameArEl = document.getElementById('cat-name-ar');
+        const nameEnEl = document.getElementById('cat-name-en');
         const iconEl = document.getElementById('cat-icon');
         const colorEl = document.getElementById('cat-color');
-        if (!nameEl || !nameEl.value.trim()) return;
+        if (!nameArEl || !nameArEl.value.trim()) return;
+
+        const nameAR = nameArEl.value.trim();
+        const nameEN = (nameEnEl && nameEnEl.value.trim()) ? nameEnEl.value.trim() : nameAR;
+
+        let catId = id;
+        if (!catId) {
+            // Clean slug ID from English name
+            const slug = (nameEnEl && nameEnEl.value.trim()) 
+                ? nameEnEl.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') 
+                : '';
+            catId = slug ? `cat_${slug}` : ('cat_' + Date.now().toString(36));
+        }
 
         const data = {
-            id: id || Utils.generateId(),
-            nameAR: nameEl.value.trim(),
+            id: catId,
+            nameAR: nameAR,
+            nameEN: nameEN,
             icon: iconEl ? iconEl.value : 'bx-capsule',
             color: colorEl ? colorEl.value : '#3b82f6'
         };
@@ -2774,6 +2745,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         if (typeof this.renderWarehouseCategories === 'function') this.renderWarehouseCategories();
         if (typeof this.renderCategoryChips === 'function') this.renderCategoryChips();
         if (typeof this.renderInventory === 'function') this.renderInventory();
+        if (typeof this.renderAuditView === 'function') this.renderAuditView();
     },
 
     async deleteCategoryConfirm(id) {
@@ -3040,20 +3012,27 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         }
 
         await Audit.deleteSession(sessionId);
+        if (this.selectedAuditSessionId === sessionId) {
+            this.selectedAuditSessionId = null;
+            this.auditLevel = 'sessions';
+        }
         UI.showToast('تم حذف الجلسة وسجلاتها نهائياً 🗑️', 'info');
         this.renderAuditView();
+        if (typeof this.renderDashboard === 'function') this.renderDashboard();
     },
 
     async archiveAuditSession(sessionId) {
         await Audit.archiveSession(sessionId);
         UI.showToast('تم نقل الجلسة إلى الأرشيف بنجاح 📦', 'success');
         this.renderAuditView();
+        if (typeof this.renderDashboard === 'function') this.renderDashboard();
     },
 
     async unarchiveAuditSession(sessionId) {
         await Audit.unarchiveSession(sessionId);
         UI.showToast('تمت استعادة الجلسة من الأرشيف ↩️', 'success');
         this.renderAuditView();
+        if (typeof this.renderDashboard === 'function') this.renderDashboard();
     },
 
     async openAuditReportModal(sessionId) {
@@ -3961,11 +3940,13 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     async holdAuditSession(id) {
         await Audit.holdSession(id);
         this.renderAuditView();
+        if (typeof this.renderDashboard === 'function') this.renderDashboard();
     },
 
     async resumeAuditSession(id) {
         await Audit.resumeSession(id);
         this.renderAuditView();
+        if (typeof this.renderDashboard === 'function') this.renderDashboard();
     },
 
     async finalizeAuditSession(id) {
@@ -4047,6 +4028,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             this.auditLevel = 'locations';
             UI.switchView('view-audit');
             this.renderAuditView();
+            if (typeof this.renderDashboard === 'function') this.renderDashboard();
         }
     },
 
