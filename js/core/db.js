@@ -58,7 +58,8 @@ export const DB = {
                     db.createObjectStore(STORES.CATEGORIES, { keyPath: 'id' });
                 }
 
-                // Settings Store
+                // Settings store uses out-of-line keys (manual key per put).
+                // Changing to { keyPath: 'key' } would require DB_VERSION bump + migration.
                 if (!db.objectStoreNames.contains(STORES.SETTINGS)) {
                     db.createObjectStore(STORES.SETTINGS);
                 }
@@ -116,7 +117,7 @@ export const DB = {
             const tx = db.transaction([storeName], 'readwrite');
             const store = tx.objectStore(storeName);
             const request = store.put(data);
-            request.onsuccess = () => resolve(data.id);
+            request.onsuccess = () => { if (storeName === 'medicineMaster') this.invalidateMedsCache(); resolve(data.id); };
             request.onerror = (e) => reject(e.target.error);
         });
     },
@@ -171,7 +172,7 @@ export const DB = {
             const tx = db.transaction([storeName], 'readwrite');
             const store = tx.objectStore(storeName);
             const request = store.delete(id);
-            request.onsuccess = () => resolve();
+            request.onsuccess = () => { if (storeName === 'medicineMaster') this.invalidateMedsCache(); resolve(); };
             request.onerror = (e) => reject(e.target.error);
         });
     },
@@ -183,12 +184,13 @@ export const DB = {
             const tx = db.transaction([storeName], 'readwrite');
             const store = tx.objectStore(storeName);
             const request = store.clear();
-            request.onsuccess = () => resolve();
+            request.onsuccess = () => { if (storeName === 'medicineMaster') this.invalidateMedsCache(); resolve(); };
             request.onerror = (e) => reject(e.target.error);
         });
     },
 
     async deleteDB() {
+        this.invalidateMedsCache(); // Clear cache before deleting DB
         if (this.db) {
             this.db.close();
             this.db = null;
@@ -201,6 +203,24 @@ export const DB = {
             };
             request.onerror = (e) => reject(e.target.error);
         });
+    },
+
+    // --- Medicine Cache Layer (v18.10.0) ---
+    _medsCache: null,
+    _medsCacheTime: 0,
+    _CACHE_MAX_AGE: 5000, // 5 second TTL
+
+    async getCachedMeds(maxAge) {
+        const ttl = maxAge || this._CACHE_MAX_AGE;
+        if (this._medsCache && Date.now() - this._medsCacheTime < ttl) return this._medsCache;
+        this._medsCache = await this.getAll('medicineMaster');
+        this._medsCacheTime = Date.now();
+        return this._medsCache;
+    },
+
+    invalidateMedsCache() {
+        this._medsCache = null;
+        this._medsCacheTime = 0;
     }
 };
 

@@ -9,13 +9,10 @@ import { db } from './firebase-config.js';
  */
 
 export const Sync = {
-    // Fixed Cloud Path for Single Pharmacy Architecture
-    CLOUD_PATH: 'global_master/data',
-    
-    // v16.3.1: Delegated V2 Bridge
-    get V2_ACTIVE() { return SyncV2.ACTIVE; },
-    isV2Active() { return SyncV2.ACTIVE; },
+    // v18.10.0: Removed dead CLOUD_PATH, V2_ACTIVE proxy, MedicinesSyncLayer proxy
     LOG_COLLECTION: 'sync_logs',
+    _retryQueue: [],
+    _retryTimer: null,
 
     async initV2() {
         return SyncV2.init();
@@ -23,15 +20,6 @@ export const Sync = {
 
     async log(op, status, message, medId = null, extra = {}) {
         return SyncV2.log(op, status, message, medId, extra);
-    },
-
-    /**
-     * MedicinesSyncLayer (v16.3.1 - Proxy)
-     */
-    MedicinesSyncLayer: {
-        async pullV2() { return SyncV2.pull(); },
-        async pushV2(med) { return SyncV2.push(med); },
-        async runMigration() { return SyncV2.runMigration(Sync.CLOUD_PATH); }
     },
     
     async pull() {
@@ -154,6 +142,23 @@ export const Sync = {
             
         } catch (err) {
             console.error('Sync Push Error:', err);
+            throw err; // Re-throw for pushWithRetry to catch
+        }
+    },
+
+    // v18.10.0: Retry wrapper with exponential backoff
+    async pushWithRetry(medId, attempt = 1) {
+        try {
+            await this.push(medId);
+        } catch (err) {
+            if (attempt < 3) {
+                const delay = attempt === 1 ? 5000 : 30000;
+                console.warn(`Sync: Retry ${attempt}/3 for ${medId} in ${delay/1000}s...`);
+                setTimeout(() => this.pushWithRetry(medId, attempt + 1), delay);
+            } else {
+                console.error(`Sync: Failed to push ${medId} after 3 attempts`);
+                this._retryQueue.push({ medId, failedAt: Date.now() });
+            }
         }
     },
 

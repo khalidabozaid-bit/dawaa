@@ -399,21 +399,21 @@
     </main>
 
     <!-- Bottom Navigation (Clean 3 Tabs + Quick Action) -->
-    <nav class="bottom-nav">
+    <nav class="bottom-nav" role="navigation" aria-label="التنقل الرئيسي">
         <div class="nav-content container">
-            <button class="nav-item active" data-target="dashboard">
+            <button class="nav-item active" data-target="dashboard" aria-label="الصفحة الرئيسية">
                 <i class='bx bxs-home-circle'></i>
                 <span>الرئيسية</span>
             </button>
-            <button class="nav-item" data-target="audit">
+            <button class="nav-item" data-target="audit" aria-label="نظام الجرد">
                 <i class='bx bx-list-check'></i>
                 <span>الجرد</span>
             </button>
-            <button class="nav-item" data-target="inventory">
+            <button class="nav-item" data-target="inventory" aria-label="المستودع والأدوية">
                 <i class='bx bxs-capsule'></i>
                 <span>المستودع</span>
             </button>
-            <button class="nav-item" data-target="settings" title="التقارير والإعدادات">
+            <button class="nav-item" data-target="settings" aria-label="التقارير والإعدادات" title="التقارير والإعدادات">
                 <i class='bx bxs-cog'></i>
                 <span>الإعدادات</span>
             </button>
@@ -421,7 +421,7 @@
     </nav>
 
     <!-- Modals Overlay -->
-    <div id="modal-container" class="modal-overlay"></div>
+    <div id="modal-container" class="modal-overlay" role="dialog" aria-modal="true"></div>
 
     <!-- Firebase SDK (Compat v10) -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
@@ -432,7 +432,7 @@
 
     <!-- App Scripts -->
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/app.js?v=18.9.2"></script>
+    <script type="module" src="js/app.js?v=18.10.0"></script>
     
     <!-- Navigation Logic managed by js/app.js -->
 </body>

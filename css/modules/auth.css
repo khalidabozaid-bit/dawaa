@@ -139,3 +139,24 @@ body.dark-mode .auth-input {
 }
 body.dark-mode .auth-card h2 { color: white; }
 body.dark-mode .auth-group label { color: #94a3b8; }
+
+/* Dark mode auth - complete coverage (v18.10.0) */
+html.dark-mode .view-login-container {
+    background: linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%);
+}
+body.dark-mode .auth-card p {
+    color: #94a3b8;
+}
+body.dark-mode .auth-input:focus {
+    background: #1e293b;
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
+}
+body.dark-mode .auth-btn {
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+}
+body.dark-mode .auth-toggle {
+    color: #94a3b8;
+}
+body.dark-mode .auth-toggle-btn {
+    color: #60a5fa;
+}

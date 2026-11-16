@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.9.2', // Security + Performance: Firestore rules, race condition fix, audit atomicity, backup complete, password obfuscation
+    VERSION: '18.10.0', // 15 improvements: XSS protection, medicine cache, retry/backoff, dark auth, dashboard cache, notifications, PWA install, dead code cleanup, error boundary, a11y, manifest fix
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -40,6 +40,9 @@ const App = {
     selectedLocationId: null,
     notifications: [],
     unreadCount: 0,
+    _dashCache: null,
+    _dashCacheTime: 0,
+    _deferredInstallPrompt: null,
 
     /**
      * Image Upload Helper for Cloud Storage (v18.7.9)
@@ -284,6 +287,7 @@ const App = {
 
             history.replaceState({ viewId: 'view-dashboard' }, "", "#dashboard");
             this.initServiceWorker();
+            this.initInstallPrompt();
             console.log("BOOT: [COMPLETE] Engine Running.");
 
         } catch (e) {
@@ -550,13 +554,80 @@ const App = {
 
     async renderDashboard() {
         try {
+            // v18.10.0: Skip re-render if stats were computed recently (10s TTL)
+            const now = Date.now();
+            if (this._dashCacheTime && now - this._dashCacheTime < 10000 && this._dashCache) {
+                UI.updateDashboardStats(this._dashCache);
+                return;
+            }
             const stats = await Inventory.getCurrentStockStats();
+            this._dashCache = stats;
+            this._dashCacheTime = now;
             UI.updateDashboardStats(stats);
             // v15.0.0: Render active structured tasks
             if (window.TaskManager) TaskManager.renderAssignedTaskPrompt();
         } catch (err) {
             console.error(err);
         }
+    },
+
+    // --- Notification System (v18.10.0) ---
+    pushNotification(message, type = 'info') {
+        const notification = {
+            id: 'notif_' + Date.now(),
+            message,
+            type,
+            time: new Date().toISOString(),
+            read: false
+        };
+        this.notifications.unshift(notification);
+        if (this.notifications.length > 50) this.notifications.pop();
+        this.unreadCount = this.notifications.filter(n => !n.read).length;
+        this.renderNotificationBadge();
+        if (typeof UI !== 'undefined') UI.showToast(message, type === 'info' ? 'info' : 'success');
+    },
+
+    renderNotificationBadge() {
+        const badge = document.getElementById('notif-badge');
+        if (badge) {
+            badge.textContent = this.unreadCount > 0 ? this.unreadCount : '';
+            badge.style.display = this.unreadCount > 0 ? 'flex' : 'none';
+        }
+    },
+
+    clearNotifications() {
+        this.notifications.forEach(n => n.read = true);
+        this.unreadCount = 0;
+        this.renderNotificationBadge();
+    },
+
+    // --- PWA Install Prompt (v18.10.0) ---
+    initInstallPrompt() {
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            this._deferredInstallPrompt = e;
+            const installBtn = document.getElementById('pwa-install-btn');
+            if (installBtn) installBtn.style.display = 'inline-flex';
+            console.log('PWA: Install prompt captured ✅');
+        });
+        window.addEventListener('appinstalled', () => {
+            this._deferredInstallPrompt = null;
+            const installBtn = document.getElementById('pwa-install-btn');
+            if (installBtn) installBtn.style.display = 'none';
+            if (typeof UI !== 'undefined') UI.showToast('تم تثبيت التطبيق بنجاح! 🎉', 'success');
+            console.log('PWA: App installed ✅');
+        });
+    },
+
+    async showInstallPrompt() {
+        if (!this._deferredInstallPrompt) {
+            if (typeof UI !== 'undefined') UI.showToast('التطبيق مثبت بالفعل أو غير متاح للتثبيت', 'info');
+            return;
+        }
+        this._deferredInstallPrompt.prompt();
+        const result = await this._deferredInstallPrompt.userChoice;
+        console.log('PWA: Install choice:', result.outcome);
+        this._deferredInstallPrompt = null;
     },
 
     async renderInventory(type = 'detailed') {
@@ -624,7 +695,7 @@ const App = {
                     <option value="">📦 جميع التصنيفات</option>
                     ${cats.map(c => {
                         const isSel = this.selectedCategoryId === c.id ? 'selected' : '';
-                        return `<option value="${c.id}" ${isSel}>${c.nameAR}</option>`;
+                        return `<option value="${c.id}" ${isSel}>${Utils.escapeHTML(c.nameAR)}</option>`;
                     }).join('')}
                 `;
             }
@@ -691,7 +762,7 @@ const App = {
                     <option value="">📍 جميع الأماكن</option>
                     ${locs.map(l => {
                         const isSel = this.selectedLocationId === l.id ? 'selected' : '';
-                        return `<option value="${l.id}" ${isSel}>${l.nameAR}</option>`;
+                        return `<option value="${l.id}" ${isSel}>${Utils.escapeHTML(l.nameAR)}</option>`;
                     }).join('')}
                 `;
             }
@@ -728,7 +799,7 @@ const App = {
                             <span class="qty-badge">${qty} قطعة</span>
                         </div>
                         <div class="result-body">
-                            <h3>${med.nameEN} <span class="ar-name">/ ${med.nameAR || ''}</span></h3>
+                            <h3>${Utils.escapeHTML(med.nameEN)} <span class="ar-name">/ ${Utils.escapeHTML(med.nameAR || '')}</span></h3>
                             <div class="result-meta">
                                 <span><i class='bx bx-barcode'></i> كود: ${med.id}</span>
                                 ${exp ? `<span class="${isExpiring ? 'text-danger fw-800' : ''}">
@@ -786,13 +857,13 @@ const App = {
                         </div>
                         <div class="card-info">
                             <h3>
-                                ${m.nameEN} 
-                                <span class="ar-name">/ ${m.nameAR || ''}</span>
+                                ${Utils.escapeHTML(m.nameEN)} 
+                                <span class="ar-name">/ ${Utils.escapeHTML(m.nameAR || '')}</span>
                                 ${m.v ? `<span class="ver-badge">v${m.v}</span>` : ''}
                             </h3>
                             <div class="card-meta">
                                 <span><i class='bx bx-barcode'></i> ${m.id}</span>
-                                <span><i class='bx bx-purchase-tag-alt'></i> ${cat.nameAR}</span>
+                                <span><i class='bx bx-purchase-tag-alt'></i> ${Utils.escapeHTML(cat.nameAR)}</span>
                             </div>
                         </div>
                         <div class="card-actions-float">
@@ -819,7 +890,7 @@ const App = {
                 return `
                     <div class="category-card" onclick="window.App.openCategory('${cat.id}')">
                         <div class="category-icon" style="background: ${cat.color}"><i class='bx ${cat.icon}'></i></div>
-                        <span>${cat.nameAR}</span>
+                        <span>${Utils.escapeHTML(cat.nameAR)}</span>
                     </div>
                 `;
             }).join('');
@@ -857,7 +928,7 @@ const App = {
 
             UI.showModal(`
                 <div class="modal-header">
-                    <h2>${info.nameAR}</h2>
+                    <h2>${Utils.escapeHTML(info.nameAR)}</h2>
                     <div class="header-btns">
                         <button class="btn-primary sm-btn" onclick="window.App.openAddMedicineWithCat('${catId}')"><i class='bx bx-plus'></i> صنف جديد</button>
                         <button class="btn-ghost sm-btn" onclick="window.App.openTransferMedicine('${catId}')"><i class='bx bx-transfer'></i> نقل</button>
@@ -873,8 +944,8 @@ const App = {
                                         <img src="${imgSrc}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';">
                                     </div>
                                     <div class="med-info-overlay">
-                                        <h4>${m.nameEN} <span class="med-id-badge">#${m.id}</span></h4>
-                                        <span class="med-active-sub">${m.activeIngredient || ''}</span>
+                                        <h4>${Utils.escapeHTML(m.nameEN)} <span class="med-id-badge">#${m.id}</span></h4>
+                                        <span class="med-active-sub">${Utils.escapeHTML(m.activeIngredient || '')}</span>
                                     </div>
                                 </div>
                                 <div class="med-card-actions">
@@ -902,7 +973,7 @@ const App = {
             
             UI.showModal(`
                 <div class="modal-header">
-                    <h2>نقل صنف إلى: ${targetCat.nameAR}</h2>
+                    <h2>نقل صنف إلى: ${Utils.escapeHTML(targetCat.nameAR)}</h2>
                 </div>
                 <div class="search-bar mb-20">
                     <i class='bx bx-search'></i>
@@ -937,7 +1008,7 @@ const App = {
                 <div class="search-result-item" onclick="window.App.executeTransfer('${m.id}', '${targetCatId}')">
                     <i class='bx bx-transfer-alt'></i>
                     <div class="search-info">
-                        <span class="search-name">${m.nameEN} (كود #${m.id})</span>
+                        <span class="search-name">${Utils.escapeHTML(m.nameEN)} (كود #${m.id})</span>
                         <span class="search-sub">من قسم: ${Categories.getCategoryNameAR(m.categoryId)}</span>
                     </div>
                     <button class="sm-btn btn-secondary">سحب للقسم</button>
@@ -966,7 +1037,7 @@ const App = {
                 Sync.push(medicineId).catch(() => {});
             }
             
-            UI.showToast(`تم نقل ${med.nameEN} بنجاح ✅`, 'success');
+            UI.showToast(`تم نقل ${Utils.escapeHTML(med.nameEN)} بنجاح ✅`, 'success');
             this.openCategory(targetCatId); // Refresh category view
         } catch (err) {
             UI.showToast('فشل عملية النقل ❌', 'danger');
@@ -1265,7 +1336,7 @@ const App = {
                             <label class="form-label">فئة البند / القسم:</label>
                             <select id="m-category" class="form-select" required>
                                 <option value="">اختر القسم...</option>
-                                ${cats.map(c => `<option value="${c.id}" ${preSelectedCatId === c.id ? 'selected' : ''}>${c.nameAR || c.id}</option>`).join('')}
+                                ${cats.map(c => `<option value="${c.id}" ${preSelectedCatId === c.id ? 'selected' : ''}>${Utils.escapeHTML(c.nameAR || c.id)}</option>`).join('')}
                             </select>
                         </div>
 
@@ -1395,7 +1466,7 @@ const App = {
                         <div class="form-group">
                             <label class="form-label">القسم:</label>
                             <select id="e-category" class="form-select" required>
-                                ${cats.map(c => `<option value="${c.id}" ${c.id === (med.categoryId || 'uncategorized') ? 'selected' : ''}>${c.nameAR}</option>`).join('')}
+                                ${cats.map(c => `<option value="${c.id}" ${c.id === (med.categoryId || 'uncategorized') ? 'selected' : ''}>${Utils.escapeHTML(c.nameAR)}</option>`).join('')}
                             </select>
                         </div>
 
@@ -2040,7 +2111,7 @@ const App = {
                     <div class="session-stat-card" style="background:var(--card-bg); padding:15px; border-radius:15px; border:1px solid var(--border-color); margin-bottom:10px;">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
                             <div>
-                                <h4 style="font-weight:800">${s.name}</h4>
+                                <h4 style="font-weight:800">${Utils.escapeHTML(s.name)}</h4>
                                 <p style="font-size:11px; color:var(--text-muted)">بواسطة: ${s.created_by}</p>
                             </div>
                             <span class="badge ${s.status === 'completed' ? 'bg-success' : 'bg-primary'}">${s.status === 'completed' ? 'مكتمل' : 'جاري'}</span>
@@ -2177,7 +2248,7 @@ const App = {
                 <div class="inventory-card" style="opacity: 0.8; border-style: dashed;" onclick="window.App.openMedicineDetails('${m.id}')">
                     <div class="card-icon"><i class='bx bx-plus-circle'></i></div>
                     <div class="card-info">
-                        <h3>${m.nameEN} / ${m.nameAR || ''}</h3>
+                        <h3>${Utils.escapeHTML(m.nameEN)} / ${Utils.escapeHTML(m.nameAR || '')}</h3>
                         <div class="card-meta"><span><i class='bx bx-info-circle'></i> غير مسجل بالجرد - اضغط للإضافة</span></div>
                     </div>
                 </div>
@@ -2289,7 +2360,7 @@ const App = {
             if (typeEl && item.type) typeEl.value = item.type;
         }
 
-        UI.showToast(`✨ تم إدراج (${item.nameAR}) بنجاح`, 'success');
+        UI.showToast(`✨ تم إدراج (${Utils.escapeHTML(item.nameAR)}) بنجاح`, 'success');
     },
 
     async saveQuickAddMedicine() {
@@ -2855,9 +2926,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 const primaryCount = allMeds.filter(m => m.primaryLocation === loc.id).length;
 
                 return `
-                    <div class="square-card" onclick="window.App.openLocationDetailModal('${loc.id}')" title="استعراض أدوية ${loc.nameAR}">
+                    <div class="square-card" onclick="window.App.openLocationDetailModal('${loc.id}')" title="استعراض أدوية ${Utils.escapeHTML(loc.nameAR)}">
                         <i class='bx ${loc.icon || 'bx-map-pin'} square-icon' style="color: ${loc.color || 'var(--primary)'}"></i>
-                        <h3>${loc.nameAR}</h3>
+                        <h3>${Utils.escapeHTML(loc.nameAR)}</h3>
                         <span class="square-meta">${count} صنف</span>
                         ${primaryCount > 0 ? `<span style="font-size:10px; color:var(--primary); font-weight:600;">⭐ ${primaryCount} أساسي</span>` : ''}
                     </div>
@@ -2906,9 +2977,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                                     <img src="${img}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                                 </div>
                                 <div style="flex:1; min-width:0;">
-                                    <h4 style="margin:0; font-size:13px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${m.nameEN || m.nameAR}</h4>
+                                    <h4 style="margin:0; font-size:13px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHTML(m.nameEN || m.nameAR)}</h4>
                                     <div style="display:flex; align-items:center; gap:6px; margin-top:2px;">
-                                        <span style="font-size:11px; color:var(--text-muted);">${m.nameAR && m.nameAR !== m.nameEN ? m.nameAR : (m.activeIngredient || 'دواء')}</span>
+                                        <span style="font-size:11px; color:var(--text-muted);">${Utils.escapeHTML(m.nameAR && m.nameAR !== m.nameEN ? m.nameAR : (m.activeIngredient || 'دواء'))}</span>
                                         ${isPrimary ? '<span style="font-size:9px; background:var(--primary); color:white; padding:1px 5px; border-radius:4px; font-weight:bold;">أساسي ⭐</span>' : ''}
                                     </div>
                                 </div>
@@ -2966,7 +3037,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     <div style="display:flex; align-items:center; gap:10px;">
                         <i class='bx ${cat.icon || 'bx-category'}' style="font-size:24px; color:${cat.color || 'var(--primary)'}"></i>
                         <div>
-                            <h2 style="margin:0; font-size:18px;">${cat.nameAR}</h2>
+                            <h2 style="margin:0; font-size:18px;">${Utils.escapeHTML(cat.nameAR)}</h2>
                             <small class="text-muted">${medsInCat.length} صنف مسجل في هذا القسم</small>
                         </div>
                     </div>
@@ -2991,8 +3062,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                                     <img src="${img}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                                 </div>
                                 <div style="flex:1; min-width:0;">
-                                    <h4 style="margin:0; font-size:13px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${m.nameEN || m.nameAR}</h4>
-                                    <span style="font-size:11px; color:var(--text-muted);">${m.nameAR && m.nameAR !== m.nameEN ? m.nameAR : (m.activeIngredient || 'دواء')}</span>
+                                    <h4 style="margin:0; font-size:13px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHTML(m.nameEN || m.nameAR)}</h4>
+                                    <span style="font-size:11px; color:var(--text-muted);">${Utils.escapeHTML(m.nameAR && m.nameAR !== m.nameEN ? m.nameAR : (m.activeIngredient || 'دواء'))}</span>
                                 </div>
                                 <div style="display:flex; align-items:center; gap:6px;">
                                     <button class="btn-ghost sm-btn" onclick="window.App.openMoveCategoryModal('${m.id}', '${catId}')" title="نقل إلى تصنيف آخر" style="font-size:11px; padding:4px 8px; border-radius:6px; border:1px solid var(--border-color);">
@@ -3011,7 +3082,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     ${medsInCat.length === 0 ? `
                         <div class="empty-state" style="padding:30px; text-align:center;">
                             <i class='bx bx-capsule' style="font-size:36px; color:var(--text-muted); opacity:0.5;"></i>
-                            <p class="text-muted mt-10">لا توجد أدوية مسجلة في قسم "${cat.nameAR}" حالياً</p>
+                            <p class="text-muted mt-10">لا توجد أدوية مسجلة في قسم "${Utils.escapeHTML(cat.nameAR)}" حالياً</p>
                             <button class="btn-primary sm-btn mt-10" onclick="window.App.openAddMedicineWithCat('${catId}')">
                                 <i class='bx bx-plus'></i> إضافة أول دواء هنا
                             </button>
@@ -3042,9 +3113,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     <h2>نقل الدواء إلى تصنيف آخر</h2>
                 </div>
                 <div style="background:var(--bg-secondary); padding:12px; border-radius:12px; margin-bottom:15px;">
-                    <h3 style="margin:0; font-size:14px; font-weight:800;">${med.nameEN}</h3>
+                    <h3 style="margin:0; font-size:14px; font-weight:800;">${Utils.escapeHTML(med.nameEN)}</h3>
                     <p style="margin:4px 0 0 0; font-size:12px; color:var(--text-muted);">
-                        التصنيف الحالي: <strong style="color:var(--primary);">${currentCat ? currentCat.nameAR : med.categoryId}</strong>
+                        التصنيف الحالي: <strong style="color:var(--primary);">${Utils.escapeHTML(currentCat ? currentCat.nameAR : med.categoryId)}</strong>
                     </p>
                 </div>
                 <form onsubmit="event.preventDefault(); window.App.saveMoveCategory('${medicineId}', '${sourceCatId || ''}');">
@@ -3092,7 +3163,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             const cats = await Categories.getAllSorted();
             const newCat = cats.find(c => c.id === targetCatId);
 
-            UI.showToast(`تم نقل ${med.nameEN || med.nameAR} إلى ${newCat?.nameAR || targetCatId} بنجاح ✅`, 'success');
+            UI.showToast(`تم نقل ${Utils.escapeHTML(med.nameEN || med.nameAR)} إلى ${Utils.escapeHTML(newCat?.nameAR || targetCatId)} بنجاح ✅`, 'success');
 
             if (sourceCatId) {
                 await this.refreshAllViews(sourceCatId);
@@ -3114,7 +3185,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
             UI.showModal(`
                 <div class="modal-header">
-                    <h2>خيارات: ${med.nameEN || med.nameAR}</h2>
+                    <h2>خيارات: ${Utils.escapeHTML(med.nameEN || med.nameAR)}</h2>
                 </div>
                 <div style="display:flex; flex-direction:column; gap:10px; margin:15px 0;">
                     <button class="action-card-btn secondary" onclick="window.App.openEditMedicine('${medicineId}')" style="justify-content:flex-start; padding:12px 16px;">
@@ -3208,15 +3279,15 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const allowed = new Set(loc.allowedCategories || ['all']);
 
         UI.showModal(`
-            <div class="modal-header"><h2>تعديل مكان التخزين: ${loc.nameAR}</h2></div>
+            <div class="modal-header"><h2>تعديل مكان التخزين: ${Utils.escapeHTML(loc.nameAR)}</h2></div>
             <form onsubmit="event.preventDefault(); window.App.saveLocationForm('${id}');">
                 <div class="form-group mb-12">
                     <label class="form-label">اسم المكان:</label>
-                    <input type="text" id="loc-name-ar" class="form-input" value="${loc.nameAR}" required>
+                    <input type="text" id="loc-name-ar" class="form-input" value="${Utils.escapeHTML(loc.nameAR)}" required>
                 </div>
                 <div class="form-group mb-12">
                     <label class="form-label">الاسم بالإنجليزية:</label>
-                    <input type="text" id="loc-name-en" class="form-input" value="${loc.nameEN || ''}" placeholder="English name (optional)">
+                    <input type="text" id="loc-name-en" class="form-input" value="${Utils.escapeHTML(loc.nameEN || '')}" placeholder="English name (optional)">
                 </div>
                 <div class="form-group mb-12">
                     <label class="form-label">أيقونة المكان:</label>
@@ -3527,7 +3598,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                                         <span class="badge ${s.type === 'group' ? 'bg-info' : 'bg-secondary'}" style="padding: 3px 8px; border-radius: 6px; font-size: 11px;">
                                             ${s.type === 'group' ? '👥 جماعي' : '👤 فردي'}
                                         </span>
-                                        <h3 style="margin: 0; font-size: 15px; font-weight: 800;">${s.name}</h3>
+                                        <h3 style="margin: 0; font-size: 15px; font-weight: 800;">${Utils.escapeHTML(s.name)}</h3>
                                     </div>
                                     <span style="font-size: 11px; color: var(--text-muted);">${new Date(s.startedAt).toLocaleDateString('ar-EG')}</span>
                                 </div>
@@ -3584,7 +3655,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                                         <span class="badge ${isFinal ? 'bg-success' : 'bg-secondary'}" style="font-size: 10px; padding: 2px 6px; border-radius: 4px;">
                                             ${isFinal ? 'معتمد 🏁' : 'مؤرشف 📦'}
                                         </span>
-                                        <strong style="font-size: 14px;">${s.name}</strong>
+                                        <strong style="font-size: 14px;">${Utils.escapeHTML(s.name)}</strong>
                                     </div>
                                     <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px; display: flex; gap: 8px;">
                                         <span><i class='bx bx-user'></i> ${s.host || 'النظام'}</span>
@@ -3648,7 +3719,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                             ${allLocs.map(loc => `
                                 <label style="display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer;">
                                     <input type="checkbox" class="edit-session-loc-cb" value="${loc.id}" ${sessionLocSet.has(loc.id) ? 'checked' : ''}>
-                                    <span>${loc.nameAR}</span>
+                                    <span>${Utils.escapeHTML(loc.nameAR)}</span>
                                 </label>
                             `).join('')}
                         </div>
@@ -3907,7 +3978,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     return `
                         <div class="square-card" onclick="window.App.openAuditLocation('${loc.id}')">
                             <i class='bx ${loc.icon || 'bx-map-pin'} square-icon' style="color: ${loc.color || 'var(--primary)'}"></i>
-                            <h3>${loc.nameAR}</h3>
+                            <h3>${Utils.escapeHTML(loc.nameAR)}</h3>
                             <span class="square-meta">${stats.counted} / ${stats.total} تم جردها</span>
                             <div style="width: 80%; height: 4px; background: var(--border-color); border-radius: 2px; margin-top: 8px; overflow: hidden;">
                                 <div style="width: ${stats.progress}%; height: 100%; background: #10b981; border-radius: 2px;"></div>
@@ -4026,7 +4097,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                             <div class="square-card ${isCatDone ? 'counted' : ''}" onclick="window.App.openAuditCategory('${cat.id}')" style="cursor:pointer;">
                                 ${isCatDone ? `<span class="badge-done"><i class='bx bx-check'></i> مكتمل</span>` : ''}
                                 <i class='bx ${cat.icon || 'bx-category'} square-icon' style="color: ${cat.color || 'var(--primary)'}"></i>
-                                <h3 style="font-size:12px; margin:4px 0 2px 0;">${cat.nameAR}</h3>
+                                <h3 style="font-size:12px; margin:4px 0 2px 0;">${Utils.escapeHTML(cat.nameAR)}</h3>
                                 <span class="square-meta" style="font-size:10.5px; font-weight:600;">${catCounted} / ${catMeds.length} صنف</span>
                                 <div style="width: 80%; height: 3px; background: var(--border-color); border-radius: 2px; margin-top: 6px; overflow: hidden;">
                                     <div style="width: ${catMeds.length > 0 ? Math.round((catCounted/catMeds.length)*100) : 0}%; height: 100%; background: #10b981; border-radius: 2px;"></div>
@@ -4793,8 +4864,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     <img src="${imgUrl}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                 </div>
                 <div style="flex:1; min-width:0;">
-                    <h3 style="margin:0; font-size:14px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${med.nameEN || med.nameAR}</h3>
-                    <p style="margin:2px 0 0 0; font-size:11px; color:var(--text-muted);"><i class='bx bx-map-pin'></i> المكان: <strong style="color:var(--text-main);">${loc?.nameAR || 'المستودع'}</strong></p>
+                    <h3 style="margin:0; font-size:14px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHTML(med.nameEN || med.nameAR)}</h3>
+                    <p style="margin:2px 0 0 0; font-size:11px; color:var(--text-muted);"><i class='bx bx-map-pin'></i> المكان: <strong style="color:var(--text-main);">${Utils.escapeHTML(loc?.nameAR || 'المستودع')}</strong></p>
                 </div>
             </div>
 
@@ -5093,7 +5164,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         <option value="live" ${currentSource === 'live' ? 'selected' : ''}>📌 المخزون العام الحالي (حسب آخر جرد معتمد)</option>
                         ${sessions.map(s => `
                             <option value="${s.id}" ${currentSource === s.id ? 'selected' : ''}>
-                                📋 ${s.name} (${s.status === 'finalized' ? 'معتمد 🏁' : (s.status === 'active' ? 'جاري 🟢' : 'معلق ⏸️')}) — ${new Date(s.startedAt).toLocaleDateString('ar-EG')}
+                                📋 ${Utils.escapeHTML(s.name)} (${s.status === 'finalized' ? 'معتمد 🏁' : (s.status === 'active' ? 'جاري 🟢' : 'معلق ⏸️')}) — ${new Date(s.startedAt).toLocaleDateString('ar-EG')}
                             </option>
                         `).join('')}
                     </select>
@@ -5352,8 +5423,31 @@ App.handleAdminUnlock = async function() {
 
 window.onerror = (msg, url, line, col, error) => {
     console.error('Dawaa Global Catch:', { msg, url, line, error });
-    return false; // allow standard error logging
+    // v18.10.0: Show user-friendly toast
+    if (typeof UI !== 'undefined' && UI.showToast) {
+        UI.showToast('حدث خطأ غير متوقع — التطبيق يعمل بشكل طبيعي 🔧', 'warning');
+    }
+    // Log to Firestore for monitoring (fire-and-forget)
+    try {
+        const firestore = window.db || (window.firebase?.firestore ? window.firebase.firestore() : null);
+        if (firestore) {
+            firestore.collection('error_logs').add({
+                msg: String(msg).substring(0, 500),
+                url: String(url || '').substring(0, 200),
+                line, col,
+                stack: error?.stack ? String(error.stack).substring(0, 1000) : '',
+                userName: window.App?.userName || 'unknown',
+                timestamp: (window.firebase || firebase).firestore.FieldValue.serverTimestamp(),
+                version: window.App?.VERSION || 'unknown'
+            }).catch(() => {});
+        }
+    } catch (_) {}
+    return false;
 };
+
+window.addEventListener('unhandledrejection', (event) => {
+    console.error('Dawaa Unhandled Promise:', event.reason);
+});
 
 const _boot = async () => {
     window.App = App;
