@@ -2218,6 +2218,7 @@ App.handleLogout = async function() {
             await auth.signOut();
             // Clear local states if any
             localStorage.removeItem('dawaa-temp-name');
+            localStorage.removeItem('dawaa_active_user');
             window.location.reload();
         } catch (err) {
             UI.showToast('فشل في تسجيل الخروج', 'danger');
@@ -3306,7 +3307,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 }).join('')}
             </div>
 
-            <div class="form-actions">
+            <div class="form-actions" style="display:flex; justify-content:space-between; align-items:center; margin-top:16px;">
+                <button type="button" class="btn-ghost text-danger" onclick="window.App.handleLogout()" style="display:flex; align-items:center; gap:6px; color:var(--danger, #ef4444);">
+                    <i class='bx bx-log-out'></i> تسجيل الخروج من النظام
+                </button>
                 <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إغلاق</button>
             </div>
         `);
