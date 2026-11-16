@@ -27,12 +27,12 @@ window.auth = auth;
 window.storage = storage;
 
 /**
- * Dawaa App Orchestrator (v18.7.8)
+ * Dawaa App Orchestrator (v18.7.9)
  * Cache-Busting Service Worker Logic Enabled.
  */
 
 const App = {
-    VERSION: '18.7.8', // Universal Sovereign v18.7.8
+    VERSION: '18.7.9', // High-Speed Image Engine v18.7.9
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -41,13 +41,34 @@ const App = {
     unreadCount: 0,
 
     /**
-     * Image Upload Helper for Cloud Storage (v9.8.0)
+     * Image Upload Helper for Cloud Storage (v18.7.9)
+     * Auto-compresses raw files, sets JPEG metadata, and uploads in milliseconds.
      */
-    async uploadImage(file, medId) {
-        if (!file) return null;
+    async uploadImage(fileOrBlob, medId) {
+        if (!fileOrBlob) return null;
         try {
-            const storageRef = storage.ref(`medicine_images/${medId}_${Date.now()}.jpg`);
-            const snapshot = await storageRef.put(file);
+            const stor = (typeof window.storage !== 'undefined' ? window.storage : null) || 
+                         (typeof storage !== 'undefined' ? storage : null) || 
+                         (window.firebase?.storage ? window.firebase.storage() : null);
+            if (!stor) {
+                console.warn('Firebase Storage not initialized.');
+                return null;
+            }
+
+            // Ensure we upload a compressed lightweight JPEG blob (max 800px, ~40KB)
+            let uploadBlob = fileOrBlob;
+            if (fileOrBlob instanceof File && typeof Utils !== 'undefined' && Utils.compressImage) {
+                try {
+                    const comp = await Utils.compressImage(fileOrBlob, 800, 0.75);
+                    if (comp?.blob) uploadBlob = comp.blob;
+                } catch (ce) {
+                    console.warn('Pre-upload compression fallback:', ce);
+                }
+            }
+
+            const storageRef = stor.ref(`medicine_images/${medId}_${Date.now()}.jpg`);
+            const metadata = { contentType: 'image/jpeg', cacheControl: 'public,max-age=2592000' };
+            const snapshot = await storageRef.put(uploadBlob, metadata);
             return await snapshot.ref.getDownloadURL();
         } catch (err) {
             console.error('Storage Upload Error:', err);
@@ -1275,14 +1296,31 @@ const App = {
         }
     },
 
-    handleImagePreview(input, previewId) {
-        if (input.files && input.files[0]) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const container = document.getElementById(previewId);
-                container.innerHTML = `<img src="${e.target.result}">`;
-            };
-            reader.readAsDataURL(input.files[0]);
+    async handleImagePreview(input, previewId) {
+        if (!input.files || !input.files[0]) return;
+        const file = input.files[0];
+        const container = document.getElementById(previewId);
+        if (container) {
+            container.innerHTML = `<i class='bx bx-loader-alt bx-spin' style='font-size:24px; color:var(--primary);'></i>`;
+        }
+
+        try {
+            const result = (typeof Utils !== 'undefined' && Utils.compressImage)
+                ? await Utils.compressImage(file, 800, 0.75)
+                : { blob: file, dataUrl: await Utils.fileToBase64(file) };
+
+            input._compressedBlob = result.blob;
+            input._compressedDataUrl = result.dataUrl;
+
+            if (container) {
+                container.innerHTML = `<img src="${result.dataUrl}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;">`;
+            }
+        } catch (err) {
+            console.warn('Image preview compression fallback:', err);
+            if (container && typeof Utils !== 'undefined' && Utils.fileToBase64) {
+                const fallbackUrl = await Utils.fileToBase64(file);
+                container.innerHTML = `<img src="${fallbackUrl}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;">`;
+            }
         }
     },
 
@@ -1307,11 +1345,21 @@ const App = {
 
             const fileInput = document.getElementById('m-file');
             let imgData = '';
-            let file = null;
+            let fileBlob = null;
 
             if (fileInput && fileInput.files && fileInput.files[0]) {
-                file = fileInput.files[0];
-                imgData = await Utils.fileToBase64(file);
+                const rawFile = fileInput.files[0];
+                if (fileInput._compressedDataUrl && fileInput._compressedBlob) {
+                    imgData = fileInput._compressedDataUrl;
+                    fileBlob = fileInput._compressedBlob;
+                } else if (typeof Utils !== 'undefined' && Utils.compressImage) {
+                    const comp = await Utils.compressImage(rawFile, 800, 0.75);
+                    imgData = comp.dataUrl;
+                    fileBlob = comp.blob;
+                } else {
+                    imgData = await Utils.fileToBase64(rawFile);
+                    fileBlob = rawFile;
+                }
             }
 
             const medId = barcode || (await Categories.generateNextId()) || ('med_' + Date.now());
@@ -1350,20 +1398,24 @@ const App = {
 
             await this.refreshAllViews(sourceCat);
 
-            // Background Cloud Upload if requested
-            if (file && shouldSync && typeof this.uploadImage === 'function') {
-                this.uploadImage(file, medId).then(async (url) => {
-                    if (url) {
-                        const m = await DB.get('medicineMaster', medId);
-                        if (m) {
-                            m.imagePath = url;
-                            await DB.put('medicineMaster', m);
-                            if (typeof Sync !== 'undefined' && Sync.push) Sync.push(medId);
+            // Fast Cloud Sync & Image Upload
+            if (shouldSync) {
+                if (fileBlob && typeof this.uploadImage === 'function') {
+                    this.uploadImage(fileBlob, medId).then(async (url) => {
+                        if (url) {
+                            const m = await DB.get('medicineMaster', medId);
+                            if (m) {
+                                m.imagePath = url;
+                                await DB.put('medicineMaster', m);
+                                if (typeof Sync !== 'undefined' && Sync.push) await Sync.push(medId);
+                                await this.refreshAllViews(sourceCat);
+                            }
                         }
-                    }
-                }).catch(e => console.warn('Cloud upload failed:', e));
-            } else if (shouldSync && typeof Sync !== 'undefined' && Sync.push) {
-                Sync.push(medId);
+                    }).catch(e => console.warn('Cloud image upload warning:', e));
+                }
+                if (typeof Sync !== 'undefined' && Sync.push) {
+                    await Sync.push(medId);
+                }
             }
 
         } catch (err) {
@@ -1378,12 +1430,22 @@ const App = {
         try {
             const fileInput = document.getElementById('e-file');
             const med = await DB.get('medicineMaster', id);
-            let file = null;
+            let fileBlob = null;
             
             let imgData = med.imagePath;
-            if (fileInput.files && fileInput.files[0]) {
-                file = fileInput.files[0];
-                imgData = await Utils.fileToBase64(file);
+            if (fileInput && fileInput.files && fileInput.files[0]) {
+                const rawFile = fileInput.files[0];
+                if (fileInput._compressedDataUrl && fileInput._compressedBlob) {
+                    imgData = fileInput._compressedDataUrl;
+                    fileBlob = fileInput._compressedBlob;
+                } else if (typeof Utils !== 'undefined' && Utils.compressImage) {
+                    const comp = await Utils.compressImage(rawFile, 800, 0.75);
+                    imgData = comp.dataUrl;
+                    fileBlob = comp.blob;
+                } else {
+                    imgData = await Utils.fileToBase64(rawFile);
+                    fileBlob = rawFile;
+                }
             }
 
             const selectedLocIds = [];
@@ -1410,20 +1472,27 @@ const App = {
             UI.showToast('تم تحديث بيانات الدواء بنجاح ✨', 'success');
             await this.refreshAllViews(updated.categoryId);
 
-            // Background Cloud Upload
-            if (file && typeof this.uploadImage === 'function') {
-                UI.showToast('جاري تحديث الصورة في السحابة... ☁️', 'info');
-                this.uploadImage(file, id).then(async (url) => {
-                    if (url) {
-                        const m = await DB.get('medicineMaster', id);
-                        m.imagePath = url;
-                        await Categories.saveMedicine(m);
-                        if (typeof Sync !== 'undefined' && Sync.push) Sync.push(id);
-                        UI.showToast('تم تحديث الصورة السحابية بنجاح ✨', 'success');
-                    }
-                });
-            } else if (typeof Sync !== 'undefined' && Sync.push) {
-                Sync.push(id);
+            // Cloud Upload & Sync
+            const shouldSyncEdit = document.getElementById('e-sync')?.checked ?? true;
+            if (shouldSyncEdit) {
+                if (fileBlob && typeof this.uploadImage === 'function') {
+                    UI.showToast('جاري تحديث الصورة في السحابة... ☁️', 'info');
+                    this.uploadImage(fileBlob, id).then(async (url) => {
+                        if (url) {
+                            const m = await DB.get('medicineMaster', id);
+                            if (m) {
+                                m.imagePath = url;
+                                await Categories.saveMedicine(m);
+                                if (typeof Sync !== 'undefined' && Sync.push) await Sync.push(id);
+                                await this.refreshAllViews(m.categoryId);
+                                UI.showToast('تم تحديث الصورة السحابية بنجاح ✨', 'success');
+                            }
+                        }
+                    }).catch(e => console.warn('Cloud image upload warning:', e));
+                }
+                if (typeof Sync !== 'undefined' && Sync.push) {
+                    await Sync.push(id);
+                }
             }
         } catch (err) {
             UI.showToast('فشل تحديث البيانات', 'danger');

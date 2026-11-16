@@ -138,7 +138,9 @@ export const Sync = {
             med.lastSynced = new Date().toISOString();
             
             const syncMed = { ...med, syncStatus: 'global_v2' };
-            if (syncMed.imagePath?.startsWith('data:image')) {
+            
+            // Allow lightweight compressed images (<120KB) to sync to Firestore doc; strip only giant legacy data URLs (>120KB)
+            if (syncMed.imagePath?.startsWith('data:image') && syncMed.imagePath.length > 120000) {
                 syncMed.imagePath = ''; 
             }
 
@@ -153,9 +155,16 @@ export const Sync = {
                 const docRef = firestore.doc(this.CLOUD_PATH);
                 const doc = await docRef.get();
                 let masterData = doc.exists ? (doc.data().masterData || []) : [];
+                
+                // In the legacy multi-item array, strip data:image to avoid 1MB document limit
+                const legacyMed = { ...syncMed };
+                if (legacyMed.imagePath?.startsWith('data:image')) {
+                    legacyMed.imagePath = '';
+                }
+
                 const existingIdx = masterData.findIndex(m => m.id === med.id);
-                if (existingIdx > -1) masterData[existingIdx] = syncMed;
-                else masterData.push(syncMed);
+                if (existingIdx > -1) masterData[existingIdx] = legacyMed;
+                else masterData.push(legacyMed);
 
                 await docRef.set({ 
                     masterData,
