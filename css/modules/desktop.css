@@ -1,0 +1,394 @@
+/* ==========================================================================
+   Desktop & Tablet Responsive Layout (v18.11.0)
+   Applied at min-width: 768px (tablet) and 1024px (desktop)
+   ========================================================================== */
+
+/* ── Tablet (768px+) ── */
+@media (min-width: 768px) {
+
+    /* Wider container */
+    .container {
+        max-width: 900px;
+        padding: 0 30px;
+    }
+
+    /* Stats grid: 3 columns on tablet */
+    .stats-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+    .stat-card.total {
+        grid-column: span 3;
+    }
+
+    /* Category grid: 4 columns */
+    .category-grid {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+    }
+
+    /* Medicine selection: 3 columns */
+    .medicine-selection-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+    }
+
+    /* Modal: centered instead of bottom-sheet */
+    .modal-overlay.show {
+        align-items: center;
+    }
+
+    .bottom-sheet {
+        max-width: 560px;
+        border-radius: 24px;
+        margin: 20px;
+        max-height: 85vh;
+    }
+
+    /* Quick actions wider */
+    .quick-actions-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    /* Audit grid: 3 columns */
+    .audit-square-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+    }
+
+    /* Reports: 2 columns */
+    .reports-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    /* Creation choices side by side */
+    .creation-choice-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    /* Location checks: 3 columns */
+    .loc-check-list {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    /* Toast wider */
+    .toast {
+        max-width: 450px;
+    }
+}
+
+
+/* ── Desktop (1024px+) ── */
+@media (min-width: 1024px) {
+
+    /* Full desktop width */
+    .container {
+        max-width: 1100px;
+        padding: 0 40px;
+    }
+
+    /* ── Sidebar Navigation ── */
+    .bottom-nav {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        right: 0;
+        left: auto;
+        width: 220px;
+        height: 100vh;
+        border-top: none;
+        border-left: 1px solid var(--border-color);
+        background: rgba(255, 255, 255, 0.95);
+        -webkit-backdrop-filter: blur(20px);
+        backdrop-filter: blur(20px);
+        padding: 90px 12px 20px;
+        z-index: 99;
+    }
+
+    .nav-content {
+        flex-direction: column;
+        justify-content: flex-start;
+        align-items: stretch;
+        gap: 6px;
+        height: auto;
+    }
+
+    .nav-item {
+        flex-direction: row;
+        justify-content: flex-start;
+        gap: 12px;
+        padding: 12px 16px;
+        border-radius: 14px;
+        flex: unset;
+    }
+
+    .nav-item:hover {
+        background: var(--primary-light);
+        color: var(--primary);
+    }
+
+    .nav-item.active {
+        background: var(--primary-light);
+    }
+
+    .nav-item i {
+        font-size: 20px;
+    }
+
+    .nav-item span {
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    /* Hide the floating add button in sidebar mode */
+    .nav-action-btn {
+        position: relative;
+        top: 0;
+        width: auto;
+        margin: 12px 0;
+    }
+
+    .nav-action-btn button {
+        width: 100%;
+        height: 48px;
+        border-radius: 14px;
+        font-size: 20px;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+
+    /* ── Main content offset for sidebar ── */
+    body {
+        margin-right: 220px;
+    }
+
+    .app-header {
+        margin-right: 0;
+    }
+
+    /* No bottom padding needed */
+    .view {
+        padding-bottom: 40px;
+    }
+
+    /* Stats: 4 columns */
+    .stats-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+    .stat-card.total {
+        grid-column: span 2;
+    }
+
+    /* Category: 5 columns */
+    .category-grid {
+        grid-template-columns: repeat(5, 1fr);
+    }
+
+    /* Medicine: 4 columns */
+    .medicine-selection-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+
+    /* Audit: 4 columns */
+    .audit-square-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+
+    /* Quick actions: 3 columns */
+    .quick-actions-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    /* Reports: 2 columns */
+    .reports-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    /* Form rows smarter */
+    .form-row {
+        gap: 20px;
+    }
+
+    /* Header wider */
+    .app-logo h1 {
+        font-size: 24px;
+    }
+
+    .user-name {
+        font-size: 14px;
+    }
+
+    .greeting {
+        font-size: 11px;
+    }
+
+    /* Search bar bigger */
+    .search-bar {
+        height: 54px;
+    }
+
+    .search-bar input {
+        font-size: 15px;
+    }
+
+    /* Bigger view headers */
+    .view-header h2 {
+        font-size: 22px;
+    }
+
+    /* Dashboard welcome */
+    .dashboard-welcome h2 {
+        font-size: 24px;
+    }
+
+    /* Dual entry: wider spacing */
+    .dual-entry-container {
+        gap: 20px;
+    }
+
+    /* Location boxes side by side */
+    .location-box {
+        padding: 20px;
+    }
+
+    /* Bigger buttons on desktop */
+    .btn-primary {
+        height: 52px;
+        font-size: 16px;
+    }
+
+    /* Cards hover effect more prominent */
+    .inventory-card:hover {
+        box-shadow: var(--shadow-md);
+        transform: translateX(-3px);
+    }
+
+    .stat-card:hover {
+        transform: translateY(-4px);
+        box-shadow: var(--shadow-lg);
+    }
+
+    /* Segmented nav wider */
+    .segmented-nav {
+        max-width: 500px;
+    }
+
+    /* Auth card bigger on desktop */
+    .auth-card {
+        max-width: 440px;
+        padding: 50px 40px;
+    }
+
+    /* Toast position adjusted for sidebar */
+    .toast {
+        bottom: 30px;
+        left: calc(50% - 110px);
+    }
+
+    /* Settings grid: always 2 columns */
+    .settings-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    /* Breadcrumbs wider */
+    .breadcrumbs-bar {
+        padding: 12px 20px;
+    }
+
+    /* Audit toolbar horizontal */
+    .audit-toolbar {
+        flex-direction: row;
+        align-items: center;
+    }
+
+    .audit-search-wrapper {
+        max-width: 400px;
+    }
+}
+
+
+/* ── Wide Desktop (1400px+) ── */
+@media (min-width: 1400px) {
+
+    .container {
+        max-width: 1280px;
+    }
+
+    /* Wider sidebar */
+    .bottom-nav {
+        width: 250px;
+    }
+
+    body {
+        margin-right: 250px;
+    }
+
+    /* Stats: 4 columns wider */
+    .stats-grid {
+        gap: 20px;
+    }
+
+    /* Category: 6 columns */
+    .category-grid {
+        grid-template-columns: repeat(6, 1fr);
+    }
+
+    /* Medicine: 5 columns */
+    .medicine-selection-grid {
+        grid-template-columns: repeat(5, 1fr);
+    }
+
+    /* Audit: 5 columns */
+    .audit-square-grid {
+        grid-template-columns: repeat(5, 1fr);
+    }
+
+    /* Quick actions: 4 columns */
+    .quick-actions-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+
+    /* Toast adjusted */
+    .toast {
+        left: calc(50% - 125px);
+    }
+}
+
+
+/* ── Dark Mode Desktop Fixes ── */
+@media (min-width: 1024px) {
+    body.dark-mode .bottom-nav {
+        background: rgba(15, 23, 42, 0.95);
+        border-left-color: var(--border-color);
+    }
+
+    body.dark-mode .nav-item:hover {
+        background: rgba(59, 130, 246, 0.1);
+    }
+
+    body.dark-mode .nav-item.active {
+        background: rgba(59, 130, 246, 0.15);
+    }
+}
+
+
+/* ── Print Layout (Desktop) ── */
+@media print {
+    .bottom-nav,
+    .app-header,
+    .toast,
+    .modal-overlay,
+    .update-banner {
+        display: none !important;
+    }
+
+    body {
+        margin-right: 0 !important;
+    }
+
+    .container {
+        max-width: 100% !important;
+    }
+
+    .view {
+        padding-bottom: 0 !important;
+    }
+}

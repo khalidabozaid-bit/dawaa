@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.10.0', // 15 improvements: XSS protection, medicine cache, retry/backoff, dark auth, dashboard cache, notifications, PWA install, dead code cleanup, error boundary, a11y, manifest fix
+    VERSION: '18.11.0', // Desktop responsive layout — sidebar nav, wider grids, centered modals, tablet/desktop/wide breakpoints
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   

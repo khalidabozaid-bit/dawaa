@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'dawaa-cache-v18.10.0';
+const CACHE_NAME = 'dawaa-cache-v18.11.0';
 const IMAGE_CACHE_NAME = 'dawaa-images-v1';
 const MAX_IMAGES = 1000;
 
@@ -15,6 +15,7 @@ const ASSETS_TO_CACHE = [
   './css/modules/components.css',
   './css/modules/views.css',
   './css/modules/dark.css',
+  './css/modules/desktop.css',
   './css/modules/auth.css',
   './js/core/db.js',
   './js/core/ui.js',
