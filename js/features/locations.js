@@ -176,5 +176,24 @@ export const Locations = {
             // 2. Fallback to location's allowed category rules
             return allowedCatIds.has(m.categoryId);
         });
+    },
+
+    /**
+     * Ensures a category is in a location's allowedCategories list.
+     * If location uses 'all', this is a no-op.
+     */
+    async addCategoryToLocation(locationId, categoryId) {
+        if (!locationId || !categoryId) return;
+        const loc = await this.get(locationId);
+        if (!loc) return;
+        
+        // If location allows all categories, no need to add
+        if (!loc.allowedCategories || loc.allowedCategories.includes('all')) return;
+        
+        // Add category if not already present
+        if (!loc.allowedCategories.includes(categoryId)) {
+            loc.allowedCategories.push(categoryId);
+            await this.save(loc);
+        }
     }
 };

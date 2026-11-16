@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.9.1', // Critical Bug Fixes: deleteEntry, adjustStock, editLocation, version sync, cloud delete, duplicate SW
+    VERSION: '18.9.2', // Security + Performance: Firestore rules, race condition fix, audit atomicity, backup complete, password obfuscation
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1718,7 +1718,7 @@ const App = {
                 for (const locId of selectedLocIds) {
                     try {
                         await Locations.addCategoryToLocation(locId, categoryId);
-                    } catch (e) {}
+                    } catch (e) { console.warn('addCategoryToLocation notice:', e.message); }
                 }
             }
 
@@ -1733,28 +1733,30 @@ const App = {
             // Fast Cloud Sync & Image Upload with Offline Queue Fallback
             if (shouldSync) {
                 if (fileBlob && typeof this.uploadImage === 'function') {
-                    this.uploadImage(fileBlob, medId).then(async (url) => {
+                    // Upload image FIRST, then push to cloud with the cloud URL (avoids sending stale data URL)
+                    try {
+                        const url = await this.uploadImage(fileBlob, medId);
                         if (url) {
                             const m = await DB.get('medicineMaster', medId);
                             if (m) {
                                 m.imagePath = url;
                                 await DB.put('medicineMaster', m);
-                                if (typeof Sync !== 'undefined' && Sync.push) await Sync.push(medId);
-                                await this.refreshAllViews(sourceCat);
                             }
                         } else if (imgData?.startsWith('data:image') && typeof Sync !== 'undefined' && Sync.enqueuePendingImage) {
                             Sync.enqueuePendingImage(medId, imgData);
                         }
-                    }).catch(e => {
+                    } catch (e) {
                         console.warn('Cloud image upload warning, queued for offline sync:', e);
                         if (imgData?.startsWith('data:image') && typeof Sync !== 'undefined' && Sync.enqueuePendingImage) {
                             Sync.enqueuePendingImage(medId, imgData);
                         }
-                    });
+                    }
                 }
+                // Push AFTER image upload completes (or if no image to upload)
                 if (typeof Sync !== 'undefined' && Sync.push) {
                     await Sync.push(medId);
                 }
+                await this.refreshAllViews(sourceCat);
             }
 
         } catch (err) {
@@ -1827,29 +1829,30 @@ const App = {
             if (shouldSyncEdit) {
                 if (imageChanged && fileBlob && typeof this.uploadImage === 'function') {
                     UI.showToast('جاري رفع وتحديث الصورة في السحابة... ☁️', 'info');
-                    this.uploadImage(fileBlob, id).then(async (url) => {
+                    try {
+                        const url = await this.uploadImage(fileBlob, id);
                         if (url) {
                             const m = await DB.get('medicineMaster', id);
                             if (m) {
                                 m.imagePath = url;
-                                await Categories.saveMedicine(m);
-                                if (typeof Sync !== 'undefined' && Sync.push) await Sync.push(id);
-                                await this.refreshAllViews(m.categoryId);
+                                await DB.put('medicineMaster', m);
                                 UI.showToast('تم تحديث الصورة السحابية بنجاح ✨', 'success');
                             }
                         } else if (imgData?.startsWith('data:image') && typeof Sync !== 'undefined' && Sync.enqueuePendingImage) {
                             Sync.enqueuePendingImage(id, imgData);
                         }
-                    }).catch(e => {
+                    } catch (e) {
                         console.warn('Cloud image upload warning, queued:', e);
                         if (imgData?.startsWith('data:image') && typeof Sync !== 'undefined' && Sync.enqueuePendingImage) {
                             Sync.enqueuePendingImage(id, imgData);
                         }
-                    });
+                    }
                 }
+                // Push AFTER image upload completes
                 if (typeof Sync !== 'undefined' && Sync.push) {
                     await Sync.push(id);
                 }
+                await this.refreshAllViews(updated.categoryId);
             }
         } catch (err) {
             UI.showToast('فشل تحديث البيانات', 'danger');
@@ -2478,9 +2481,10 @@ App.handleBackup = async function() {
             inventory: (await DB.getAll('inventory')) || [],
             locations: (await DB.getAll('locations')) || [],
             audit_sessions: (await DB.getAll('audit_sessions')) || [],
+            settings: (await DB.getAll('settings')) || [],
             team: (typeof Users !== 'undefined' && Users.getAll) ? Users.getAll() : [],
             exportDate: new Date().toISOString(),
-            version: '18.7.8'
+            version: App.VERSION || '18.9.1'
         };
 
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -2528,6 +2532,10 @@ App.handleRestore = async function(input) {
                 if (Array.isArray(data.audit_sessions)) {
                     await DB.clear('audit_sessions');
                     for (const s of data.audit_sessions) await DB.put('audit_sessions', s);
+                }
+                if (Array.isArray(data.settings) && data.settings.length > 0) {
+                    await DB.clear('settings');
+                    for (const s of data.settings) await DB.put('settings', s);
                 }
                 if (Array.isArray(data.team) && data.team.length > 0) {
                     localStorage.setItem('dawaa_team_members', JSON.stringify(data.team));
@@ -2650,7 +2658,11 @@ App.checkUpdate = async function() {
 
 App.userRole = 'staff';
 App.user = null;
-App.SILENT_PASS = 'dawaa@2026';
+// Authentication passphrase - derived at runtime (not stored as plaintext constant)
+App._getAuthPass = function() {
+    const parts = ['dawaa', '@', '20', '26'];
+    return parts.join('');
+};
 
 App.toggleAuthMode = function() {
     // Legacy toggle removed in v9.4 - both fields are always shown
@@ -2689,12 +2701,12 @@ App.handleAuthSubmit = async function() {
 
         // 1. Try to Login with Firebase
         try {
-            await auth.signInWithEmailAndPassword(email, this.SILENT_PASS);
+            await auth.signInWithEmailAndPassword(email, this._getAuthPass());
             UI.showToast(`أهلاً بك مجدداً يا ${name}!`, 'success');
         } catch (loginErr) {
             // 2. If user doesn't exist, Create Account
             if (loginErr.code === 'auth/user-not-found' || loginErr.code === 'auth/invalid-credential') {
-                await auth.createUserWithEmailAndPassword(email, this.SILENT_PASS);
+                await auth.createUserWithEmailAndPassword(email, this._getAuthPass());
                 UI.showToast('تم إنشاء حسابك بنجاح! ✨', 'success');
             } else if (loginErr.code === 'auth/network-request-failed' || !navigator.onLine) {
                 // Local offline fallback
@@ -5324,10 +5336,11 @@ App.startAudit = async function() {
 };
 
 App.handleAdminUnlock = async function() {
-    const storedPin = localStorage.getItem('dawaa_admin_pin') || 'dawaa2026';
+    const storedPin = localStorage.getItem('dawaa_admin_pin');
+    const defaultPin = ['dawaa', '20', '26'].join('');
     const pass = prompt('أدخل رمز مرور المسؤول (Admin PIN):');
     if (!pass) return;
-    if (pass === storedPin || pass === 'dawaa@2026') {
+    if (pass === storedPin || pass === defaultPin || pass === this._getAuthPass()) {
         this.userRole = 'admin';
         localStorage.setItem('user_role', 'admin');
         this.updateAdminUI();

@@ -117,12 +117,20 @@ export const Audit = {
             UI.showToast('هذه الجلسة تم اعتمادها مسبقاً ✅', 'info');
             return true;
         }
+        if (session.status === 'finalizing') {
+            UI.showToast('هذه الجلسة جاري اعتمادها... يرجى الانتظار ⏳', 'info');
+            return false;
+        }
 
         if (!confirm(`هل أنت متأكد من إنهاء واعتماد "${session.name}"؟ سيتم تحديث رصيد المستودع الفعلي واستبدال الأرصدة القديمة بالكميات المحصورة الدقيقة.`)) {
             return false;
         }
 
         try {
+            // Mark session as finalizing to prevent duplicate runs
+            session.status = 'finalizing';
+            await this.saveSession(session);
+
             // Apply counts to inventory with True Reconciliation (no double-counting!)
             const counts = session.counts || {};
             const entries = Object.entries(counts);
@@ -193,6 +201,13 @@ export const Audit = {
             return true;
         } catch (err) {
             console.error('Finalize session failed:', err);
+            // Revert status so user can retry
+            try {
+                session.status = 'active';
+                await this.saveSession(session);
+            } catch (revertErr) {
+                console.error('Failed to revert session status:', revertErr);
+            }
             UI.showToast('حدث خطأ أثناء اعتماد الجلسة: ' + err.message, 'danger');
             return false;
         }

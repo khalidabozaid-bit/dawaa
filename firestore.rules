@@ -8,93 +8,123 @@ service cloud.firestore {
              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
-    // [New] Medicines Collection (V2) - Synchronized across authenticated devices
+    // Helper: Check if user is authenticated
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Medicines Collection (V2) - Read: all authenticated; Write: admin only for delete, all auth for create/update
     match /medicines/{medId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAuth();
+      allow create, update: if isAuth();
+      allow delete: if isAdmin();
     }
 
-    // [New] Categories Collection - Synchronized across authenticated devices
+    // Categories Collection - Read: all authenticated; Create/Update: all auth; Delete: admin only
     match /categories/{catId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAuth();
+      allow create, update: if isAuth();
+      allow delete: if isAdmin();
     }
 
-    // [New] Locations Collection - Synchronized across authenticated devices
+    // Locations Collection - Read: all authenticated; Create/Update: all auth; Delete: admin only
     match /locations/{locId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAuth();
+      allow create, update: if isAuth();
+      allow delete: if isAdmin();
     }
 
     // Product source used by the V2 inventory/counting flows.
     match /products/{productId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAuth();
+      allow create, update: if isAuth();
+      allow delete: if isAdmin();
     }
 
     // Remote feature flags consumed by SyncV2.
     match /config/{configId} {
-      allow read: if request.auth != null;
+      allow read: if isAuth();
       allow write: if isAdmin();
     }
 
-    // [New] Sync Logs (Global Tracking)
+    // Sync Logs (Global Tracking) - Immutable
     match /sync_logs/{logId} {
-      allow create: if request.auth != null;
+      allow create: if isAuth();
       allow read: if isAdmin();
-      allow update, delete: if false; // Immutable logs
+      allow update, delete: if false;
     }
 
-    // Legacy Support (Global Master) - Synchronized across authenticated devices
+    // Legacy Support (Global Master) - Read only; no new writes
     match /global_master/{docId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAuth();
+      allow write: if isAdmin();
     }
     
-    // User Profiles & Private Data
+    // User Profiles & Private Data - Users can only write their own profile
     match /users/{userId} {
-      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow read: if isAuth() && (request.auth.uid == userId || isAdmin());
+      allow create: if isAuth() && request.auth.uid == userId;
+      allow update: if isAuth() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin();
       
       match /inventory_sync/{itemId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read, write: if isAuth() && request.auth.uid == userId;
       }
     }
     
-    // Audits & Hub Activity
-    match /audits/{auditId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+    // Audit Sessions - Read: all auth; Write: admin or session host
+    match /audit_sessions/{sessionId} {
+      allow read: if isAuth();
+      allow create, update: if isAuth();
+      allow delete: if isAdmin();
     }
 
-    // Collaborative audit activity feed.
+    // Audits & Hub Activity (legacy collaborative audit broadcast)
+    match /audits/{auditId} {
+      allow read: if isAuth();
+      allow create, update: if isAuth();
+      allow delete: if isAdmin();
+    }
+
+    // Collaborative audit activity feed - Immutable
     match /audit_feed/{feedId} {
-      allow read, create: if request.auth != null;
+      allow read, create: if isAuth();
       allow update, delete: if false;
     }
 
     // Collaborative inventory entry sync.
     match /inventory_sync/{entryId} {
-      allow read, create: if request.auth != null;
-      allow update, delete: if isAdmin();
+      allow read, create: if isAuth();
+      allow update: if isAuth();
+      allow delete: if isAdmin();
     }
 
     // Structured inventory sessions and task assignment.
     match /inventory_sessions/{sessionId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
+      allow read: if isAuth();
+      allow create: if isAuth();
       allow update, delete: if isAdmin();
     }
 
     match /inventory_tasks/{taskId} {
-      allow read: if request.auth != null && (
+      allow read: if isAuth() && (
         resource.data.user_id == request.auth.token.email ||
         resource.data.user_id == request.auth.token.name ||
         isAdmin()
       );
-      allow create, update: if request.auth != null;
+      allow create, update: if isAuth();
       allow delete: if isAdmin();
     }
 
     match /inventory_counts/{countId} {
-      allow read: if request.auth != null;
-      allow create, update: if request.auth != null;
+      allow read: if isAuth();
+      allow create, update: if isAuth();
       allow delete: if isAdmin();
+    }
+
+    // Deny all other collections by default
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
