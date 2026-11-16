@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'dawaa-cache-v18.9.0';
+const CACHE_NAME = 'dawaa-cache-v18.9.1';
 const IMAGE_CACHE_NAME = 'dawaa-images-v1';
 const MAX_IMAGES = 1000;
 
@@ -109,7 +109,7 @@ async function limitCacheSize(cacheName, maxItems) {
         await cache.delete(keys[i]);
       }
     }
-  } catch (e) {}
+  } catch (e) { console.warn('Cache size limit error:', e); }
 }
 
 self.addEventListener('fetch', (event) => {

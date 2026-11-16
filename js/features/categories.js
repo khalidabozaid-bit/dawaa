@@ -468,6 +468,10 @@ export const Categories = {
         if (!med.categoryId) med.categoryId = 'uncategorized';
         if (!med.lastUpdated) med.lastUpdated = new Date().toISOString();
         await DB.put('medicineMaster', med);
+        // Push to cloud
+        if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+            window.Sync.push(med.id).catch(() => {});
+        }
         return med.id;
     },
 

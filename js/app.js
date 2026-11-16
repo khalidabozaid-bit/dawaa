@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.9.0', // Warehouse Restructuring: Pure Catalog + Location Hub + Dual Filter + V2 Cloud Sync
+    VERSION: '18.9.1', // Critical Bug Fixes: deleteEntry, adjustStock, editLocation, version sync, cloud delete, duplicate SW
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -217,7 +217,8 @@ const App = {
             const medLangSelect = document.getElementById('med-lang-select');
             if (medLangSelect) medLangSelect.value = localStorage.getItem('dawaa_med_lang_pref') || 'en';
             this.initNetworkMonitor();
-            this.registerServiceWorker();
+            // Service Worker is registered via initServiceWorker() only (no duplication)
+            // this.registerServiceWorker(); // Removed: duplicate SW registration
 
             console.log("BOOT: [STEP 7] Firebase Auth Monitor");
             auth.onAuthStateChanged(async (user) => {
@@ -479,17 +480,32 @@ const App = {
     // Service Worker update logic moved to App.checkUpdate (v9.9.7 Architect)
 
 
-    // --- Central View Refresh & Live Sync Coordination (v18.7.3) ---
+    // --- Central View Refresh & Live Sync Coordination (v18.9.1) ---
     async refreshAllViews(targetCatId = null) {
         try {
-            if (typeof this.renderInventory === 'function') await this.renderInventory();
-            if (typeof this.renderWarehouseCategories === 'function') await this.renderWarehouseCategories();
-            if (typeof this.renderWarehouseLocations === 'function') await this.renderWarehouseLocations();
-            if (typeof this.renderCategoryChips === 'function') await this.renderCategoryChips();
-            if (typeof this.renderDashboard === 'function') await this.renderDashboard();
+            const currentView = UI.currentView || '';
+            
+            // Only refresh views that are currently visible or relevant
+            if (currentView === 'smart-inventory' || currentView === 'inventory') {
+                if (typeof this.renderInventory === 'function') await this.renderInventory();
+            }
+            
+            if (currentView === 'warehouse') {
+                if (typeof this.renderWarehouseCategories === 'function') await this.renderWarehouseCategories();
+                if (typeof this.renderWarehouseLocations === 'function') await this.renderWarehouseLocations();
+            }
+            
+            // Category chips appear on inventory views too
+            if (currentView === 'smart-inventory' || currentView === 'inventory' || currentView === 'warehouse') {
+                if (typeof this.renderCategoryChips === 'function') await this.renderCategoryChips();
+            }
+            
+            if (currentView === 'dashboard' || !currentView) {
+                if (typeof this.renderDashboard === 'function') await this.renderDashboard();
+            }
             
             // If in Audit view or if an audit session is open
-            if (typeof this.renderAuditView === 'function') {
+            if (currentView === 'audit' && typeof this.renderAuditView === 'function') {
                 const auditContainer = document.getElementById('view-audit');
                 if (auditContainer && (auditContainer.classList.contains('active') || this.selectedAuditSessionId)) {
                     await this.renderAuditView();
@@ -2073,7 +2089,7 @@ const App = {
         if (confirm('حذف هذا السجل؟')) {
             try {
                 await Inventory.deleteEntry(id);
-                UI.renderCurrentView();
+                await this.refreshAllViews();
                 UI.showToast('تم الحذف', 'info');
             } catch (err) {
                 UI.showToast('فشل الحذف', 'danger');
@@ -2290,8 +2306,9 @@ const App = {
             } else {
                 const newQty = Math.max(0, delta);
                 entry = {
-                    id: 'inv_' + medId,
+                    id: 'inv_audit_stock_' + medId,
                     medicineId: medId,
+                    auditId: 'manual_adjustment',
                     quantity: newQty,
                     expiryDate: `${new Date().getFullYear() + 2}-12-31`,
                     location: 'المستودع الرئيسي',
@@ -2408,6 +2425,10 @@ const App = {
             } else if (action === 'delete_all') {
                 for (const med of meds) {
                     await DB.delete('medicineMaster', med.id);
+                    // Sync deletion to cloud
+                    if (typeof window.Sync !== 'undefined' && window.Sync.deleteMedicine) {
+                        window.Sync.deleteMedicine(med.id).catch(() => {});
+                    }
                 }
                 UI.showToast(`تم حذف القسم و ${meds.length} دواء`, 'warning');
             }
@@ -3180,6 +3201,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 <div class="form-group mb-12">
                     <label class="form-label">اسم المكان:</label>
                     <input type="text" id="loc-name-ar" class="form-input" value="${loc.nameAR}" required>
+                </div>
+                <div class="form-group mb-12">
+                    <label class="form-label">الاسم بالإنجليزية:</label>
+                    <input type="text" id="loc-name-en" class="form-input" value="${loc.nameEN || ''}" placeholder="English name (optional)">
                 </div>
                 <div class="form-group mb-12">
                     <label class="form-label">أيقونة المكان:</label>
