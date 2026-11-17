@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.16.0', // Audit Barcode Scanning workflow with continuous scan, iOS fallback, auto-link & 27K lookup
+    VERSION: '18.17.0', // Smart Phonetic Drug Matcher v4, Tube-Size/Strength Separation, Enricher Tabs & Inline Manual Linker
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -3272,11 +3272,12 @@ const App = {
             // Yield a frame so spinner renders smoothly
             await new Promise(r => setTimeout(r, 30));
 
-            const rows = allMeds.map(med => {
+            const rows = allMeds.map((med, idx) => {
                 const matches = EgyptianDrugs.findBestMatches(med, 5);
                 const selectedIdx = 0;
                 const best = matches[0] || null;
                 return {
+                    _idx: idx,
                     med,
                     matches,
                     selectedIdx,
@@ -3295,8 +3296,11 @@ const App = {
             this._enricherState = {
                 rows,
                 fields,
-                filter: 'actionable', // 'actionable' | 'high' | 'all'
-                search: ''
+                filter: 'actionable', // 'actionable' | 'high' | 'medium' | 'unmatched' | 'all'
+                search: '',
+                openManualIdx: -1,
+                manualQuery: '',
+                manualResults: []
             };
 
             // Only keep rows auto-checked if they actually have a change under default fields
@@ -3353,18 +3357,37 @@ const App = {
         };
     },
 
-    _renderEnricherModal() {
+    _getEnricherStats() {
         const st = this._enricherState;
-        if (!st) return;
-
-        let highCount = 0, medCount = 0, actionableCount = 0;
+        let highCount = 0, medCount = 0, unmatchedCount = 0, actionableCount = 0;
+        if (!st) return { highCount, medCount, unmatchedCount, actionableCount };
         for (const r of st.rows) {
             const best = r.matches[r.selectedIdx];
             const diff = this._computeEnrichDiff(r, st.fields);
             if (best?.confidence === 'high') highCount++;
             else if (best?.confidence === 'medium') medCount++;
+            else if (r.med.type !== 'supply') unmatchedCount++;
             if (diff.hasChanges) actionableCount++;
         }
+        return { highCount, medCount, unmatchedCount, actionableCount };
+    },
+
+    _refreshEnricherCounters() {
+        const { highCount, medCount, unmatchedCount, actionableCount } = this._getEnricherStats();
+        const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+        setTxt('enrich-high-num', highCount);
+        setTxt('enrich-med-num', medCount);
+        setTxt('enrich-unmatched-num', unmatchedCount);
+        setTxt('enrich-actionable-num', actionableCount);
+        setTxt('enr-tab-med-cnt', medCount);
+        setTxt('enr-tab-unmatched-cnt', unmatchedCount);
+    },
+
+    _renderEnricherModal() {
+        const st = this._enricherState;
+        if (!st) return;
+
+        const { highCount, medCount, unmatchedCount, actionableCount } = this._getEnricherStats();
 
         UI.showModal(`
             <div class="sheet-handle"></div>
@@ -3377,19 +3400,23 @@ const App = {
                 </p>
             </div>
 
-            <!-- Summary Strip -->
-            <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:10px; text-align:center;">
-                <div style="padding:7px; border-radius:8px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25);">
-                    <div style="font-size:15px; font-weight:800; color:#059669;">${highCount}</div>
-                    <div style="font-size:10px; color:var(--text-muted);">🟢 تطابق قوي</div>
+            <!-- Summary Strip (clickable filters) -->
+            <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin-bottom:10px; text-align:center;">
+                <div onclick="window.App._setEnricherFilter('high')" style="cursor:pointer; padding:6px 4px; border-radius:8px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25);">
+                    <div style="font-size:14px; font-weight:800; color:#059669;" id="enrich-high-num">${highCount}</div>
+                    <div style="font-size:9.5px; color:var(--text-muted);">🟢 قوي</div>
                 </div>
-                <div style="padding:7px; border-radius:8px; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25);">
-                    <div style="font-size:15px; font-weight:800; color:#d97706;">${medCount}</div>
-                    <div style="font-size:10px; color:var(--text-muted);">🟡 محتاج مراجعة</div>
+                <div onclick="window.App._setEnricherFilter('medium')" style="cursor:pointer; padding:6px 4px; border-radius:8px; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25);">
+                    <div style="font-size:14px; font-weight:800; color:#d97706;" id="enrich-med-num">${medCount}</div>
+                    <div style="font-size:9.5px; color:var(--text-muted);">🟡 مراجعة</div>
                 </div>
-                <div style="padding:7px; border-radius:8px; background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.25);">
-                    <div style="font-size:15px; font-weight:800; color:var(--primary);" id="enrich-actionable-num">${actionableCount}</div>
-                    <div style="font-size:10px; color:var(--text-muted);">✨ جاهز للتكميل</div>
+                <div onclick="window.App._setEnricherFilter('unmatched')" style="cursor:pointer; padding:6px 4px; border-radius:8px; background:rgba(100,116,139,0.08); border:1px solid rgba(100,116,139,0.25);">
+                    <div style="font-size:14px; font-weight:800; color:var(--text-muted);" id="enrich-unmatched-num">${unmatchedCount}</div>
+                    <div style="font-size:9.5px; color:var(--text-muted);">⚪ غير مطابق</div>
+                </div>
+                <div onclick="window.App._setEnricherFilter('actionable')" style="cursor:pointer; padding:6px 4px; border-radius:8px; background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.25);">
+                    <div style="font-size:14px; font-weight:800; color:var(--primary);" id="enrich-actionable-num">${actionableCount}</div>
+                    <div style="font-size:9.5px; color:var(--text-muted);">✨ للتكميل</div>
                 </div>
             </div>
 
@@ -3413,10 +3440,12 @@ const App = {
             </div>
 
             <!-- Filter Tabs + Search -->
-            <div style="display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap; align-items:center;">
-                <button type="button" id="enr-tab-actionable" onclick="window.App._setEnricherFilter('actionable')" class="${st.filter==='actionable'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:11px; padding:5px 9px; border-radius:8px; ${st.filter!=='actionable'?'border:1px solid var(--border-color);':''}">المقترحة للتكميل</button>
-                <button type="button" id="enr-tab-high" onclick="window.App._setEnricherFilter('high')" class="${st.filter==='high'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:11px; padding:5px 9px; border-radius:8px; ${st.filter!=='high'?'border:1px solid var(--border-color);':''}">🟢 قوي فقط</button>
-                <button type="button" id="enr-tab-all" onclick="window.App._setEnricherFilter('all')" class="${st.filter==='all'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:11px; padding:5px 9px; border-radius:8px; ${st.filter!=='all'?'border:1px solid var(--border-color);':''}">الكل (${st.rows.length})</button>
+            <div style="display:flex; gap:5px; margin-bottom:8px; flex-wrap:wrap; align-items:center;">
+                <button type="button" id="enr-tab-actionable" onclick="window.App._setEnricherFilter('actionable')" class="${st.filter==='actionable'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:10.5px; padding:5px 8px; border-radius:8px; ${st.filter!=='actionable'?'border:1px solid var(--border-color);':''}">للتكميل</button>
+                <button type="button" id="enr-tab-high" onclick="window.App._setEnricherFilter('high')" class="${st.filter==='high'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:10.5px; padding:5px 8px; border-radius:8px; ${st.filter!=='high'?'border:1px solid var(--border-color);':''}">🟢 قوي</button>
+                <button type="button" id="enr-tab-medium" onclick="window.App._setEnricherFilter('medium')" class="${st.filter==='medium'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:10.5px; padding:5px 8px; border-radius:8px; ${st.filter!=='medium'?'border:1px solid var(--border-color);':''}">🟡 مراجعة (<span id="enr-tab-med-cnt">${medCount}</span>)</button>
+                <button type="button" id="enr-tab-unmatched" onclick="window.App._setEnricherFilter('unmatched')" class="${st.filter==='unmatched'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:10.5px; padding:5px 8px; border-radius:8px; ${st.filter!=='unmatched'?'border:1px solid var(--border-color);':''}">⚪ غير مطابق (<span id="enr-tab-unmatched-cnt">${unmatchedCount}</span>)</button>
+                <button type="button" id="enr-tab-all" onclick="window.App._setEnricherFilter('all')" class="${st.filter==='all'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:10.5px; padding:5px 8px; border-radius:8px; ${st.filter!=='all'?'border:1px solid var(--border-color);':''}">الكل (${st.rows.length})</button>
                 <input type="text" id="enr-search" placeholder="🔍 فلتر بالاسم..." value="${Utils.escapeHTML(st.search)}" oninput="window.App._setEnricherSearch(this.value)" style="flex:1; min-width:110px; padding:5px 8px; border:1px solid var(--border-color); border-radius:8px; font-size:11.5px; background:var(--surface); color:var(--text-main);">
             </div>
 
@@ -3454,10 +3483,7 @@ const App = {
                 r.checked = true;
             }
         }
-        const actEl = document.getElementById('enrich-actionable-num');
-        if (actEl) {
-            actEl.textContent = st.rows.filter(r => this._computeEnrichDiff(r, st.fields).hasChanges).length;
-        }
+        this._refreshEnricherCounters();
         this._renderEnricherList();
     },
 
@@ -3465,7 +3491,7 @@ const App = {
         const st = this._enricherState;
         if (!st) return;
         st.filter = filter;
-        ['actionable', 'high', 'all'].forEach(f => {
+        ['actionable', 'high', 'medium', 'unmatched', 'all'].forEach(f => {
             const btn = document.getElementById(`enr-tab-${f}`);
             if (!btn) return;
             if (f === filter) {
@@ -3493,7 +3519,101 @@ const App = {
         row.selectedIdx = parseInt(newIdx, 10) || 0;
         const diff = this._computeEnrichDiff(row, st.fields);
         row.checked = diff.hasChanges;
+        this._refreshEnricherCounters();
         this._renderEnricherList();
+    },
+
+    _toggleEnricherManualSearch(rowIdx) {
+        const st = this._enricherState;
+        if (!st) return;
+        if (st.openManualIdx === rowIdx) {
+            st.openManualIdx = -1;
+            st.manualQuery = '';
+            st.manualResults = [];
+            this._renderEnricherList();
+            return;
+        }
+        const row = st.rows[rowIdx];
+        if (!row) return;
+        st.openManualIdx = rowIdx;
+        // Pre-fill first word of med name to speed up manual search
+        const seed = (row.med.nameEN || row.med.nameAR || '').trim().split(/\s+/)[0] || '';
+        st.manualQuery = seed;
+        st.manualResults = seed.length >= 2 ? EgyptianDrugs.search(seed, 8) : [];
+        this._renderEnricherList();
+        setTimeout(() => {
+            const inp = document.getElementById(`enr-manual-input-${rowIdx}`);
+            if (inp) {
+                inp.focus();
+                inp.select();
+            }
+        }, 30);
+    },
+
+    _onEnricherManualSearch(rowIdx, query) {
+        const st = this._enricherState;
+        if (!st || st.openManualIdx !== rowIdx) return;
+        st.manualQuery = query || '';
+        st.manualResults = st.manualQuery.trim().length >= 2 ? EgyptianDrugs.search(st.manualQuery.trim(), 8) : [];
+        const resEl = document.getElementById(`enr-manual-results-${rowIdx}`);
+        if (resEl) {
+            resEl.innerHTML = this._renderManualSearchResultsHtml(rowIdx, st.manualResults, st.manualQuery);
+        }
+    },
+
+    _renderManualSearchResultsHtml(rowIdx, results, query) {
+        if (!query || query.trim().length < 2) {
+            return `<div style="font-size:11px; color:var(--text-muted); padding:6px;">اكتب حرفين على الأقل للبحث في الـ ${EgyptianDrugs.catalogSize.toLocaleString()} دواء...</div>`;
+        }
+        if (!results || results.length === 0) {
+            return `<div style="font-size:11px; color:var(--text-muted); padding:6px;">لا توجد نتائج لـ "${Utils.escapeHTML(query)}" — جرب جزء آخر من الاسم أو المادة الفعالة</div>`;
+        }
+        return results.map((item, idx) => `
+            <div onclick="window.App._onEnricherPickManual(${rowIdx}, ${idx})" style="cursor:pointer; padding:6px 8px; border-radius:7px; border:1px solid var(--border-color); background:var(--surface); margin-top:4px; transition:background 0.15s;" onmouseover="this.style.background='rgba(59,130,246,0.08)'" onmouseout="this.style.background='var(--surface)'">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+                    <strong style="font-size:11.5px; color:var(--text-main);">${Utils.escapeHTML(EgyptianDrugs.formatEN ? EgyptianDrugs.formatEN(item.nameEN) : item.nameEN)}</strong>
+                    ${item.barcode ? `<span style="font-size:9.5px; color:#7c3aed; font-family:monospace;">🔢 ${Utils.escapeHTML(item.barcode)}</span>` : ''}
+                </div>
+                ${item.nameAR ? `<div style="font-size:10.5px; color:var(--text-muted);">${Utils.escapeHTML(item.nameAR)}</div>` : ''}
+                ${item.active ? `<div style="font-size:10px; color:#059669;">💊 ${Utils.escapeHTML(item.active)}</div>` : ''}
+            </div>
+        `).join('');
+    },
+
+    _onEnricherPickManual(rowIdx, resultIdx) {
+        const st = this._enricherState;
+        if (!st) return;
+        const row = st.rows[rowIdx];
+        const item = st.manualResults?.[resultIdx];
+        if (!row || !item) return;
+
+        const formattedEN = EgyptianDrugs.formatEN ? EgyptianDrugs.formatEN(item.nameEN) : item.nameEN;
+        const existingIdx = row.matches.findIndex(m => m.item === item || (m.item.nameEN === item.nameEN && m.item.barcode === item.barcode));
+        if (existingIdx >= 0) {
+            row.matches[existingIdx].manual = true;
+            row.matches[existingIdx].confidence = 'high';
+            row.matches[existingIdx].score = 100;
+            row.selectedIdx = existingIdx;
+        } else {
+            row.matches.unshift({
+                item,
+                score: 100,
+                confidence: 'high',
+                manual: true,
+                formattedEN
+            });
+            row.selectedIdx = 0;
+        }
+
+        const diff = this._computeEnrichDiff(row, st.fields);
+        row.checked = diff.hasChanges;
+        st.openManualIdx = -1;
+        st.manualQuery = '';
+        st.manualResults = [];
+
+        this._refreshEnricherCounters();
+        this._renderEnricherList();
+        UI.showToast(`تم ربط "${row.med.nameEN || row.med.nameAR}" بنجاح 🔗`, 'success');
     },
 
     _toggleEnricherRow(medId, isChecked) {
@@ -3541,7 +3661,9 @@ const App = {
             const diff = this._computeEnrichDiff(r, st.fields);
 
             if (st.filter === 'actionable' && !diff.hasChanges) return false;
-            if (st.filter === 'high' && !(match && match.confidence === 'high' && diff.hasChanges)) return false;
+            if (st.filter === 'high' && !(match && match.confidence === 'high')) return false;
+            if (st.filter === 'medium' && !(match && match.confidence === 'medium')) return false;
+            if (st.filter === 'unmatched' && !(!match && r.med.type !== 'supply')) return false;
 
             if (q) {
                 const en = (r.med.nameEN || '').toLowerCase();
@@ -3564,7 +3686,7 @@ const App = {
                 <div class="empty-state" style="padding:26px; text-align:center; background:var(--bg-secondary); border-radius:12px;">
                     <i class='bx bx-check-circle' style="font-size:34px; color:#10b981;"></i>
                     <p style="margin:8px 0 0 0; font-size:13px; color:var(--text-muted);">
-                        ${st.filter === 'actionable' ? 'ممتاز! كل الأدوية المطابقة بياناتها مكتملة وفق الإعدادات المحددة ✅' : 'لا توجد أصناف مطابقة لهذا الفلتر'}
+                        ${st.filter === 'actionable' ? 'ممتاز! كل الأدوية المطابقة بياناتها مكتملة وفق الإعدادات المحددة ✅' : (st.filter === 'unmatched' ? 'ممتاز! لا توجد أدوية غير مطابقة 🎉' : 'لا توجد أصناف مطابقة لهذا الفلتر')}
                     </p>
                 </div>
             `;
@@ -3579,9 +3701,11 @@ const App = {
             const isHigh = match?.confidence === 'high';
             const badge = !match
                 ? `<span style="font-size:10px; padding:2px 6px; border-radius:6px; background:var(--bg-secondary); color:var(--text-muted); border:1px solid var(--border-color);">${med.type === 'supply' ? '🩹 مستلزم طبي' : '⚪ غير مطابق'}</span>`
-                : isHigh
-                    ? `<span style="font-size:10px; padding:2px 6px; border-radius:6px; background:rgba(16,185,129,0.12); color:#059669; font-weight:800;">🟢 قوي ${match.score}%</span>`
-                    : `<span style="font-size:10px; padding:2px 6px; border-radius:6px; background:rgba(245,158,11,0.14); color:#d97706; font-weight:800;">🟡 مراجعة ${match.score}%</span>`;
+                : match.manual
+                    ? `<span style="font-size:10px; padding:2px 6px; border-radius:6px; background:rgba(59,130,246,0.14); color:#2563eb; font-weight:800;">🔗 ربط يدوي</span>`
+                    : isHigh
+                        ? `<span style="font-size:10px; padding:2px 6px; border-radius:6px; background:rgba(16,185,129,0.12); color:#059669; font-weight:800;">🟢 قوي ${match.score}%</span>`
+                        : `<span style="font-size:10px; padding:2px 6px; border-radius:6px; background:rgba(245,158,11,0.14); color:#d97706; font-weight:800;">🟡 مراجعة ${match.score}%${match.fuzzyCorrected ? ' ✏️' : ''}</span>`;
 
             const diffLines = [];
             if (diff.changes.activeIngredient) {
@@ -3598,6 +3722,11 @@ const App = {
             }
 
             const safeMedId = Utils.escapeHTML(med.id);
+            const isManualOpen = st.openManualIdx === r._idx;
+            const manualBtn = med.type === 'supply' ? '' : (!match
+                ? `<button type="button" onclick="window.App._toggleEnricherManualSearch(${r._idx})" style="font-size:10.5px; padding:3px 8px; border-radius:6px; border:1px solid rgba(59,130,246,0.35); background:rgba(59,130,246,0.08); color:var(--primary); cursor:pointer; font-weight:700;">🔍 ${isManualOpen ? 'إغلاق البحث' : 'بحث يدوي وربط'}</button>`
+                : `<button type="button" onclick="window.App._toggleEnricherManualSearch(${r._idx})" style="font-size:10px; padding:2px 6px; border-radius:6px; border:1px solid var(--border-color); background:transparent; color:var(--text-muted); cursor:pointer;">🔍 ${isManualOpen ? 'إغلاق' : 'بحث آخر'}</button>`
+            );
 
             return `
                 <div style="padding:10px; border-radius:10px; background:var(--surface); border:1px solid ${r.checked && diff.hasChanges ? 'rgba(16,185,129,0.5)' : 'var(--border-color)'};">
@@ -3608,16 +3737,28 @@ const App = {
                         <div style="flex:1; min-width:0;">
                             <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; flex-wrap:wrap;">
                                 <strong style="font-size:12.5px; color:var(--text-main);">${Utils.escapeHTML(med.nameEN || med.nameAR)}</strong>
-                                ${badge}
+                                <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
+                                    ${manualBtn}
+                                    ${badge}
+                                </div>
                             </div>
                             ${med.nameAR && med.nameAR !== med.nameEN ? `<div style="font-size:11px; color:var(--text-muted);">${Utils.escapeHTML(med.nameAR)}</div>` : ''}
+
+                            ${isManualOpen ? `
+                                <div style="margin-top:7px; padding:8px; border-radius:8px; background:var(--bg-secondary); border:1px solid rgba(59,130,246,0.35);">
+                                    <input type="text" id="enr-manual-input-${r._idx}" value="${Utils.escapeHTML(st.manualQuery)}" placeholder="ابحث بالاسم الإنجليزي أو العربي أو المادة الفعالة..." oninput="window.App._onEnricherManualSearch(${r._idx}, this.value)" style="width:100%; padding:6px 8px; border-radius:7px; border:1px solid var(--border-color); background:var(--surface); color:var(--text-main); font-size:11.5px; box-sizing:border-box;">
+                                    <div id="enr-manual-results-${r._idx}" style="max-height:170px; overflow-y:auto; margin-top:4px;">
+                                        ${this._renderManualSearchResultsHtml(r._idx, st.manualResults, st.manualQuery)}
+                                    </div>
+                                </div>
+                            ` : ''}
 
                             ${r.matches.length > 0 ? `
                                 <div style="margin-top:6px;">
                                     <select onchange="window.App._onEnricherSelectMatch('${safeMedId}', this.value)" style="width:100%; padding:5px 7px; border-radius:7px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-main); font-size:11px;">
                                         ${r.matches.map((m, idx) => `
                                             <option value="${idx}" ${idx === r.selectedIdx ? 'selected' : ''}>
-                                                [${m.score}%] ${Utils.escapeHTML(m.formattedEN)}${m.item.nameAR ? ' — ' + Utils.escapeHTML(m.item.nameAR) : ''}${m.item.barcode ? ' 🔢' : ''}
+                                                [${m.manual ? 'يدوي' : m.score + '%'}] ${Utils.escapeHTML(m.formattedEN)}${m.item.nameAR ? ' — ' + Utils.escapeHTML(m.item.nameAR) : ''}${m.item.barcode ? ' 🔢' : ''}
                                             </option>
                                         `).join('')}
                                     </select>

@@ -46,35 +46,153 @@ let _extendedCatalog = null;
 let _loadingPromise = null;
 let _loadFailed = false;
 let _enPrefixIndex = null;
+let _enPhoneticIndex = null;
+let _enConsIndex = null;
 let _arPrefixIndex = null;
+let _arSkeletonIndex = null;
+
+function phoneticKeyEN(word) {
+    if (!word) return '';
+    let s = String(word).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (s.length <= 2) return s;
+    // Common Egyptian/Latin pharmaceutical spelling equivalences
+    s = s
+        .replace(/ph/g, 'f')
+        .replace(/qu/g, 'k')
+        .replace(/rh/g, 'r')
+        .replace(/ch/g, 'k')
+        .replace(/ck/g, 'k')
+        .replace(/gh/g, 'g')
+        .replace(/th/g, 't')
+        .replace(/c(?=[eiy])/g, 's')
+        .replace(/c/g, 'k')
+        .replace(/p/g, 'b')
+        .replace(/[ey]/g, 'i')
+        .replace(/([a-z])\1+/g, '$1');
+    // Drop trailing silent 'e' (already mapped to 'i' above? Check original trailing 'e')
+    if (String(word).toLowerCase().replace(/[^a-z0-9]/g, '').endsWith('e') && s.length >= 5 && s.endsWith('i')) {
+        s = s.slice(0, -1);
+    }
+    return s;
+}
+
+function consonantSkeletonEN(word) {
+    const p = phoneticKeyEN(word);
+    if (!p) return '';
+    return p[0] + p.slice(1).replace(/[aeiou]/g, '');
+}
+
+function firstCharPlusConsonant(pKey) {
+    if (!pKey || pKey.length < 2) return '';
+    for (let i = 1; i < pKey.length; i++) {
+        if (!/[aeiou]/.test(pKey[i])) return pKey[0] + pKey[i];
+    }
+    return pKey.slice(0, 2);
+}
+
+function arabicSkeleton(word) {
+    if (!word) return '';
+    const w = normalizeArabic(word).replace(/[^\u0600-\u06FF0-9]/g, '');
+    if (w.length <= 2) return w;
+    // Strip internal Arabic long vowels (ا و ي) to match وان/ون and ديلتارينو/دلتارينو
+    return w[0] + w.slice(1).replace(/[اوي]/g, '');
+}
+
+function collapseInitialisms(text) {
+    let s = String(text || '').toLowerCase();
+    // 1. Standard medical abbreviations first
+    s = s
+        .replace(/\bs\.?\s*r\.?\b/g, 'sr')
+        .replace(/\bc\.?\s*r\.?\b/g, 'cr')
+        .replace(/\bx\.?\s*r\.?\b/g, 'xr')
+        .replace(/\bf\.?\s*c\.?\s*t(?:abs?)?\b/g, 'tab')
+        .replace(/\be\.?\s*c\.?\s*t(?:abs?)?\b/g, 'tab')
+        .replace(/\bi\.?\s*v\.?\b/g, 'iv')
+        .replace(/\bi\.?\s*m\.?\b/g, 'im')
+        .replace(/\bi\.?\s*u\.?\b/g, 'iu');
+    // 2. Dotted single-letter acronyms (e.g. "b.b.c." -> "bbc", "d.g." -> "dg")
+    s = s.replace(/(^|[\s(])((?:[a-z]\.\s*){2,5}[a-z]?\.?)(?=$|[\s),])/g, (full, pre, seq) => {
+        const letters = seq.replace(/[\s.]/g, '');
+        return letters.length >= 2 ? pre + letters : full;
+    });
+    // 3. Spaced/comma single-digit brand codes at start (e.g. "1 2 3" or "1,2,3" -> "123")
+    s = s.replace(/^(\s*)(\d(?:[\s,.-]+\d){1,3})(?=\s|$|[(\[])/g, (_, pre, seq) => {
+        return pre + seq.replace(/[\s,.-]/g, '');
+    });
+    return s;
+}
+
+function addToIndex(map, key, item) {
+    if (!key || key.length < 2) return;
+    let bucket = map.get(key);
+    if (!bucket) {
+        bucket = [];
+        map.set(key, bucket);
+    }
+    if (bucket[bucket.length - 1] !== item) {
+        bucket.push(item);
+    }
+}
 
 function buildCatalogIndex(catalog) {
     const enIdx = new Map();
+    const enPhonIdx = new Map();
+    const enConsIdx = new Map();
     const arIdx = new Map();
+    const arSkelIdx = new Map();
+
     for (let i = 0; i < catalog.length; i++) {
         const item = catalog[i];
         item._enLow = (item.nameEN || '').toLowerCase();
+        item._enNorm = collapseInitialisms(item._enLow);
+        item._enCompact = item._enNorm.replace(/[^a-z0-9]/g, '');
         item._arNorm = normalizeArabic(item.nameAR || '');
         item._actLow = (item.active || '').toLowerCase();
 
-        // Fast first-token extraction for indexing without running all regexes on 27K items
-        const enMatch = item._enLow.match(/[a-z0-9-]+/);
-        const bEn = enMatch ? enMatch[0].replace(/-/g, '') : '';
-        if (bEn.length >= 2) {
-            const k = bEn.slice(0, 2);
-            if (!enIdx.has(k)) enIdx.set(k, []);
-            enIdx.get(k).push(item);
+        // Fast token extraction from collapsed text (handles b.b.c. -> bbc, 1 2 3 -> 123, trimed flu -> trimedflu)
+        const enTokens = item._enNorm.match(/[a-z0-9-]+/g);
+        if (enTokens && enTokens.length > 0) {
+            const t0 = enTokens[0].replace(/-/g, '');
+            const t1 = enTokens[1] ? enTokens[1].replace(/-/g, '') : '';
+            const candidates = [t0];
+            // Also index joined first two words (e.g. "trimed flu" -> "trimedflu", "dg wash" -> "dgwash")
+            if (t1 && t0.length >= 2 && t1.length >= 2 && !/^\d/.test(t1) && !GENERIC_NOISE.has(t1)) {
+                candidates.push(t0 + t1);
+            }
+            for (const cand of candidates) {
+                if (cand.length >= 2) {
+                    addToIndex(enIdx, cand.slice(0, 2), item);
+                    const pk = phoneticKeyEN(cand);
+                    if (pk.length >= 2) {
+                        addToIndex(enPhonIdx, pk.slice(0, 2), item);
+                        const fc = firstCharPlusConsonant(pk);
+                        if (fc.length >= 2) addToIndex(enConsIdx, fc, item);
+                    }
+                }
+            }
         }
-        const arMatch = item._arNorm.match(/[\u0600-\u06FF0-9]+/);
-        const bAr = arMatch ? arMatch[0] : '';
-        if (bAr.length >= 2) {
-            const k = bAr.slice(0, 2);
-            if (!arIdx.has(k)) arIdx.set(k, []);
-            arIdx.get(k).push(item);
+
+        const arMatch = item._arNorm.match(/[\u0600-\u06FF0-9]+/g);
+        if (arMatch && arMatch.length > 0) {
+            const bAr = arMatch[0];
+            if (bAr.length >= 2) {
+                addToIndex(arIdx, bAr.slice(0, 2), item);
+                const sk = arabicSkeleton(bAr);
+                if (sk.length >= 2) addToIndex(arSkelIdx, sk.slice(0, 2), item);
+            }
+            // Joined first 2 Arabic words (e.g. "تراي ميد" vs "ترايمد")
+            if (arMatch[1] && bAr.length >= 2 && arMatch[1].length >= 2) {
+                const joinedAr = bAr + arMatch[1];
+                const sk2 = arabicSkeleton(joinedAr);
+                if (sk2.length >= 2) addToIndex(arSkelIdx, sk2.slice(0, 2), item);
+            }
         }
     }
     _enPrefixIndex = enIdx;
+    _enPhoneticIndex = enPhonIdx;
+    _enConsIndex = enConsIdx;
     _arPrefixIndex = arIdx;
+    _arSkeletonIndex = arSkelIdx;
 }
 
 async function loadExtendedCatalog() {
@@ -149,9 +267,12 @@ function detectForms(text) {
     return forms;
 }
 
+const TOPICAL_OR_LIQUID_RE = /\b(cream|cr|oint|ointment|gel|lotion|emulgel|foam|shampoo|wash|mouthwash|paste|soap|tube|spray|syrup|syr|susp|suspension|drops|drop)\b|كريم|مرهم|جل|لوشن|غسول|مضمضه|مضمضة|شامبو|معجون|بخاخ|شراب|نقط|قطره|قطرة/i;
+
 function extractStrengths(text) {
     if (!text) return [];
-    const s = String(text).toLowerCase();
+    const s = collapseInitialisms(text);
+    const isTopicalOrLiquid = TOPICAL_OR_LIQUID_RE.test(s);
     const out = new Set();
     // Convert "1 gm" / "1g" / "1.5 gm" to mg equivalents too for cross-matching (1 gm === 1000 mg)
     const unitRe = /(\d+(?:\.\d+)?)\s*(gm|g|mg|mcg|iu|%)\b/gi;
@@ -161,6 +282,8 @@ function extractStrengths(text) {
         const unit = m[2].toLowerCase();
         if (!isNaN(val)) {
             if (unit === 'gm' || unit === 'g') {
+                // On topical/liquid items, >= 5 gm is tube/jar pack weight (e.g. 15 gm, 30 gm, 50 gm), not drug strength
+                if (isTopicalOrLiquid && val >= 5) continue;
                 out.add(String(val * 1000));
                 out.add(String(val));
             } else {
@@ -169,9 +292,10 @@ function extractStrengths(text) {
         }
     }
     if (out.size === 0) {
-        // Standalone numbers NOT directly followed by pack words (tabs/caps/amp/sachet/ml)
-        const numRe = /\b(\d+(?:\.\d+)?)\b(?!\s*(?:f\.?c\.?t|tabs?|tablets?|caps?|capsules?|amps?|sachets?|lozenges?|patches?|strips?|vials?))/gi;
-        while ((m = numRe.exec(s)) !== null) {
+        // Standalone numbers NOT at the very start (brand code like "123") and NOT directly followed by pack/weight/volume words (EN or AR)
+        const withoutLeadingCode = s.replace(/^\s*\d+\b/, '');
+        const numRe = /\b(\d+(?:\.\d+)?)\b(?!\s*(?:f\.?c\.?t|tabs?|tablets?|caps?|capsules?|amps?|sachets?|lozenges?|patches?|strips?|vials?|ml|gm|g\b|جرام|جم|مل|قرص|اقراص|كبسول|كبسوله|كيس|اكياس|امبول|امبولات|فيال|قمع|اقماع))/gi;
+        while ((m = numRe.exec(withoutLeadingCode)) !== null) {
             const val = parseFloat(m[1]);
             if (!isNaN(val)) out.add(String(val));
         }
@@ -180,21 +304,13 @@ function extractStrengths(text) {
 }
 
 function normalizeEnForTokens(text) {
-    return String(text || '')
-        .toLowerCase()
-        .replace(/\bs\.?\s*r\.?\b/g, 'sr')
-        .replace(/\bc\.?\s*r\.?\b/g, 'cr')
-        .replace(/\bx\.?\s*r\.?\b/g, 'xr')
-        .replace(/\bf\.?\s*c\.?\s*t(?:abs?)?\b/g, 'tab')
-        .replace(/\bi\.?\s*v\.?\b/g, 'iv')
-        .replace(/\bi\.?\s*m\.?\b/g, 'im')
-        .replace(/\bi\.?\s*u\.?\b/g, 'iu');
+    return collapseInitialisms(text);
 }
 
 function extractEnTokens(text) {
     if (!text) return [];
     const norm = normalizeEnForTokens(text);
-    // Keep hyphenated brand tokens together (e.g. bi-profenid, c-retard, multi-relax)
+    // Keep hyphenated brand tokens together (e.g. bi-profenid, c-retard, multi-relax, fusi-zon, dg-wash)
     return norm
         .replace(/[^a-z0-9-]+/g, ' ')
         .replace(/(^|\s)-+|-+(\s|$)/g, ' ')
@@ -205,9 +321,23 @@ function extractEnTokens(text) {
 
 function pickBrandEN(tokens) {
     if (!tokens || tokens.length === 0) return '';
+    // Preserve leading numeric product code brands (e.g. "123 Tab", "1 2 3 (one two three)")
+    if (/^\d{2,4}$/.test(tokens[0])) {
+        return tokens[0];
+    }
     // Prefer first non-noise, non-number token (normalized without hyphens for comparison)
     const first = tokens.find(t => !GENERIC_NOISE.has(t) && !/^\d+$/.test(t));
     return first ? first.replace(/-/g, '') : (tokens[0] || '').replace(/-/g, '');
+}
+
+function pickBrand2EN(tokens) {
+    if (!tokens || tokens.length < 2) return '';
+    const t0 = tokens[0].replace(/-/g, '');
+    const t1 = tokens[1].replace(/-/g, '');
+    if (t0.length < 2 || t1.length < 2) return '';
+    if (/^\d+$/.test(t0) || /^\d+$/.test(t1)) return '';
+    if (GENERIC_NOISE.has(t0) || GENERIC_NOISE.has(t1)) return '';
+    return t0 + t1;
 }
 
 function extractArTokens(text) {
@@ -219,10 +349,12 @@ function extractArTokens(text) {
         .filter(t => t.length >= 2);
 }
 
+// Optimal String Alignment (Damerau-Levenshtein): counts adjacent transposition (e.g. daimicron/diamicron) as 1
 function editDistanceAtMost(a, b, maxDist = 2) {
     if (a === b) return 0;
     const la = a.length, lb = b.length;
     if (Math.abs(la - lb) > maxDist) return maxDist + 1;
+    let prev2 = null;
     let prev = new Array(lb + 1);
     let curr = new Array(lb + 1);
     for (let j = 0; j <= lb; j++) prev[j] = j;
@@ -231,11 +363,17 @@ function editDistanceAtMost(a, b, maxDist = 2) {
         let rowMin = curr[0];
         for (let j = 1; j <= lb; j++) {
             const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-            curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
-            if (curr[j] < rowMin) rowMin = curr[j];
+            let best = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+            if (i > 1 && j > 1 && prev2 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+                best = Math.min(best, prev2[j - 2] + 1);
+            }
+            curr[j] = best;
+            if (best < rowMin) rowMin = best;
         }
         if (rowMin > maxDist) return maxDist + 1;
-        [prev, curr] = [curr, prev];
+        prev2 = prev;
+        prev = curr;
+        curr = new Array(lb + 1);
     }
     return prev[lb];
 }
@@ -273,171 +411,154 @@ function searchCatalog(catalog, qRaw, qNorm, limit) {
     return results;
 }
 
-export const EgyptianDrugs = {
-    getAll() {
-        return _extendedCatalog ? [..._extendedCatalog] : [...BUILTIN_CATALOG];
-    },
+function scoreSingleQuery(med, catalog, topN) {
+    const medEnTokens = extractEnTokens(med.nameEN);
+    const medArTokens = extractArTokens(med.nameAR);
+    const medBrandEN = pickBrandEN(medEnTokens);
+    const medBrand2EN = pickBrand2EN(medEnTokens);
+    const medBrandAR = medArTokens[0] || '';
+    const medBrand2AR = (medArTokens.length >= 2 && medArTokens[0].length >= 2 && medArTokens[1].length >= 2)
+        ? (medArTokens[0] + medArTokens[1]) : '';
+    const medForms = detectForms(`${med.nameEN || ''} ${med.nameAR || ''}`);
+    const medStrengths = extractStrengths(`${med.nameEN || ''} ${med.nameAR || ''}`);
+    const medAct = (med.activeIngredient || '').toLowerCase().trim();
 
-    async ensureLoaded() {
-        await loadExtendedCatalog();
-        return _extendedCatalog || BUILTIN_CATALOG;
-    },
+    const medVariants = new Set(medEnTokens.filter(t => VARIANT_KEYWORDS.has(t)));
+    const medCoreWords = medEnTokens.filter(t => t.length >= 3 && !GENERIC_NOISE.has(t) && !/^\d+$/.test(t));
 
-    /**
-     * Search with auto-loading of extended catalog.
-     * Supports English name, Arabic name, active ingredient, and barcode.
-     */
-    search(query, limit = 8) {
-        if (!query) return [];
-        const strQuery = String(query).trim();
-        if (!strQuery || strQuery.length < 2) return [];
+    if (!medBrandEN && !medBrandAR) return [];
 
-        const qRaw = strQuery.toLowerCase();
-        const qNorm = normalizeArabic(strQuery);
+    const medPhonEN = phoneticKeyEN(medBrandEN);
+    const medPhon2EN = medBrand2EN ? phoneticKeyEN(medBrand2EN) : '';
+    const medConsEN = consonantSkeletonEN(medBrandEN);
+    const medArSkel = arabicSkeleton(medBrandAR);
+    const medArSkel2 = medBrand2AR ? arabicSkeleton(medBrand2AR) : '';
 
-        if (_extendedCatalog) {
-            const startMatches = [];
-            const includeMatches = [];
-            for (const item of _extendedCatalog) {
-                if (startMatches.length + includeMatches.length >= limit * 3) break;
-                const en = (item.nameEN || '').toLowerCase();
-                const arRaw = (item.nameAR || '').toLowerCase();
-                const arNorm = normalizeArabic(item.nameAR || '');
-                const actRaw = (item.active || '').toLowerCase();
-                const bc = item.barcode || '';
+    // Gather candidates quickly from prefix/phonetic indices; widen to consonant index only if needed
+    const gatherCandidates = (includeConsonantFallback) => {
+        if (!_enPrefixIndex || !_arPrefixIndex) return catalog;
+        const candSet = new Set();
+        const pull = (idx, key) => {
+            if (!idx || !key || key.length < 2) return;
+            const list = idx.get(key);
+            if (list) for (let i = 0; i < list.length; i++) candSet.add(list[i]);
+        };
 
-                if (bc && bc === strQuery) {
-                    startMatches.unshift(item);
-                } else if (en.startsWith(qRaw) || arRaw.startsWith(qRaw) || arNorm.startsWith(qNorm)) {
-                    startMatches.push(item);
-                } else if (en.includes(qRaw) || arRaw.includes(qRaw) || arNorm.includes(qNorm) ||
-                           actRaw.includes(qRaw) || normalizeArabic(item.active || '').includes(qNorm) ||
-                           (bc && bc.includes(qRaw))) {
-                    includeMatches.push(item);
-                }
-            }
-            return [...startMatches, ...includeMatches].slice(0, limit);
+        if (medBrandEN.length >= 2) {
+            pull(_enPrefixIndex, medBrandEN.slice(0, 2));
+            pull(_enPhoneticIndex, medPhonEN.slice(0, 2));
+            if (includeConsonantFallback) pull(_enConsIndex, firstCharPlusConsonant(medPhonEN));
         }
-
-        if (!_loadingPromise && !_loadFailed) {
-            loadExtendedCatalog();
+        if (medBrand2EN.length >= 2) {
+            pull(_enPrefixIndex, medBrand2EN.slice(0, 2));
+            pull(_enPhoneticIndex, medPhon2EN.slice(0, 2));
+            if (includeConsonantFallback) pull(_enConsIndex, firstCharPlusConsonant(medPhon2EN));
         }
-
-        return searchCatalog(BUILTIN_CATALOG, qRaw, qNorm, limit);
-    },
-
-    async searchAsync(query, limit = 8) {
-        if (!query) return [];
-        const strQuery = String(query).trim();
-        if (!strQuery || strQuery.length < 2) return [];
-
-        await loadExtendedCatalog();
-        return this.search(query, limit);
-    },
-
-    /**
-     * Find top matching catalog items for a user medicine record.
-     * Uses pre-built 2-char prefix index for <5ms matching across 27,601 drugs.
-     * Returns [{ item, score, confidence: 'high'|'medium', formattedEN }]
-     */
-    findBestMatches(med, topN = 5) {
-        const catalog = _extendedCatalog || BUILTIN_CATALOG;
-        if (!med || catalog.length === 0) return [];
-        if (med.type === 'supply') return []; // Don't auto-match medical consumables (syringes, cannulas) to drugs
-
-        const medBc = String(med.barcode || '').trim();
-        const isRealBc = /^\d{8,14}$/.test(medBc);
-
-        // 1. Exact barcode shortcut
-        if (isRealBc) {
-            const exact = catalog.find(c => c.barcode && c.barcode === medBc);
-            if (exact) {
-                return [{ item: exact, score: 100, confidence: 'high', formattedEN: toTitleCaseDrug(exact.nameEN) }];
-            }
+        if (medBrandAR.length >= 2) {
+            pull(_arPrefixIndex, medBrandAR.slice(0, 2));
+            pull(_arSkeletonIndex, medArSkel.slice(0, 2));
         }
-
-        const medEnTokens = extractEnTokens(med.nameEN);
-        const medArTokens = extractArTokens(med.nameAR);
-        const medBrandEN = pickBrandEN(medEnTokens);
-        const medBrandAR = medArTokens[0] || '';
-        const medForms = detectForms(`${med.nameEN || ''} ${med.nameAR || ''}`);
-        const medStrengths = extractStrengths(`${med.nameEN || ''} ${med.nameAR || ''}`);
-        const medAct = (med.activeIngredient || '').toLowerCase().trim();
-
-        const medVariants = new Set(medEnTokens.filter(t => VARIANT_KEYWORDS.has(t)));
-        const medCoreWords = medEnTokens.filter(t => t.length >= 3 && !GENERIC_NOISE.has(t) && !/^\d+$/.test(t));
-
-        if (!medBrandEN && !medBrandAR) return [];
-
-        // Gather candidates quickly from prefix indices (or full catalog for builtin)
-        let candidates;
-        if (_enPrefixIndex && _arPrefixIndex) {
-            const candSet = new Set();
-            if (medBrandEN.length >= 2) {
-                const list = _enPrefixIndex.get(medBrandEN.slice(0, 2));
-                if (list) for (const x of list) candSet.add(x);
-            }
-            if (medBrandAR.length >= 2) {
-                const list = _arPrefixIndex.get(medBrandAR.slice(0, 2));
-                if (list) for (const x of list) candSet.add(x);
-            }
-            candidates = Array.from(candSet);
-        } else {
-            candidates = catalog;
+        if (medArSkel2.length >= 2) {
+            pull(_arSkeletonIndex, medArSkel2.slice(0, 2));
         }
+        return Array.from(candSet);
+    };
 
-        const scored = [];
-
+    const scorePool = (candidates) => {
+        const out = [];
         for (let i = 0; i < candidates.length; i++) {
             const item = candidates[i];
             if (!item._enTokens) {
-                item._enTokens = extractEnTokens(item._enLow || item.nameEN);
+                item._enTokens = extractEnTokens(item._enNorm || item.nameEN);
                 item._arTokens = extractArTokens(item._arNorm || item.nameAR);
                 item._brandEN = pickBrandEN(item._enTokens);
+                item._brand2EN = pickBrand2EN(item._enTokens);
+                item._phonEN = phoneticKeyEN(item._brandEN);
+                item._phon2EN = item._brand2EN ? phoneticKeyEN(item._brand2EN) : '';
+                item._consEN = consonantSkeletonEN(item._brandEN);
                 item._brandAR = item._arTokens[0] || '';
+                item._brand2AR = (item._arTokens.length >= 2 && item._arTokens[0].length >= 2 && item._arTokens[1].length >= 2)
+                    ? (item._arTokens[0] + item._arTokens[1]) : '';
+                item._arSkel = arabicSkeleton(item._brandAR);
+                item._arSkel2 = item._brand2AR ? arabicSkeleton(item._brand2AR) : '';
             }
+
             const itemEnTokens = item._enTokens;
-            const itemArTokens = item._arTokens;
             const itemBrandEN = item._brandEN;
+            const itemBrand2EN = item._brand2EN;
             const itemBrandAR = item._brandAR;
+            const itemBrand2AR = item._brand2AR;
 
             let score = 0;
             let enMatched = false;
+            let enExact = false;
+            let enFuzzyCorrected = false;
+            let matchedViaBrand2 = false;
             let arMatched = false;
 
-            // --- Brand EN scoring ---
+            // --- Brand EN scoring (Exact -> Joined 2-word -> Phonetic -> Damerau-Levenshtein -> Consonant Skeleton) ---
             if (medBrandEN && itemBrandEN) {
                 if (medBrandEN === itemBrandEN) {
-                    score += 52;
+                    score += 56;
                     enMatched = true;
+                    enExact = true;
+                } else if ((itemBrand2EN && medBrandEN === itemBrand2EN) || (medBrand2EN && medBrand2EN === itemBrandEN)) {
+                    score += 58;
+                    enMatched = true;
+                    enExact = true;
+                    matchedViaBrand2 = true;
                 } else if (medBrandEN.length >= 4 && itemBrandEN.length >= 4) {
-                    const dist = editDistanceAtMost(medBrandEN, itemBrandEN, medBrandEN.length >= 6 ? 2 : 1);
-                    if (dist === 1) {
-                        score += 42;
+                    const rawDist = editDistanceAtMost(medBrandEN, itemBrandEN, 3);
+                    const phonExact = medPhonEN.length >= 4 && medPhonEN === item._phonEN && rawDist <= (medBrandEN.length >= 7 ? 3 : 2);
+                    const phon2Exact = !phonExact && (
+                        (item._phon2EN && medPhonEN.length >= 5 && medPhonEN === item._phon2EN && editDistanceAtMost(medBrandEN, itemBrand2EN, 2) <= 2) ||
+                        (medPhon2EN && medPhon2EN.length >= 5 && medPhon2EN === item._phonEN && editDistanceAtMost(medBrand2EN, itemBrandEN, 2) <= 2)
+                    );
+
+                    if (phonExact || phon2Exact) {
+                        score += (rawDist <= 1 || phon2Exact) ? 52 : 50;
                         enMatched = true;
-                    } else if (dist === 2 && medBrandEN.length >= 6) {
-                        score += 30;
+                        enFuzzyCorrected = true;
+                        if (phon2Exact) matchedViaBrand2 = true;
+                    } else if (rawDist === 1 && medBrandEN.length >= 5 && itemBrandEN.length >= 5) {
+                        score += 48;
                         enMatched = true;
+                        enFuzzyCorrected = true;
+                    } else if (medPhonEN.length >= 5 && item._phonEN.length >= 5 && editDistanceAtMost(medPhonEN, item._phonEN, 1) === 1 && rawDist <= 2) {
+                        score += 48;
+                        enMatched = true;
+                        enFuzzyCorrected = true;
+                    } else if (medConsEN.length >= 4 && medConsEN === item._consEN && medBrandEN.length >= 6 && itemBrandEN.length >= 5 && rawDist <= 2) {
+                        score += 48;
+                        enMatched = true;
+                        enFuzzyCorrected = true;
+                    } else if (rawDist === 2 && medBrandEN.length >= 6) {
+                        score += 36;
+                        enMatched = true;
+                        enFuzzyCorrected = true;
                     } else if (itemBrandEN.startsWith(medBrandEN) || medBrandEN.startsWith(itemBrandEN)) {
                         const ratio = Math.min(medBrandEN.length, itemBrandEN.length) / Math.max(medBrandEN.length, itemBrandEN.length);
                         if (ratio >= 0.72) {
-                            score += 34;
+                            score += 38;
                             enMatched = true;
+                            enFuzzyCorrected = true;
                         }
                     }
                 }
             }
 
-            // --- Brand AR scoring ---
+            // --- Brand AR scoring (Exact -> Joined 2-word -> Skeleton -> 1-char typo) ---
             if (medBrandAR && itemBrandAR) {
-                // Guard: if BOTH have long EN brand names that clearly differ, don't let a generic 1st AR word falsely match
                 const strongEnMismatch = !enMatched && medBrandEN.length >= 5 && itemBrandEN.length >= 5 && editDistanceAtMost(medBrandEN, itemBrandEN, 3) > 3;
                 if (!strongEnMismatch) {
-                    if (medBrandAR === itemBrandAR) {
-                        score += enMatched ? 10 : 44;
+                    if (medBrandAR === itemBrandAR || (medBrand2AR && medBrand2AR === itemBrandAR) || (itemBrand2AR && medBrandAR === itemBrand2AR)) {
+                        score += enMatched ? 14 : 48;
+                        arMatched = true;
+                    } else if (medArSkel.length >= 3 && (medArSkel === item._arSkel || (medArSkel2 && medArSkel2 === item._arSkel) || (item._arSkel2 && medArSkel === item._arSkel2))) {
+                        score += enMatched ? 12 : 44;
                         arMatched = true;
                     } else if (medBrandAR.length >= 4 && itemBrandAR.length >= 4 && editDistanceAtMost(medBrandAR, itemBrandAR, 1) === 1) {
-                        score += enMatched ? 6 : 36;
+                        score += enMatched ? 10 : 40;
                         arMatched = true;
                     }
                 }
@@ -462,7 +583,8 @@ export const EgyptianDrugs = {
                 else score -= 10;
             }
             for (const v of itemVariants) {
-                if (!medVariants.has(v)) score -= 6;
+                if (matchedViaBrand2 && itemEnTokens[1] === v) continue;
+                if (!medVariants.has(v)) score -= 3;
             }
 
             // --- Strength scoring ---
@@ -485,10 +607,12 @@ export const EgyptianDrugs = {
             }
 
             // --- Active ingredient confirmation ---
+            let activeConfirmed = false;
             if (medAct && item.active) {
                 const itemAct = item._actLow || item.active.toLowerCase();
                 if (itemAct.includes(medAct) || medAct.includes(itemAct)) {
                     score += 14;
+                    activeConfirmed = true;
                 }
             }
 
@@ -497,17 +621,169 @@ export const EgyptianDrugs = {
 
             const clamped = Math.max(0, Math.min(100, Math.round(score)));
             if (clamped >= 48) {
-                scored.push({
+                const allowHigh = enExact || (arMatched && (enMatched || activeConfirmed)) || activeConfirmed;
+                const confidence = (allowHigh && clamped >= 72) ? 'high' : 'medium';
+                out.push({
                     item,
                     score: clamped,
-                    confidence: clamped >= 72 ? 'high' : 'medium',
+                    confidence,
+                    fuzzyCorrected: enFuzzyCorrected,
                     formattedEN: toTitleCaseDrug(item.nameEN)
                 });
             }
         }
+        return out;
+    };
 
-        scored.sort((a, b) => b.score - a.score);
-        return scored.slice(0, topN);
+    let scored = scorePool(gatherCandidates(false));
+    if (scored.length === 0 && _enConsIndex) {
+        scored = scorePool(gatherCandidates(true));
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, topN);
+}
+
+export const EgyptianDrugs = {
+    getAll() {
+        return _extendedCatalog ? [..._extendedCatalog] : [...BUILTIN_CATALOG];
+    },
+
+    async ensureLoaded() {
+        await loadExtendedCatalog();
+        return _extendedCatalog || BUILTIN_CATALOG;
+    },
+
+    /**
+     * Search with auto-loading of extended catalog.
+     * Supports English name, Arabic name, active ingredient, barcode,
+     * dot/space normalization (b.b.c., 1 2 3), and phonetic fuzzy fallback.
+     */
+    search(query, limit = 8) {
+        if (!query) return [];
+        const strQuery = String(query).trim();
+        if (!strQuery || strQuery.length < 2) return [];
+
+        const qRaw = strQuery.toLowerCase();
+        const qNorm = normalizeArabic(strQuery);
+        const qCollapsed = collapseInitialisms(qRaw).trim();
+        const qCompact = qCollapsed.replace(/[^a-z0-9]/g, '');
+
+        if (_extendedCatalog) {
+            const startMatches = [];
+            const includeMatches = [];
+            const seen = new Set();
+
+            for (const item of _extendedCatalog) {
+                if (startMatches.length + includeMatches.length >= limit * 3) break;
+                const en = item._enLow || (item.nameEN || '').toLowerCase();
+                const enNorm = item._enNorm || en;
+                const enComp = item._enCompact || '';
+                const arRaw = (item.nameAR || '').toLowerCase();
+                const arNorm = item._arNorm || normalizeArabic(item.nameAR || '');
+                const actRaw = item._actLow || (item.active || '').toLowerCase();
+                const bc = item.barcode || '';
+
+                if (bc && bc === strQuery) {
+                    startMatches.unshift(item);
+                    seen.add(item);
+                } else if (en.startsWith(qRaw) || enNorm.startsWith(qCollapsed) ||
+                           (qCompact.length >= 2 && enComp.startsWith(qCompact)) ||
+                           arRaw.startsWith(qRaw) || arNorm.startsWith(qNorm)) {
+                    startMatches.push(item);
+                    seen.add(item);
+                } else if (en.includes(qRaw) || enNorm.includes(qCollapsed) ||
+                           (qCompact.length >= 3 && enComp.includes(qCompact)) ||
+                           arRaw.includes(qRaw) || arNorm.includes(qNorm) ||
+                           actRaw.includes(qRaw) || normalizeArabic(item.active || '').includes(qNorm) ||
+                           (bc && bc.includes(qRaw))) {
+                    includeMatches.push(item);
+                    seen.add(item);
+                }
+            }
+
+            // Put smart phonetic/fuzzy brand matches ahead of substring/active-ingredient hits when no direct prefix match was found
+            let smartBrandMatches = [];
+            if (startMatches.length < limit && strQuery.length >= 3 && !/^\d{6,}$/.test(strQuery)) {
+                const smartHits = this.findBestMatches({ nameEN: strQuery, nameAR: strQuery, type: 'medicine' }, limit);
+                for (const hit of smartHits) {
+                    if (!seen.has(hit.item)) {
+                        smartBrandMatches.push(hit.item);
+                        seen.add(hit.item);
+                    }
+                }
+            }
+
+            const combined = [...startMatches, ...smartBrandMatches, ...includeMatches];
+            return combined.slice(0, limit);
+        }
+
+        if (!_loadingPromise && !_loadFailed) {
+            loadExtendedCatalog();
+        }
+
+        return searchCatalog(BUILTIN_CATALOG, qRaw, qNorm, limit);
+    },
+
+    async searchAsync(query, limit = 8) {
+        if (!query) return [];
+        const strQuery = String(query).trim();
+        if (!strQuery || strQuery.length < 2) return [];
+
+        await loadExtendedCatalog();
+        return this.search(query, limit);
+    },
+
+    /**
+     * Find top matching catalog items for a user medicine record.
+     * Supports exact, phonetic, transposition, dot/space collapse, dual-name "/" splits,
+     * and tube-size vs strength separation across 27,601 drugs in <10ms.
+     * Returns [{ item, score, confidence: 'high'|'medium', formattedEN }]
+     */
+    findBestMatches(med, topN = 5) {
+        const catalog = _extendedCatalog || BUILTIN_CATALOG;
+        if (!med || catalog.length === 0) return [];
+        if (med.type === 'supply') return []; // Don't auto-match medical consumables (syringes, cannulas) to drugs
+
+        const medBc = String(med.barcode || '').trim();
+        const isRealBc = /^\d{8,14}$/.test(medBc);
+
+        // 1. Exact barcode shortcut
+        if (isRealBc) {
+            const exact = catalog.find(c => c.barcode && c.barcode === medBc);
+            if (exact) {
+                return [{ item: exact, score: 100, confidence: 'high', formattedEN: toTitleCaseDrug(exact.nameEN) }];
+            }
+        }
+
+        // 2. Primary match on full medicine record
+        const primary = scoreSingleQuery(med, catalog, topN);
+
+        // 3. Dual-name "/" support (e.g. "Panadol Advance / dolipran")
+        const rawEN = String(med.nameEN || '');
+        if (rawEN.includes('/')) {
+            const parts = rawEN.split('/').map(p => p.trim()).filter(p => p.length >= 3);
+            if (parts.length >= 2) {
+                const bestByItem = new Map();
+                for (const m of primary) bestByItem.set(m.item, m);
+                for (const part of parts) {
+                    const partMatches = scoreSingleQuery({ ...med, nameEN: part }, catalog, topN);
+                    for (const pm of partMatches) {
+                        const prev = bestByItem.get(pm.item);
+                        if (!prev || pm.score > prev.score) bestByItem.set(pm.item, pm);
+                    }
+                }
+                return Array.from(bestByItem.values())
+                    .sort((a, b) => b.score - a.score)
+                    .slice(0, topN);
+            }
+        }
+
+        return primary;
+    },
+
+    formatEN(str) {
+        return toTitleCaseDrug(str);
     },
 
     preload() {
