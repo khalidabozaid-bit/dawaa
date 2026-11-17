@@ -2,6 +2,7 @@
 import { DB } from '../core/db.js';
 import { CATEGORY_MAP, SEED_MEDICINES } from '../core/seed_data.js';
 import { Utils } from '../core/utils.js';
+import { auth } from '../core/firebase-config.js';
 
 /**
  * Categories & Master Data Feature (v18.7.4 - Clean Logic & Uncategorized Support)
@@ -96,10 +97,13 @@ export const Categories = {
                 }
             }
 
-            // Seed Medicines if empty
+            // Seed Medicines only if DB is empty AND no authenticated user
+            // (logged-in users get real data from Sync.pull — no need for dummy seed)
             const existingMeds = await DB.getAll('medicineMaster');
-            if (existingMeds.length === 0) {
-                console.log('Dawaa Categories: Seeding default medicines (1001-Native)...');
+            const hasAuthUser = (typeof auth !== 'undefined' && auth?.currentUser) || 
+                                (typeof firebase !== 'undefined' && firebase?.auth?.()?.currentUser);
+            if (existingMeds.length === 0 && !hasAuthUser) {
+                console.log('Dawaa Categories: Seeding default medicines (first-time, no auth)...');
                 for (const med of SEED_MEDICINES) {
                     await DB.add('medicineMaster', {
                         id: med.id, 
