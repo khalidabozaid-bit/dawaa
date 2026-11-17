@@ -79,7 +79,7 @@
             <div class="app-logo">
                 <i class='bx bxs-capsule'></i>
                 <h1>دواء</h1>
-                <span id="app-version-tag" style="display: none;">v18.11.8</span>
+                <span id="app-version-tag" style="display: none;">v18.11.9</span>
                 <span id="network-status" style="display: none;"></span>
             </div>
             
@@ -266,6 +266,13 @@
                 <h3><i class='bx bxs-file-doc'></i> تقارير الجرد (Excel Export)</h3>
             </div>
             <div class="reports-grid mb-25">
+                <div class="report-card" onclick="window.App.openCustomExportModal()" style="border: 1.5px solid rgba(59,130,246,0.3); background: rgba(59,130,246,0.04);">
+                    <div class="report-icon primary"><i class='bx bx-slider-alt'></i></div>
+                    <div class="report-info">
+                        <h3>تصدير إكسيل مخصص ⭐</h3>
+                        <p>تحكم كامل: الاسم، التصنيف، الأماكن، الصلاحيات، والترتيب</p>
+                    </div>
+                </div>
                 <div class="report-card" onclick="window.App.export('full')">
                     <div class="report-icon primary"><i class='bx bx-spreadsheet'></i></div>
                     <div class="report-info">

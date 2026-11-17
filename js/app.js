@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.11.8', // Merged audit view — all medicines across all locations with counting
+    VERSION: '18.11.9', // Custom Excel export builder with full control
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2465,6 +2465,461 @@ const App = {
             UI.showToast('فشل التصدير', 'danger');
         }
     },
+
+    // ===================== Custom Export Builder =====================
+    async openCustomExportModal() {
+        try {
+            const allCats = (await Categories.getAllSorted()) || [];
+            const allLocs = (await Locations.getAll()) || [];
+
+            // Build category checkboxes
+            const catChecks = allCats.map(c => {
+                const label = c.name || c.id;
+                return `<label style="display:flex; align-items:center; gap:6px; padding:4px 0; cursor:pointer;">
+                    <input type="checkbox" value="${c.id}" checked class="cex-cat-cb"> ${label}
+                </label>`;
+            }).join('');
+
+            // Build location checkboxes
+            const locChecks = allLocs.map(l => {
+                const label = l.nameAR || l.id;
+                return `<label style="display:flex; align-items:center; gap:6px; padding:4px 0; cursor:pointer;">
+                    <input type="checkbox" value="${l.id}" checked class="cex-loc-cb"> ${label}
+                </label>`;
+            }).join('');
+
+            // Load saved preferences
+            let saved = {};
+            try { saved = JSON.parse(localStorage.getItem('dawaa_export_prefs') || '{}'); } catch(e) {}
+
+            const nameVal = saved.nameMode || 'both';
+            const groupVal = saved.groupByCat !== false;
+            const locModeVal = saved.locationMode || 'columns';
+            const expiryVal = saved.expiryMode || 'all';
+            const sortVal = saved.sortMode || 'name';
+
+            UI.showModal(`
+                <div class="modal-header">
+                    <h2><i class='bx bx-slider-alt'></i> تصدير إكسيل مخصص</h2>
+                    <p class="text-muted" style="font-size:12px; margin-top:4px;">اختر الإعدادات وصدّر</p>
+                </div>
+
+                <div style="max-height: 65vh; overflow-y: auto; padding: 4px;">
+
+                <!-- 1. Name -->
+                <div class="cex-section" style="margin-bottom:16px;">
+                    <h4 style="margin-bottom:8px; font-size:14px;">📛 اسم الدواء</h4>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <label style="cursor:pointer;"><input type="radio" name="cex-name" value="both" ${nameVal==='both'?'checked':''}> الاتنين (EN + AR)</label>
+                        <label style="cursor:pointer;"><input type="radio" name="cex-name" value="en" ${nameVal==='en'?'checked':''}> إنجليزي فقط</label>
+                        <label style="cursor:pointer;"><input type="radio" name="cex-name" value="ar" ${nameVal==='ar'?'checked':''}> عربي فقط</label>
+                    </div>
+                </div>
+
+                <!-- 2. Group by category -->
+                <div class="cex-section" style="margin-bottom:16px;">
+                    <h4 style="margin-bottom:8px; font-size:14px;">🗂️ التجميع بالتصنيف</h4>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <label style="cursor:pointer;"><input type="radio" name="cex-group" value="yes" ${groupVal?'checked':''}> مجمّع بالتصنيفات</label>
+                        <label style="cursor:pointer;"><input type="radio" name="cex-group" value="no" ${!groupVal?'checked':''}> قائمة مسطحة</label>
+                    </div>
+                </div>
+
+                <!-- 3. Locations -->
+                <div class="cex-section" style="margin-bottom:16px;">
+                    <h4 style="margin-bottom:8px; font-size:14px;">📍 الأماكن</h4>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+                        <label style="cursor:pointer;"><input type="radio" name="cex-loc" value="columns" ${locModeVal==='columns'?'checked':''}> عمود لكل مكان</label>
+                        <label style="cursor:pointer;"><input type="radio" name="cex-loc" value="single" ${locModeVal==='single'?'checked':''}> عمود واحد باسم المكان</label>
+                        <label style="cursor:pointer;"><input type="radio" name="cex-loc" value="none" ${locModeVal==='none'?'checked':''}> بدون أماكن</label>
+                    </div>
+                </div>
+
+                <!-- 4. Expiry -->
+                <div class="cex-section" style="margin-bottom:16px;">
+                    <h4 style="margin-bottom:8px; font-size:14px;">📅 الصلاحية</h4>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <label style="cursor:pointer;"><input type="radio" name="cex-exp" value="all" ${expiryVal==='all'?'checked':''}> كل الصلاحيات مع كمياتها</label>
+                        <label style="cursor:pointer;"><input type="radio" name="cex-exp" value="earliest" ${expiryVal==='earliest'?'checked':''}> أقرب صلاحية فقط</label>
+                        <label style="cursor:pointer;"><input type="radio" name="cex-exp" value="none" ${expiryVal==='none'?'checked':''}> بدون صلاحية</label>
+                    </div>
+                </div>
+
+                <!-- 5. Sort -->
+                <div class="cex-section" style="margin-bottom:16px;">
+                    <h4 style="margin-bottom:8px; font-size:14px;">🔢 الترتيب</h4>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <label style="cursor:pointer;"><input type="radio" name="cex-sort" value="name" ${sortVal==='name'?'checked':''}> أبجدي بالاسم</label>
+                        <label style="cursor:pointer;"><input type="radio" name="cex-sort" value="qty-asc" ${sortVal==='qty-asc'?'checked':''}> الأقل كمية أولاً</label>
+                        <label style="cursor:pointer;"><input type="radio" name="cex-sort" value="exp-asc" ${sortVal==='exp-asc'?'checked':''}> الأقرب صلاحية أولاً</label>
+                    </div>
+                </div>
+
+                <!-- 6. Filter: Categories -->
+                <details style="margin-bottom:16px; border:1px solid var(--border); border-radius:8px; padding:8px 12px;">
+                    <summary style="cursor:pointer; font-size:14px; font-weight:600;">🏷️ فلتر التصنيفات <small style="color:var(--text-muted);">(اختياري)</small></summary>
+                    <div style="margin-top:8px; display:flex; flex-direction:column; gap:2px; max-height:150px; overflow-y:auto;">
+                        <label style="display:flex; align-items:center; gap:6px; padding:4px 0; cursor:pointer; color:var(--primary); font-weight:600;">
+                            <input type="checkbox" id="cex-cat-all" checked onchange="document.querySelectorAll('.cex-cat-cb').forEach(c=>c.checked=this.checked)"> تحديد / إلغاء الكل
+                        </label>
+                        ${catChecks}
+                    </div>
+                </details>
+
+                <!-- 7. Filter: Locations -->
+                <details style="margin-bottom:16px; border:1px solid var(--border); border-radius:8px; padding:8px 12px;">
+                    <summary style="cursor:pointer; font-size:14px; font-weight:600;">📍 فلتر الأماكن <small style="color:var(--text-muted);">(اختياري)</small></summary>
+                    <div style="margin-top:8px; display:flex; flex-direction:column; gap:2px; max-height:150px; overflow-y:auto;">
+                        <label style="display:flex; align-items:center; gap:6px; padding:4px 0; cursor:pointer; color:var(--primary); font-weight:600;">
+                            <input type="checkbox" id="cex-loc-all" checked onchange="document.querySelectorAll('.cex-loc-cb').forEach(c=>c.checked=this.checked)"> تحديد / إلغاء الكل
+                        </label>
+                        ${locChecks}
+                    </div>
+                </details>
+
+                </div>
+
+                <div class="form-actions mt-15" style="gap:8px;">
+                    <button class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+                    <button class="btn-primary" onclick="window.App._runCustomExport()">
+                        <i class='bx bx-download'></i> تصدير الآن
+                    </button>
+                </div>
+            `);
+        } catch (err) {
+            console.error('Custom export modal error:', err);
+            UI.showToast('خطأ في فتح خيارات التصدير', 'danger');
+        }
+    },
+
+    _runCustomExport() {
+        // Collect options from modal
+        const nameMode = document.querySelector('input[name="cex-name"]:checked')?.value || 'both';
+        const groupByCat = (document.querySelector('input[name="cex-group"]:checked')?.value || 'yes') === 'yes';
+        const locationMode = document.querySelector('input[name="cex-loc"]:checked')?.value || 'columns';
+        const expiryMode = document.querySelector('input[name="cex-exp"]:checked')?.value || 'all';
+        const sortMode = document.querySelector('input[name="cex-sort"]:checked')?.value || 'name';
+
+        // Collect category & location filters
+        const selectedCats = Array.from(document.querySelectorAll('.cex-cat-cb:checked')).map(c => c.value);
+        const selectedLocs = Array.from(document.querySelectorAll('.cex-loc-cb:checked')).map(c => c.value);
+
+        // Save preferences
+        try {
+            localStorage.setItem('dawaa_export_prefs', JSON.stringify({
+                nameMode, groupByCat, locationMode, expiryMode, sortMode
+            }));
+        } catch(e) {}
+
+        UI.closeModal();
+        this.exportCustomInventory({ nameMode, groupByCat, locationMode, expiryMode, sortMode, selectedCats, selectedLocs });
+    },
+
+    async exportCustomInventory(opts) {
+        try {
+            if (!window.XLSX) {
+                UI.showToast('مكتبة تصدير Excel غير متوفرة', 'danger');
+                return;
+            }
+
+            const masterMeds = (await DB.getAll('medicineMaster')) || [];
+            const inventoryEntries = (await DB.getAll('inventory')) || [];
+            const allCats = (await Categories.getAllSorted()) || [];
+            const allLocs = (await Locations.getAll()) || [];
+            const catMap = new Map(allCats.map(c => [c.id, c]));
+            const locMap = new Map(allLocs.map(l => [l.id, l]));
+
+            // Filter by selected categories
+            const catFilter = new Set(opts.selectedCats || allCats.map(c => c.id));
+            // Always include uncategorized if it exists or if all selected
+            if (catFilter.size === allCats.length) catFilter.add('uncategorized');
+
+            // Filter by selected locations
+            const locFilter = new Set(opts.selectedLocs || allLocs.map(l => l.id));
+
+            // --- Step 1: Build per-medicine data ---
+            // medId → { nameEN, nameAR, categoryId, perLoc: { locId: { qty, expiries: { date: qty } } }, total, earliestExp }
+            const medData = new Map();
+
+            for (const med of masterMeds) {
+                if (!catFilter.has(med.categoryId || 'uncategorized')) continue;
+                medData.set(med.id, {
+                    id: med.id,
+                    nameEN: med.nameEN || '',
+                    nameAR: med.nameAR || med.nameEN || '',
+                    categoryId: med.categoryId || 'uncategorized',
+                    perLoc: {},
+                    total: 0,
+                    earliestExp: null
+                });
+            }
+
+            for (const entry of inventoryEntries) {
+                const d = medData.get(entry.medicineId);
+                if (!d) continue;
+
+                // Resolve location id
+                let locId = null;
+                // entry.location might be a name or an id
+                if (locMap.has(entry.location)) {
+                    locId = entry.location;
+                } else {
+                    // Try matching by name
+                    for (const [lid, lobj] of locMap) {
+                        if (lobj.nameAR === entry.location || lobj.nameEN === entry.location) {
+                            locId = lid; break;
+                        }
+                    }
+                    if (!locId) locId = entry.location || '__default__';
+                }
+
+                if (!locFilter.has(locId) && locId !== '__default__') continue;
+
+                const qty = parseFloat(entry.quantity) || 0;
+                const exp = entry.expiryDate || null;
+
+                if (!d.perLoc[locId]) {
+                    d.perLoc[locId] = { qty: 0, expiries: {} };
+                }
+                d.perLoc[locId].qty += qty;
+                if (exp) {
+                    d.perLoc[locId].expiries[exp] = (d.perLoc[locId].expiries[exp] || 0) + qty;
+                }
+                d.total += qty;
+                if (exp && (!d.earliestExp || exp < d.earliestExp)) {
+                    d.earliestExp = exp;
+                }
+            }
+
+            const medsArray = Array.from(medData.values());
+            if (medsArray.length === 0) {
+                UI.showToast('لا توجد بيانات لتصديرها', 'warning');
+                return;
+            }
+
+            // --- Step 2: Sort ---
+            if (opts.sortMode === 'qty-asc') {
+                medsArray.sort((a, b) => a.total - b.total);
+            } else if (opts.sortMode === 'exp-asc') {
+                medsArray.sort((a, b) => {
+                    if (!a.earliestExp && !b.earliestExp) return 0;
+                    if (!a.earliestExp) return 1;
+                    if (!b.earliestExp) return -1;
+                    return a.earliestExp.localeCompare(b.earliestExp);
+                });
+            } else {
+                medsArray.sort((a, b) => (a.nameEN || a.nameAR).localeCompare(b.nameEN || b.nameAR));
+            }
+
+            // --- Step 3: Get unique location names used ---
+            const usedLocIds = new Set();
+            for (const d of medsArray) {
+                for (const lid of Object.keys(d.perLoc)) usedLocIds.add(lid);
+            }
+            const locColumns = allLocs.filter(l => usedLocIds.has(l.id)).sort((a, b) => (a.nameAR || '').localeCompare(b.nameAR || ''));
+
+            // Helper: format expiries
+            const formatExpiries = (d) => {
+                // Merge all expiries across locations
+                const allExp = {};
+                for (const loc of Object.values(d.perLoc)) {
+                    for (const [exp, qty] of Object.entries(loc.expiries)) {
+                        allExp[exp] = (allExp[exp] || 0) + qty;
+                    }
+                }
+                if (Object.keys(allExp).length === 0) return '';
+                return Object.entries(allExp)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([exp, qty]) => `${exp}: ${qty}`)
+                    .join(' | ');
+            };
+
+            // --- Step 4: Build sheet ---
+            if (opts.groupByCat) {
+                // === GROUPED BY CATEGORY ===
+                const catGroups = new Map();
+                for (const d of medsArray) {
+                    const cid = d.categoryId;
+                    if (!catGroups.has(cid)) catGroups.set(cid, []);
+                    catGroups.get(cid).push(d);
+                }
+
+                const sortedCatIds = Array.from(catGroups.keys()).sort((a, b) => {
+                    if (a === 'uncategorized') return 1;
+                    if (b === 'uncategorized') return -1;
+                    return (catMap.get(a)?.name || a).localeCompare(catMap.get(b)?.name || b);
+                });
+
+                // Headers
+                const headers = [];
+                if (opts.nameMode === 'both' || opts.nameMode === 'en') headers.push('Medicine Name (EN)');
+                if (opts.nameMode === 'both' || opts.nameMode === 'ar') headers.push('اسم الدواء (AR)');
+
+                if (opts.locationMode === 'columns') {
+                    for (const loc of locColumns) headers.push(loc.nameAR || loc.id);
+                } else if (opts.locationMode === 'single') {
+                    headers.push('مكان التخزين');
+                }
+
+                headers.push('الإجمالي');
+
+                if (opts.expiryMode === 'all') {
+                    headers.push('الصلاحيات');
+                } else if (opts.expiryMode === 'earliest') {
+                    headers.push('أقرب صلاحية');
+                }
+
+                const aoa = [headers];
+                const categoryRowIndices = [];
+                let grandTotal = 0;
+
+                for (const catId of sortedCatIds) {
+                    const cat = catMap.get(catId);
+                    const catName = cat ? cat.name : (catId === 'uncategorized' ? 'بدون تصنيف' : catId);
+                    const meds = catGroups.get(catId);
+                    const catTotal = meds.reduce((s, m) => s + m.total, 0);
+
+                    // Category header
+                    const catRow = [`◼ ${catName} (${meds.length} صنف — ${catTotal} وحدة)`];
+                    for (let i = 1; i < headers.length; i++) catRow.push('');
+                    categoryRowIndices.push(aoa.length);
+                    aoa.push(catRow);
+
+                    // Medicine rows
+                    for (const m of meds) {
+                        const row = [];
+                        if (opts.nameMode === 'both' || opts.nameMode === 'en') row.push(m.nameEN);
+                        if (opts.nameMode === 'both' || opts.nameMode === 'ar') row.push(m.nameAR);
+
+                        if (opts.locationMode === 'columns') {
+                            for (const loc of locColumns) {
+                                row.push(m.perLoc[loc.id]?.qty || 0);
+                            }
+                        } else if (opts.locationMode === 'single') {
+                            const locNames = [];
+                            for (const [lid, data] of Object.entries(m.perLoc)) {
+                                const lObj = locMap.get(lid);
+                                const name = lObj ? lObj.nameAR : lid;
+                                locNames.push(`${name} (${data.qty})`);
+                            }
+                            row.push(locNames.join(' | '));
+                        }
+
+                        row.push(m.total);
+
+                        if (opts.expiryMode === 'all') {
+                            row.push(formatExpiries(m));
+                        } else if (opts.expiryMode === 'earliest') {
+                            row.push(m.earliestExp || '');
+                        }
+
+                        aoa.push(row);
+                    }
+
+                    grandTotal += catTotal;
+                }
+
+                // Grand total
+                const totalRow = [];
+                if (opts.nameMode === 'both') { totalRow.push(''); totalRow.push('الإجمالي الكلي'); }
+                else totalRow.push('الإجمالي الكلي');
+
+                if (opts.locationMode === 'columns') {
+                    for (const loc of locColumns) {
+                        const locTotal = medsArray.reduce((s, m) => s + (m.perLoc[loc.id]?.qty || 0), 0);
+                        totalRow.push(locTotal);
+                    }
+                } else if (opts.locationMode === 'single') {
+                    totalRow.push('');
+                }
+
+                totalRow.push(grandTotal);
+                if (opts.expiryMode !== 'none') totalRow.push('');
+
+                aoa.push([]);
+                aoa.push(totalRow);
+
+                // Build sheet
+                const ws = XLSX.utils.aoa_to_sheet(aoa);
+                ws['!cols'] = headers.map((h, i) => {
+                    let maxLen = h.length;
+                    for (const row of aoa) {
+                        const cellLen = String(row[i] || '').length;
+                        if (cellLen > maxLen) maxLen = cellLen;
+                    }
+                    return { wch: Math.min(maxLen + 3, 55) };
+                });
+
+                // Merge category headers
+                const merges = categoryRowIndices.map(rowIdx => ({
+                    s: { r: rowIdx + 1, c: 0 },
+                    e: { r: rowIdx + 1, c: headers.length - 1 }
+                }));
+                if (merges.length > 0) ws['!merges'] = merges;
+
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'المخزون');
+                XLSX.writeFile(wb, `مخزون_مخصص_${new Date().toISOString().split('T')[0]}.xlsx`);
+                UI.showToast(`تم تصدير ${medsArray.length} صنف ✅`, 'success');
+
+            } else {
+                // === FLAT LIST ===
+                const finalRows = medsArray.map(m => {
+                    const row = {};
+                    if (opts.nameMode === 'both' || opts.nameMode === 'en') row['Medicine Name (EN)'] = m.nameEN;
+                    if (opts.nameMode === 'both' || opts.nameMode === 'ar') row['اسم الدواء (AR)'] = m.nameAR;
+
+                    const cat = catMap.get(m.categoryId);
+                    row['التصنيف'] = cat ? cat.name : (m.categoryId === 'uncategorized' ? 'بدون تصنيف' : m.categoryId);
+
+                    if (opts.locationMode === 'columns') {
+                        for (const loc of locColumns) {
+                            row[loc.nameAR || loc.id] = m.perLoc[loc.id]?.qty || 0;
+                        }
+                    } else if (opts.locationMode === 'single') {
+                        const locNames = [];
+                        for (const [lid, data] of Object.entries(m.perLoc)) {
+                            const lObj = locMap.get(lid);
+                            const name = lObj ? lObj.nameAR : lid;
+                            locNames.push(`${name} (${data.qty})`);
+                        }
+                        row['مكان التخزين'] = locNames.join(' | ');
+                    }
+
+                    row['الإجمالي'] = m.total;
+
+                    if (opts.expiryMode === 'all') {
+                        row['الصلاحيات'] = formatExpiries(m);
+                    } else if (opts.expiryMode === 'earliest') {
+                        row['أقرب صلاحية'] = m.earliestExp || '';
+                    }
+
+                    return row;
+                });
+
+                if (finalRows.length === 0) {
+                    UI.showToast('لا توجد بيانات لتصديرها', 'warning');
+                    return;
+                }
+
+                const ws = XLSX.utils.json_to_sheet(finalRows);
+                ws['!cols'] = Object.keys(finalRows[0]).map(key => {
+                    const maxLen = Math.max(key.length, ...finalRows.map(r => String(r[key] || '').length));
+                    return { wch: Math.min(maxLen + 4, 55) };
+                });
+
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'المخزون');
+                XLSX.writeFile(wb, `مخزون_مخصص_${new Date().toISOString().split('T')[0]}.xlsx`);
+                UI.showToast(`تم تصدير ${finalRows.length} صنف ✅`, 'success');
+            }
+
+        } catch (err) {
+            console.error('Custom export error:', err);
+            UI.showToast('فشل تصدير الإكسيل: ' + err.message, 'danger');
+        }
+    },
+    // ===================== End Custom Export Builder =====================
 
     async openManageCategories() {
         try {
