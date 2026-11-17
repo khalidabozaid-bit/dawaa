@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.14.2', // Separate barcode field with external camera/delete buttons + fix search focus/keyboard across all views
+    VERSION: '18.14.3', // Align EN category in EN column and AR category in AR column in Excel exports
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2865,6 +2865,8 @@ const App = {
                             groups.set(cid, {
                                 key: cid,
                                 label: Categories.getCategoryDisplayName(cat || cid, opts.nameMode, catMap),
+                                labelEN: Categories.getCategoryDisplayName(cat || cid, 'en', catMap),
+                                labelAR: Categories.getCategoryDisplayName(cat || cid, 'ar', catMap),
                                 isLast: cid === 'uncategorized',
                                 meds: []
                             });
@@ -2877,9 +2879,12 @@ const App = {
                         const normKey = this._normalizeActiveKey(d.activeIngredient);
                         const groupKey = normKey || '__no_active__';
                         if (!groups.has(groupKey)) {
+                            const actLabel = normKey ? d.activeIngredient.trim() : 'بدون مادة فعالة';
                             groups.set(groupKey, {
                                 key: groupKey,
-                                label: normKey ? d.activeIngredient.trim() : 'بدون مادة فعالة',
+                                label: actLabel,
+                                labelEN: normKey ? d.activeIngredient.trim() : 'No Active Ingredient',
+                                labelAR: actLabel,
                                 isLast: !normKey,
                                 meds: []
                             });
@@ -2916,9 +2921,17 @@ const App = {
                 let rowCounter = 1;
 
                 for (const grp of sortedGroups) {
-                    // Clean group header placed in the Medicine Name column (col 1), NO row merge!
+                    // Put EN category under EN medicines column & AR category under AR medicines column (NO row merge!)
                     const prefix = groupMode === 'active' ? '🧬 ' : '◼ ';
-                    const grpRow = ['', `${prefix}${grp.label}`];
+                    const grpRow = [''];
+                    if (opts.nameMode === 'both') {
+                        grpRow.push(`${prefix}${grp.labelEN}`);
+                        grpRow.push(`${prefix}${grp.labelAR}`);
+                    } else if (opts.nameMode === 'en') {
+                        grpRow.push(`${prefix}${grp.labelEN}`);
+                    } else {
+                        grpRow.push(`${prefix}${grp.labelAR}`);
+                    }
                     while (grpRow.length < headers.length) grpRow.push('');
                     aoa.push(grpRow);
 
@@ -6268,11 +6281,12 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
             for (const catId of sortedCatIds) {
                 const cat = catMap.get(catId);
-                const catName = Categories.getCategoryDisplayName(cat || catId, 'both', catMap);
+                const catNameEN = Categories.getCategoryDisplayName(cat || catId, 'en', catMap);
+                const catNameAR = Categories.getCategoryDisplayName(cat || catId, 'ar', catMap);
                 const meds = catGroups.get(catId);
 
-                // Clean category header in the Medicine Name column (col 1), NO row merge!
-                const catRow = ['', `◼ ${catName}`];
+                // EN category in EN column (col 1), AR category in AR column (col 2), NO row merge!
+                const catRow = ['', `◼ ${catNameEN}`, `◼ ${catNameAR}`];
                 while (catRow.length < headers.length) catRow.push('');
                 aoa.push(catRow);
 
