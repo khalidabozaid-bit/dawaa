@@ -1,17 +1,17 @@
 import { DB } from './core/db.js';
 import { UI } from './core/ui.js';
 import { Inventory } from './features/inventory.js';
-import { Categories } from './features/categories.js?v=18.17.2';
+import { Categories } from './features/categories.js?v=18.17.3';
 import { Locations } from './features/locations.js';
 import { Audit } from './features/audit.js';
 import { Users } from './features/users.js';
-import { EgyptianDrugs } from './core/egyptian_drugs.js?v=18.17.2';
+import { EgyptianDrugs } from './core/egyptian_drugs.js?v=18.17.3';
 window.Users = Users;
 window.EgyptianDrugs = EgyptianDrugs;
 import { Exporter } from './features/export.js';
-import { Utils } from './core/utils.js?v=18.17.2';
+import { Utils } from './core/utils.js?v=18.17.3';
 import { Sync } from './core/sync.js';
-import { TaskManager } from './features/tasks.js?v=18.17.2';
+import { TaskManager } from './features/tasks.js?v=18.17.3';
 import { auth, db, storage } from './core/firebase-config.js';
 
 // Immediate Global Bindings to prevent undefined calls during boot
@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.17.2', // Unified Smart Search across all views, ES module cache-busting, Enricher verified/ignored memory & reject/change controls
+    VERSION: '18.17.3', // Enricher overwrite mode on manual link/dropdown change/reopen + per-card save & edit/replace buttons
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -3322,32 +3322,36 @@ const App = {
 
         const item = match.item;
         const changes = {};
+        const overwrite = !!(row.forceOverwrite || match.manual);
 
-        // 1. Active ingredient (fill if missing)
+        // 1. Active ingredient (fill if missing, OR replace if user manually changed/reopened this medicine)
         const curActive = (med.activeIngredient || '').trim();
-        if (fields.fillActive && !curActive && item.active && item.active.trim()) {
-            changes.activeIngredient = { from: '', to: item.active.trim() };
+        const newActive = (item.active || '').trim();
+        if (fields.fillActive && newActive && (overwrite ? newActive.toLowerCase() !== curActive.toLowerCase() : !curActive)) {
+            changes.activeIngredient = { from: curActive, to: newActive };
         }
 
-        // 2. Arabic name (fill if empty, identical to EN, or has no Arabic chars)
+        // 2. Arabic name (fill if empty/no Arabic, OR replace in overwrite mode)
         const curAR = (med.nameAR || '').trim();
         const curEN = (med.nameEN || '').trim();
+        const newAR = (item.nameAR || '').trim();
         const arMissingOrEnglish = !curAR || curAR.toLowerCase() === curEN.toLowerCase() || !/[\u0600-\u06FF]/.test(curAR);
-        if (fields.fillAR && arMissingOrEnglish && item.nameAR && item.nameAR.trim()) {
-            changes.nameAR = { from: curAR, to: item.nameAR.trim() };
+        if (fields.fillAR && newAR && (overwrite ? newAR !== curAR : arMissingOrEnglish)) {
+            changes.nameAR = { from: curAR, to: newAR };
         }
 
-        // 3. Verified EAN Barcode (fill if missing or internal short ID)
+        // 3. Verified EAN Barcode (fill if missing/internal ID, OR replace in overwrite mode)
         const curBc = String(med.barcode || '').trim();
         const hasRealBc = curBc && curBc !== String(med.id) && /^\d{8,14}$/.test(curBc);
-        if (fields.fillBarcode && !hasRealBc && item.barcode && /^\d{8,14}$/.test(item.barcode)) {
-            changes.barcode = { from: curBc === String(med.id) ? '' : curBc, to: item.barcode };
+        const newBc = String(item.barcode || '').trim();
+        if (fields.fillBarcode && /^\d{8,14}$/.test(newBc) && (overwrite ? newBc !== curBc : !hasRealBc)) {
+            changes.barcode = { from: curBc === String(med.id) ? '' : curBc, to: newBc };
         }
 
-        // 4. English name (optional — off by default to protect custom names)
-        const targetEN = match.formattedEN || item.nameEN || '';
-        if (fields.updateEN && targetEN && targetEN.trim().toLowerCase() !== curEN.toLowerCase()) {
-            changes.nameEN = { from: curEN, to: targetEN.trim() };
+        // 4. English name (global updateEN OR per-row overwriteEN enabled on manual link/edit)
+        const targetEN = (match.formattedEN || item.nameEN || '').trim();
+        if ((fields.updateEN || row.overwriteEN) && targetEN && targetEN.toLowerCase() !== curEN.toLowerCase()) {
+            changes.nameEN = { from: curEN, to: targetEN };
         }
 
         return {
@@ -3388,6 +3392,12 @@ const App = {
         setTxt('enr-tab-unmatched-cnt', unmatchedCount);
         setTxt('enr-tab-done-cnt', doneCount);
 
+        const subEl = document.getElementById('enr-header-subtitle');
+        if (subEl && this._enricherState) {
+            const pendingTotal = this._enricherState.rows.length - doneCount;
+            subEl.textContent = `فحص ${pendingTotal} صنف جديد بقاعدة ${EgyptianDrugs.catalogSize.toLocaleString()} دواء${doneCount > 0 ? ` (${doneCount} معتمد ومخفي سابقاً)` : ''}`;
+        }
+
         const banner = document.getElementById('enr-complete-banner');
         if (banner) {
             if (completePendingCount > 0) {
@@ -3413,7 +3423,7 @@ const App = {
                 <h2 style="font-size:16px; display:flex; align-items:center; gap:6px;">
                     <i class='bx bx-sparkles' style="color:#10b981;"></i> فحص وتكميل بيانات الأدوية
                 </h2>
-                <p class="text-muted" style="font-size:11.5px; margin-top:3px;">
+                <p class="text-muted" id="enr-header-subtitle" style="font-size:11.5px; margin-top:3px;">
                     فحص ${pendingTotal} صنف جديد بقاعدة ${EgyptianDrugs.catalogSize.toLocaleString()} دواء${doneCount > 0 ? ` (${doneCount} معتمد ومخفي سابقاً)` : ''}
                 </p>
             </div>
@@ -3540,10 +3550,79 @@ const App = {
         if (!row) return;
         const parsed = parseInt(newIdx, 10);
         row.selectedIdx = Number.isNaN(parsed) ? -1 : parsed;
+        if (row.selectedIdx >= 0) {
+            row.forceOverwrite = true;
+        }
         const diff = this._computeEnrichDiff(row, st.fields);
         row.checked = row.selectedIdx >= 0 && diff.hasChanges;
         this._refreshEnricherCounters();
         this._renderEnricherList();
+    },
+
+    _enableEnricherOverwrite(rowIdx) {
+        const st = this._enricherState;
+        const row = st?.rows?.[rowIdx];
+        if (!row) return;
+        row.forceOverwrite = true;
+        row.overwriteEN = true;
+        const diff = this._computeEnrichDiff(row, st.fields);
+        row.checked = diff.hasChanges;
+        this._refreshEnricherCounters();
+        this._renderEnricherList();
+    },
+
+    _toggleEnricherRowOverwriteEN(rowIdx, val) {
+        const st = this._enricherState;
+        const row = st?.rows?.[rowIdx];
+        if (!row) return;
+        row.overwriteEN = !!val;
+        const diff = this._computeEnrichDiff(row, st.fields);
+        row.checked = diff.hasChanges;
+        this._refreshEnricherCounters();
+        this._renderEnricherList();
+    },
+
+    async _applySingleEnricherRow(rowIdx) {
+        const st = this._enricherState;
+        const row = st?.rows?.[rowIdx];
+        if (!row) return;
+        const diff = this._computeEnrichDiff(row, st.fields);
+        if (!diff.hasChanges) {
+            return this._verifySingleEnricherRow(rowIdx);
+        }
+        try {
+            const med = await DB.get('medicineMaster', row.med.id);
+            if (!med) return;
+            const now = new Date().toISOString();
+            if (diff.changes.activeIngredient) med.activeIngredient = diff.changes.activeIngredient.to;
+            if (diff.changes.nameAR) med.nameAR = diff.changes.nameAR.to;
+            if (diff.changes.barcode) med.barcode = diff.changes.barcode.to;
+            if (diff.changes.nameEN) med.nameEN = diff.changes.nameEN.to;
+
+            const match = row.selectedIdx >= 0 ? row.matches[row.selectedIdx] : null;
+            med.catalogVerified = true;
+            med.catalogIgnored = false;
+            med.catalogVerifiedAt = now;
+            if (match?.item?.nameEN) med.catalogMatchedEN = match.item.nameEN;
+            med.lastUpdated = now;
+            med.v = (med.v || 1) + 1;
+            await DB.put('medicineMaster', med);
+            if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+                window.Sync.push(med.id).catch(() => {});
+            }
+            row.med = med;
+            row.status = 'verified';
+            row.checked = false;
+            row.forceOverwrite = false;
+            row.overwriteEN = false;
+            this._dashCache = null;
+            this._refreshEnricherCounters();
+            this._renderEnricherList();
+            UI.showToast(`تم تعديل واعتماد "${med.nameEN || med.nameAR}" بنجاح ✨`, 'success');
+            this.refreshAllViews?.();
+        } catch (err) {
+            UI.showToast('تعذر حفظ التعديل: ' + err.message, 'danger');
+        }
     },
 
     _rejectEnricherMatch(rowIdx) {
@@ -3675,6 +3754,7 @@ const App = {
             }
             row.med = med;
             row.status = 'pending';
+            row.forceOverwrite = true;
             row.matches = EgyptianDrugs.findBestMatches(med, 5);
             row.selectedIdx = row.matches.length > 0 ? 0 : -1;
             const diff = this._computeEnrichDiff(row, st.fields);
@@ -3768,6 +3848,8 @@ const App = {
             row.selectedIdx = 0;
         }
 
+        row.forceOverwrite = true;
+        row.overwriteEN = true;
         const diff = this._computeEnrichDiff(row, st.fields);
         row.checked = diff.hasChanges;
         st.openManualIdx = -1;
@@ -3776,7 +3858,7 @@ const App = {
 
         this._refreshEnricherCounters();
         this._renderEnricherList();
-        UI.showToast(`تم ربط "${row.med.nameEN || row.med.nameAR}" بنجاح 🔗`, 'success');
+        UI.showToast(`تم اختيار "${formattedEN}" — اضغط "حفظ التعديل" لتحديث البيانات 🔗`, 'success');
     },
 
     _toggleEnricherRow(medId, isChecked) {
@@ -3900,13 +3982,13 @@ const App = {
 
             const diffLines = [];
             if (diff.changes.activeIngredient) {
-                diffLines.push(`<div style="font-size:11px; color:#059669;">💊 <strong>المادة الفعالة:</strong> + ${Utils.escapeHTML(diff.changes.activeIngredient.to)}</div>`);
+                diffLines.push(`<div style="font-size:11px; color:#059669;">💊 <strong>المادة الفعالة:</strong> ${diff.changes.activeIngredient.from ? `<s style="opacity:0.6;">${Utils.escapeHTML(diff.changes.activeIngredient.from)}</s> ⬅️ ` : '+ '}${Utils.escapeHTML(diff.changes.activeIngredient.to)}</div>`);
             }
             if (diff.changes.nameAR) {
                 diffLines.push(`<div style="font-size:11px; color:#2563eb;">🔤 <strong>الاسم العربي:</strong> ${diff.changes.nameAR.from ? `<s style="opacity:0.6;">${Utils.escapeHTML(diff.changes.nameAR.from)}</s> ⬅️ ` : '+ '}${Utils.escapeHTML(diff.changes.nameAR.to)}</div>`);
             }
             if (diff.changes.barcode) {
-                diffLines.push(`<div style="font-size:11px; color:#7c3aed; font-family:monospace;">🔢 <strong>الباركود:</strong> + ${Utils.escapeHTML(diff.changes.barcode.to)}</div>`);
+                diffLines.push(`<div style="font-size:11px; color:#7c3aed; font-family:monospace;">🔢 <strong>الباركود:</strong> ${diff.changes.barcode.from ? `<s style="opacity:0.6;">${Utils.escapeHTML(diff.changes.barcode.from)}</s> ⬅️ ` : '+ '}${Utils.escapeHTML(diff.changes.barcode.to)}</div>`);
             }
             if (diff.changes.nameEN) {
                 diffLines.push(`<div style="font-size:11px; color:#d97706;">🇬🇧 <strong>الإنجليزي:</strong> <s style="opacity:0.6;">${Utils.escapeHTML(diff.changes.nameEN.from)}</s> ⬅️ ${Utils.escapeHTML(diff.changes.nameEN.to)}</div>`);
@@ -3967,11 +4049,22 @@ const App = {
                             ${diffLines.length > 0 ? `
                                 <div style="margin-top:6px; padding:6px 8px; border-radius:7px; background:var(--bg-secondary); display:flex; flex-direction:column; gap:3px;">
                                     ${diffLines.join('')}
+                                    <div style="margin-top:4px; padding-top:4px; border-top:1px dashed var(--border-color); display:flex; align-items:center; justify-content:space-between; gap:6px; flex-wrap:wrap;">
+                                        ${(r.forceOverwrite || match?.manual) ? `
+                                            <label style="font-size:10px; color:var(--text-muted); cursor:pointer; display:flex; align-items:center; gap:4px;">
+                                                <input type="checkbox" ${r.overwriteEN || st.fields.updateEN ? 'checked' : ''} onchange="window.App._toggleEnricherRowOverwriteEN(${r._idx}, this.checked)"> استبدال الاسم الإنجليزي أيضاً
+                                            </label>
+                                        ` : '<span></span>'}
+                                        <button type="button" onclick="window.App._applySingleEnricherRow(${r._idx})" style="font-size:10.5px; padding:3px 9px; border-radius:6px; border:none; background:#10b981; color:#fff; font-weight:700; cursor:pointer;">💾 حفظ التعديل</button>
+                                    </div>
                                 </div>
                             ` : (match ? `
-                                <div style="margin-top:6px; display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
-                                    <span style="font-size:10.5px; color:var(--text-muted);">✅ بيانات هذا الصنف مكتملة بالفعل</span>
-                                    <button type="button" onclick="window.App._verifySingleEnricherRow(${r._idx})" style="font-size:10px; padding:3px 8px; border-radius:6px; border:1px solid rgba(16,185,129,0.35); background:rgba(16,185,129,0.1); color:#059669; font-weight:700; cursor:pointer;">✅ اعتماد وإخفاء</button>
+                                <div style="margin-top:6px; display:flex; align-items:center; justify-content:space-between; gap:6px; flex-wrap:wrap;">
+                                    <span style="font-size:10.5px; color:var(--text-muted);">✅ بيانات هذا الصنف مكتملة</span>
+                                    <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                                        <button type="button" onclick="window.App._enableEnricherOverwrite(${r._idx})" style="font-size:10px; padding:3px 8px; border-radius:6px; border:1px solid rgba(245,158,11,0.4); background:rgba(245,158,11,0.1); color:#b45309; font-weight:700; cursor:pointer;">✏️ تعديل / استبدال</button>
+                                        <button type="button" onclick="window.App._verifySingleEnricherRow(${r._idx})" style="font-size:10px; padding:3px 8px; border-radius:6px; border:1px solid rgba(16,185,129,0.35); background:rgba(16,185,129,0.1); color:#059669; font-weight:700; cursor:pointer;">✅ اعتماد وإخفاء</button>
+                                    </div>
                                 </div>
                             ` : '')}
                         </div>

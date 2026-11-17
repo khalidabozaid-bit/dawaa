@@ -1,7 +1,7 @@
 // js/features/categories.js
 import { DB } from '../core/db.js';
 import { CATEGORY_MAP, SEED_MEDICINES } from '../core/seed_data.js';
-import { Utils } from '../core/utils.js?v=18.17.2';
+import { Utils } from '../core/utils.js?v=18.17.3';
 import { auth } from '../core/firebase-config.js';
 
 /**
