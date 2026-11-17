@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'dawaa-cache-v18.11.2';
+const CACHE_NAME = 'dawaa-cache-v18.11.3';
 const IMAGE_CACHE_NAME = 'dawaa-images-v1';
 const MAX_IMAGES = 1000;
 
@@ -56,12 +56,13 @@ self.addEventListener('install', (event) => {
       );
     })
   );
-  self.skipWaiting();
+  // Don't skipWaiting automatically — wait for user to approve the update
+  // self.skipWaiting(); // Removed: was causing unexpected page reloads
 });
 
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
+    self.skipWaiting(); // Only skip when user explicitly approves
   }
 });
 

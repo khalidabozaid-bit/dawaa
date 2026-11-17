@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.11.2', // Professional Excel export — grouped by category, column per location, expiry summary
+    VERSION: '18.11.3', // Fix auto-refresh — user-approved updates only
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -343,17 +343,33 @@ const App = {
                 const newWorker = reg.installing;
                 newWorker.addEventListener('statechange', () => {
                     if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                        console.log('SW: Update available (Digital Silence).');
+                        console.log('SW: Update available — showing banner.');
+                        this.pendingRegistration = reg;
+                        this.updateState = 'ready';
+                        this._showUpdateBanner();
                     }
                 });
             });
         });
+        // Reload ONLY when user approves the update (via applyUpdate → SKIP_WAITING → controllerchange)
         let refreshing = false;
         navigator.serviceWorker.addEventListener('controllerchange', () => {
             if (refreshing) return;
-            window.location.reload();
-            refreshing = true;
+            if (this._userApprovedUpdate) {
+                refreshing = true;
+                window.location.reload();
+            }
         });
+    },
+
+    _showUpdateBanner() {
+        const banner = document.querySelector('.update-banner');
+        if (banner) {
+            banner.classList.add('show');
+        } else {
+            // Toast fallback if banner element not found
+            UI.showToast('تحديث جديد متاح — اضغط "تحقق من التحديثات" في الإعدادات', 'info');
+        }
     },
 
     /**
@@ -366,12 +382,12 @@ const App = {
     },
 
     applyUpdate() {
-        // Send command to the waiting OR installing worker
+        this._userApprovedUpdate = true;
         const worker = this.swRegistration?.waiting || this.swRegistration?.installing;
         if (worker) {
             worker.postMessage({ type: 'SKIP_WAITING' });
         } else {
-            window.location.reload(); // Fallback
+            window.location.reload();
         }
     },
 
@@ -2671,8 +2687,13 @@ App.checkUpdate = async function() {
         const worker = reg.waiting || reg.installing || reg.active;
         if (worker) {
             UI.showToast('جاري تثبيت التحديث وإعادة التشغيل... ⏳', 'info');
+            this._userApprovedUpdate = true;
             worker.postMessage({ type: 'SKIP_WAITING' });
-            // controllerchange listener from Stage 1 will handle the reload
+            // controllerchange listener will handle the reload (user approved)
+            // Fallback reload if controllerchange doesn't fire in 3s
+            setTimeout(() => {
+                if (!this._reloadDone) window.location.reload();
+            }, 3000);
         }
         return;
     }
@@ -2681,19 +2702,12 @@ App.checkUpdate = async function() {
     this.updateStatus('جاري فحص الإصدار بدقة... 🔍');
     if ('serviceWorker' in navigator) {
         try {
-            // 1. Intelligent Check: Is there a newer version on the server?
             const remoteVer = await this.getRemoteVersion();
             console.log(`Update Check: Local=${this.VERSION}, Remote=${remoteVer}`);
 
             if (remoteVer && remoteVer !== this.VERSION) {
-                // 2. New Version Confirmed: Trigger SW System
                 const reg = await navigator.serviceWorker.register(`./sw.js?v=${remoteVer}`);
                 await reg.update();
-
-                // Monitor for Activation Sovereignty (v9.10.1)
-                navigator.serviceWorker.addEventListener('controllerchange', () => {
-                    window.location.reload();
-                });
 
                 const newWorker = reg.waiting || reg.installing;
                 if (newWorker) {
@@ -2706,11 +2720,11 @@ App.checkUpdate = async function() {
                 }
             }
 
-            // 3. Up to date or no version found
+            // Up to date
             this.updateStatus(`أنت تستخدم النسخة v${this.VERSION} بنجاح ✅`);
             this.updateState = 'check';
             const btn = document.querySelector('.setting-card .bx-refresh')?.closest('.setting-card');
-            if (btn) btn.style.background = ''; // Reset if it was blue
+            if (btn) btn.style.background = '';
             setTimeout(() => this.updateStatus('البحث عن إصدارات جديدة متوفرة'), 4000);
 
         } catch (err) {
