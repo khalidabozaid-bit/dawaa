@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.11.3', // Fix auto-refresh — user-approved updates only
+    VERSION: '18.11.4', // Add/edit medicine & category during audit
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -526,6 +526,15 @@ const App = {
             
             // If in Audit view or if an audit session is open
             if (currentView === 'audit' && typeof this.renderAuditView === 'function') {
+                // Restore audit context if returning from add/edit during audit
+                if (this._auditReturnContext) {
+                    const ctx = this._auditReturnContext;
+                    this._auditReturnContext = null;
+                    this.selectedAuditSessionId = ctx.sessionId;
+                    this.selectedAuditLocationId = ctx.locationId;
+                    this.selectedAuditCategoryId = ctx.categoryId;
+                    this.auditLevel = ctx.level;
+                }
                 const auditContainer = document.getElementById('view-audit');
                 if (auditContainer && (auditContainer.classList.contains('active') || this.selectedAuditSessionId)) {
                     await this.renderAuditView();
@@ -4413,6 +4422,16 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             </div>
 
+            <!-- Quick Add Buttons Row -->
+            <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+                <button class="btn-primary sm-btn" onclick="window.App.addMedicineDuringAudit()" style="font-size:11.5px; display:flex; align-items:center; gap:4px; padding:6px 12px; border-radius:8px;">
+                    <i class='bx bx-plus-medical'></i> إضافة دواء جديد
+                </button>
+                <button class="btn-ghost sm-btn" onclick="window.App.addCategoryDuringAudit()" style="font-size:11.5px; display:flex; align-items:center; gap:4px; padding:6px 12px; border-radius:8px; border:1px solid var(--border-color);">
+                    <i class='bx bx-folder-plus'></i> قسم جديد
+                </button>
+            </div>
+
             <!-- View Mode Switch & Sort Options Row -->
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
                 <div style="display:flex; background:var(--bg-secondary); border-radius:10px; padding:3px; gap:4px; border:1px solid var(--border-color);">
@@ -4826,7 +4845,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 : `<small style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${med.countedExpiry || ''}</small>`;
 
             return `
-                <div class="square-card counted" onclick="window.App.openCountModal('${med.id}')" title="انقر لتعديل العد" style="cursor:pointer;">
+                <div class="square-card counted" onclick="window.App.openCountModal('${med.id}')" title="انقر لتعديل العد" style="cursor:pointer; position:relative;">
+                    <button type="button" class="audit-edit-med-btn" onclick="event.stopPropagation(); window.App.editMedicineDuringAudit('${med.id}')" title="تعديل بيانات الدواء" style="position:absolute; top:4px; left:4px; width:22px; height:22px; border-radius:6px; border:1px solid var(--border-color); background:var(--surface); display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2; padding:0; box-shadow:0 1px 2px rgba(0,0,0,0.08);">
+                        <i class='bx bx-edit-alt' style="font-size:11px; color:var(--primary);"></i>
+                    </button>
                     <span class="badge-done">
                         <i class='bx bx-check'></i> تم
                     </span>
@@ -4849,7 +4871,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             `;
         } else {
             return `
-                <div class="square-card" onclick="window.App.openCountModal('${med.id}')" title="انقر لتسجيل العد" style="cursor:pointer;">
+                <div class="square-card" onclick="window.App.openCountModal('${med.id}')" title="انقر لتسجيل العد" style="cursor:pointer; position:relative;">
+                    <button type="button" class="audit-edit-med-btn" onclick="event.stopPropagation(); window.App.editMedicineDuringAudit('${med.id}')" title="تعديل بيانات الدواء" style="position:absolute; top:4px; left:4px; width:22px; height:22px; border-radius:6px; border:1px solid var(--border-color); background:var(--surface); display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2; padding:0; box-shadow:0 1px 2px rgba(0,0,0,0.08);">
+                        <i class='bx bx-edit-alt' style="font-size:11px; color:var(--primary);"></i>
+                    </button>
                     <div style="width: 38px; height: 38px; border-radius: 8px; overflow: hidden; margin-bottom: 4px; background: rgba(59,130,246,0.06); display:flex; align-items:center; justify-content:center; flex-shrink: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
                         <img src="${imgUrl}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
                     </div>
@@ -4942,14 +4967,19 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
             <!-- Toolbar: Quick Search & Filter Chips & Sort -->
             <div class="audit-toolbar" style="margin-bottom:12px;">
-                <div class="audit-search-wrapper" style="width:100%;">
-                    <i class='bx bx-search'></i>
-                    <input type="text" id="audit-med-search" class="audit-search-input" placeholder="بحث سريع باسم الدواء الإنجليزي أو العربي..." value="${this.auditMedSearch || ''}" oninput="window.App.handleAuditMedSearch(this.value)">
-                    ${this.auditMedSearch ? `
-                        <button type="button" onclick="window.App.handleAuditMedSearch('')" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:flex; align-items:center;">
-                            <i class='bx bx-x' style="font-size:18px;"></i>
-                        </button>
-                    ` : ''}
+                <div style="display:flex; gap:8px; align-items:center; width:100%; flex-wrap:wrap;">
+                    <div class="audit-search-wrapper" style="flex:1; min-width:200px;">
+                        <i class='bx bx-search'></i>
+                        <input type="text" id="audit-med-search" class="audit-search-input" placeholder="بحث سريع باسم الدواء الإنجليزي أو العربي..." value="${this.auditMedSearch || ''}" oninput="window.App.handleAuditMedSearch(this.value)">
+                        ${this.auditMedSearch ? `
+                            <button type="button" onclick="window.App.handleAuditMedSearch('')" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:flex; align-items:center;">
+                                <i class='bx bx-x' style="font-size:18px;"></i>
+                            </button>
+                        ` : ''}
+                    </div>
+                    <button class="btn-primary sm-btn" onclick="window.App.addMedicineDuringAudit('${cat.id}')" style="font-size:11px; display:flex; align-items:center; gap:3px; padding:6px 10px; border-radius:8px; white-space:nowrap;">
+                        <i class='bx bx-plus-medical'></i> دواء جديد
+                    </button>
                 </div>
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-top:8px;">
                     <div class="audit-filters-row">
@@ -4987,6 +5017,41 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             `}
         `;
+    },
+
+    // --- Add / Edit Medicine & Category DURING Audit ---
+
+    async addMedicineDuringAudit(preSelectedCatId = null) {
+        // Use the selected category from audit context if not passed
+        const catId = preSelectedCatId || this.selectedAuditCategoryId || null;
+        // Store audit context so we return after saving
+        this._auditReturnContext = {
+            sessionId: this.selectedAuditSessionId,
+            locationId: this.selectedAuditLocationId,
+            categoryId: this.selectedAuditCategoryId,
+            level: this.auditLevel
+        };
+        await this.openAddMedicine(catId);
+    },
+
+    async editMedicineDuringAudit(medId) {
+        this._auditReturnContext = {
+            sessionId: this.selectedAuditSessionId,
+            locationId: this.selectedAuditLocationId,
+            categoryId: this.selectedAuditCategoryId,
+            level: this.auditLevel
+        };
+        await this.openEditMedicine(medId);
+    },
+
+    async addCategoryDuringAudit() {
+        this._auditReturnContext = {
+            sessionId: this.selectedAuditSessionId,
+            locationId: this.selectedAuditLocationId,
+            categoryId: this.selectedAuditCategoryId,
+            level: this.auditLevel
+        };
+        await this.openAddCategoryModal();
     },
 
     // --- Audit Navigation Handlers ---
