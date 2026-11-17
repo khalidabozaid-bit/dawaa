@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.14.3', // Align EN category in EN column and AR category in AR column in Excel exports
+    VERSION: '18.14.4', // Styled Excel exports (Bold 14pt category headers without square symbol, xlsx-js-style)
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2918,21 +2918,22 @@ const App = {
                 }
 
                 const aoa = [headers];
+                const groupRowIndices = [];
                 let rowCounter = 1;
 
                 for (const grp of sortedGroups) {
-                    // Put EN category under EN medicines column & AR category under AR medicines column (NO row merge!)
-                    const prefix = groupMode === 'active' ? '🧬 ' : '◼ ';
+                    // Put EN category under EN column & AR category under AR column — NO square symbol, NO row merge!
                     const grpRow = [''];
                     if (opts.nameMode === 'both') {
-                        grpRow.push(`${prefix}${grp.labelEN}`);
-                        grpRow.push(`${prefix}${grp.labelAR}`);
+                        grpRow.push(grp.labelEN);
+                        grpRow.push(grp.labelAR);
                     } else if (opts.nameMode === 'en') {
-                        grpRow.push(`${prefix}${grp.labelEN}`);
+                        grpRow.push(grp.labelEN);
                     } else {
-                        grpRow.push(`${prefix}${grp.labelAR}`);
+                        grpRow.push(grp.labelAR);
                     }
                     while (grpRow.length < headers.length) grpRow.push('');
+                    groupRowIndices.push(aoa.length);
                     aoa.push(grpRow);
 
                     // Medicine rows with sequential numbering
@@ -2983,7 +2984,7 @@ const App = {
                 aoa.push([]);
                 aoa.push(countRow);
 
-                // Build sheet
+                // Build sheet with native Excel styling (Bold + Larger font for Category rows, NO merged rows)
                 const ws = XLSX.utils.aoa_to_sheet(aoa);
                 ws['!cols'] = headers.map((h, i) => {
                     if (i === 0) return { wch: 6 };
@@ -2992,10 +2993,10 @@ const App = {
                         const cellLen = String(row[i] || '').length;
                         if (cellLen > maxLen) maxLen = cellLen;
                     }
-                    return { wch: Math.min(maxLen + 3, 55) };
+                    return { wch: Math.min(maxLen + 4, 55) };
                 });
 
-                // No merged rows (group header stays cleanly inside the medicine name column)
+                this._applyExcelSheetStyles(ws, aoa.length, headers.length, groupRowIndices, aoa.length - 1);
 
                 const wb = XLSX.utils.book_new();
                 const sheetTitle = groupMode === 'active' ? 'حسب المادة الفعالة' : 'المخزون';
@@ -3069,6 +3070,7 @@ const App = {
                     const maxLen = Math.max(key.length, ...finalRows.map(r => String(r[key] || '').length));
                     return { wch: Math.min(maxLen + 4, 55) };
                 });
+                this._applyExcelSheetStyles(ws, finalRows.length + 1, keys.length, [], finalRows.length);
 
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws, 'المخزون');
@@ -3080,6 +3082,60 @@ const App = {
             console.error('Custom export error:', err);
             UI.showToast('فشل تصدير الإكسيل: ' + err.message, 'danger');
         }
+    },
+
+    /**
+     * Apply native Excel styling via xlsx-js-style:
+     * - Table Header Row: Bold 12pt white on dark navy
+     * - Category / Group Header Rows: Bold 14pt navy on soft blue tint (unmerged)
+     * - Footer Row ("إجمالي عدد الأدوية"): Bold 12pt on soft gray
+     * - RTL sheet view
+     */
+    _applyExcelSheetStyles(ws, rowCount, colCount, groupRowIndices = [], footerRowIdx = -1) {
+        if (!ws || !window.XLSX?.utils?.encode_cell) return;
+        const groupSet = new Set(groupRowIndices);
+
+        const headerStyle = {
+            font: { name: 'Arial', sz: 12, bold: true, color: { rgb: 'FFFFFF' } },
+            fill: { patternType: 'solid', fgColor: { rgb: '1E3A8A' } },
+            alignment: { vertical: 'center', horizontal: 'center' }
+        };
+        const categoryStyle = {
+            font: { name: 'Arial', sz: 14, bold: true, color: { rgb: '1E3A8A' } },
+            fill: { patternType: 'solid', fgColor: { rgb: 'EBF2FF' } },
+            alignment: { vertical: 'center' }
+        };
+        const footerStyle = {
+            font: { name: 'Arial', sz: 12, bold: true, color: { rgb: '0F172A' } },
+            fill: { patternType: 'solid', fgColor: { rgb: 'F1F5F9' } },
+            alignment: { vertical: 'center' }
+        };
+        const normalStyle = {
+            font: { name: 'Arial', sz: 11 },
+            alignment: { vertical: 'center' }
+        };
+
+        const rowsMeta = [];
+        for (let r = 0; r < rowCount; r++) {
+            const isHeader = r === 0;
+            const isGroup = groupSet.has(r);
+            const isFooter = r === footerRowIdx;
+            rowsMeta.push({ hpt: isHeader ? 26 : (isGroup ? 28 : (isFooter ? 24 : 20)) });
+
+            const style = isHeader ? headerStyle : (isGroup ? categoryStyle : (isFooter ? footerStyle : normalStyle));
+            for (let c = 0; c < colCount; c++) {
+                const ref = XLSX.utils.encode_cell({ r, c });
+                if (!ws[ref]) {
+                    if (isHeader || isGroup || isFooter) {
+                        ws[ref] = { t: 's', v: '', s: style };
+                    }
+                } else {
+                    ws[ref].s = style;
+                }
+            }
+        }
+        ws['!rows'] = rowsMeta;
+        ws['!views'] = [{ rightToLeft: true }];
     },
     // ===================== End Custom Export Builder =====================
 
@@ -6277,6 +6333,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             // Header row (with sequential numbering 'م')
             const headers = ['م', 'اسم الدواء (EN)', 'اسم الدواء (AR)', ...locColumns, 'الإجمالي', 'الصلاحيات'];
             const aoa = [headers];
+            const categoryRowIndices = [];
             let rowCounter = 1;
 
             for (const catId of sortedCatIds) {
@@ -6285,9 +6342,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 const catNameAR = Categories.getCategoryDisplayName(cat || catId, 'ar', catMap);
                 const meds = catGroups.get(catId);
 
-                // EN category in EN column (col 1), AR category in AR column (col 2), NO row merge!
-                const catRow = ['', `◼ ${catNameEN}`, `◼ ${catNameAR}`];
+                // EN category in EN column (col 1), AR category in AR column (col 2), NO square symbol, NO row merge!
+                const catRow = ['', catNameEN, catNameAR];
                 while (catRow.length < headers.length) catRow.push('');
+                categoryRowIndices.push(aoa.length);
                 aoa.push(catRow);
 
                 // Medicine rows with sequential numbering
@@ -6333,7 +6391,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 return { wch: Math.min(maxLen + 3, 50) };
             });
 
-            // No merged rows — category title sits cleanly in the medicine name column
+            // Apply native Excel styles (Bold + Larger font on category rows, NO merged rows)
+            this._applyExcelSheetStyles(ws, aoa.length, headers.length, categoryRowIndices, aoa.length - 1);
 
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'كشف الجرد');
