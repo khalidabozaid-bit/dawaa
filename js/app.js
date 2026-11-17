@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.11.7', // Audit batch edit/merge, zero-qty no expiry, system cat editable
+    VERSION: '18.11.8', // Merged audit view — all medicines across all locations with counting
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -4030,6 +4030,12 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             return;
         }
 
+        // LEVEL 2b: Merged view — all medicines across all locations
+        if (this.auditLevel === 'merged') {
+            await this.renderAuditMergedLevel(container, session);
+            return;
+        }
+
         // LEVEL 3: Categories Grid inside Location
         if (this.auditLevel === 'categories') {
             await this.renderAuditCategoriesLevel(container, session);
@@ -4795,6 +4801,16 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 <h3><i class='bx bx-map-pin'></i> اختر المكان لبدء الجرد الميداني:</h3>
             </div>
 
+            <!-- View Mode Toggle: Per-Location vs Merged -->
+            <div style="display:flex; gap:8px; margin-bottom:14px; padding:4px; background:var(--bg-secondary); border-radius:10px;">
+                <button onclick="window.App.auditLevel='locations'; window.App.renderAuditView();" style="flex:1; padding:8px; border:none; border-radius:8px; cursor:pointer; font-family:inherit; font-size:12px; font-weight:700; background:var(--primary); color:white;">
+                    <i class='bx bx-map-pin'></i> حسب المكان
+                </button>
+                <button onclick="window.App.auditLevel='merged'; window.App.auditMergedSearch=''; window.App.auditMergedFilter='all'; window.App.renderAuditView();" style="flex:1; padding:8px; border:none; border-radius:8px; cursor:pointer; font-family:inherit; font-size:12px; font-weight:700; background:transparent; color:var(--text-muted);">
+                    <i class='bx bx-merge'></i> عرض مدمج حسب الدواء
+                </button>
+            </div>
+
             <!-- Square Locations Grid -->
             <div class="audit-square-grid">
                 ${await Promise.all(activeLocations.map(async (loc) => {
@@ -4812,6 +4828,264 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 })).then(cards => cards.join(''))}
             </div>
         `;
+    },
+
+    // =========================================================================
+    // --- MERGED AUDIT VIEW (v18.11.8) — All medicines across all locations ---
+    // =========================================================================
+    async renderAuditMergedLevel(container, session) {
+        const allLocs = await Locations.getAll();
+        const sessionLocIds = session.locationIds || [];
+        const activeLocs = allLocs.filter(l => sessionLocIds.includes(l.id));
+        const locMap = new Map(activeLocs.map(l => [l.id, l]));
+        const counts = session.counts || {};
+        const allMeds = (await DB.getAll('medicineMaster')) || [];
+
+        // Build merged data: for each medicine, collect counts from all locations
+        const mergedMap = new Map(); // medId → { med, locations: [ { loc, batches, qty } ], totalQty, mergedBatches }
+
+        for (const med of allMeds) {
+            const locEntries = [];
+            let totalQty = 0;
+            const batchMap = new Map(); // expiryDate → total qty
+
+            for (const locId of sessionLocIds) {
+                const key = `${locId}___${med.id}`;
+                const record = counts[key];
+                if (record) {
+                    const batches = record.batches || [{ quantity: record.quantity, expiryDate: record.expiryDate }];
+                    const locQty = batches.reduce((s, b) => s + (parseFloat(b.quantity) || 0), 0);
+                    locEntries.push({
+                        locId,
+                        locName: locMap.get(locId)?.nameAR || locId,
+                        locIcon: locMap.get(locId)?.icon || 'bx-map-pin',
+                        locColor: locMap.get(locId)?.color || 'var(--primary)',
+                        batches,
+                        qty: locQty,
+                        countedBy: record.userName
+                    });
+                    totalQty += locQty;
+                    for (const b of batches) {
+                        const exp = b.expiryDate || 'غير محدد';
+                        batchMap.set(exp, (batchMap.get(exp) || 0) + (parseFloat(b.quantity) || 0));
+                    }
+                }
+            }
+
+            // Count how many locations this med SHOULD be in (has records)
+            // vs how many it IS counted in
+            const totalLocsForMed = sessionLocIds.length;
+            const countedLocsForMed = locEntries.length;
+
+            const mergedBatches = Array.from(batchMap.entries())
+                .map(([exp, qty]) => ({ expiryDate: exp, quantity: qty }))
+                .sort((a, b) => (a.expiryDate || '').localeCompare(b.expiryDate || ''));
+
+            mergedMap.set(med.id, {
+                med,
+                locations: locEntries,
+                totalQty,
+                mergedBatches,
+                countedLocs: countedLocsForMed,
+                totalLocs: totalLocsForMed,
+                isCounted: countedLocsForMed > 0,
+                isFullyCounted: countedLocsForMed === totalLocsForMed
+            });
+        }
+
+        let mergedList = Array.from(mergedMap.values());
+
+        // Filters
+        const currentFilter = this.auditMergedFilter || 'all';
+        const totalCount = mergedList.length;
+        const countedAny = mergedList.filter(m => m.isCounted).length;
+        const uncountedAll = mergedList.filter(m => !m.isCounted).length;
+        const partialCount = mergedList.filter(m => m.isCounted && !m.isFullyCounted).length;
+
+        if (currentFilter === 'uncounted') {
+            mergedList = mergedList.filter(m => !m.isCounted);
+        } else if (currentFilter === 'counted') {
+            mergedList = mergedList.filter(m => m.isCounted);
+        } else if (currentFilter === 'partial') {
+            mergedList = mergedList.filter(m => m.isCounted && !m.isFullyCounted);
+        }
+
+        // Search
+        const searchQuery = (this.auditMergedSearch || '').trim().toLowerCase();
+        if (searchQuery) {
+            mergedList = mergedList.filter(m => {
+                const en = (m.med.nameEN || '').toLowerCase();
+                const ar = (m.med.nameAR || '').toLowerCase();
+                const active = (m.med.activeIngredient || '').toLowerCase();
+                return en.includes(searchQuery) || ar.includes(searchQuery) || active.includes(searchQuery);
+            });
+        }
+
+        // Sort: uncounted first, then partial, then fully counted
+        mergedList.sort((a, b) => {
+            if (a.isCounted !== b.isCounted) return a.isCounted ? 1 : -1;
+            if (a.isFullyCounted !== b.isFullyCounted) return a.isFullyCounted ? 1 : -1;
+            return (a.med.nameEN || '').localeCompare(b.med.nameEN || '');
+        });
+
+        container.innerHTML = `
+            <!-- Breadcrumbs -->
+            <div class="breadcrumbs-bar">
+                <button class="btn-crumb-back" onclick="window.App.auditLevel='locations'; window.App.renderAuditView();" title="العودة للأماكن">
+                    <i class='bx bx-right-arrow-alt'></i>
+                </button>
+                <div class="breadcrumbs-trail">
+                    <span onclick="window.App.auditBackToSessions()" style="cursor:pointer">الجلسات</span>
+                    <i class='bx bx-chevron-left'></i>
+                    <span class="active">${Utils.escapeHTML(session.name)} — عرض مدمج 💊</span>
+                </div>
+            </div>
+
+            <!-- View Mode Toggle -->
+            <div style="display:flex; gap:8px; margin-bottom:14px; padding:4px; background:var(--bg-secondary); border-radius:10px;">
+                <button onclick="window.App.auditLevel='locations'; window.App.renderAuditView();" style="flex:1; padding:8px; border:none; border-radius:8px; cursor:pointer; font-family:inherit; font-size:12px; font-weight:700; background:transparent; color:var(--text-muted);">
+                    <i class='bx bx-map-pin'></i> حسب المكان
+                </button>
+                <button style="flex:1; padding:8px; border:none; border-radius:8px; cursor:pointer; font-family:inherit; font-size:12px; font-weight:700; background:var(--primary); color:white;">
+                    <i class='bx bx-merge'></i> عرض مدمج حسب الدواء
+                </button>
+            </div>
+
+            <!-- Search -->
+            <div class="audit-toolbar" style="margin-bottom:12px;">
+                <div style="display:flex; gap:8px; align-items:center; width:100%;">
+                    <div class="audit-search-wrapper" style="flex:1; min-width:200px;">
+                        <i class='bx bx-search'></i>
+                        <input type="text" class="audit-search-input" placeholder="بحث بالاسم العربي أو الإنجليزي..." value="${this.auditMergedSearch || ''}" oninput="window.App.auditMergedSearch=this.value; window.App.renderAuditView();">
+                    </div>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-top:8px;">
+                    <div class="audit-filters-row">
+                        <button type="button" class="audit-filter-chip ${currentFilter === 'all' ? 'active' : ''}" onclick="window.App.auditMergedFilter='all'; window.App.renderAuditView();">
+                            الكل (${totalCount})
+                        </button>
+                        <button type="button" class="audit-filter-chip ${currentFilter === 'uncounted' ? 'active' : ''}" onclick="window.App.auditMergedFilter='uncounted'; window.App.renderAuditView();">
+                            ⏳ لم يُعد (${uncountedAll})
+                        </button>
+                        <button type="button" class="audit-filter-chip ${currentFilter === 'counted' ? 'active' : ''}" onclick="window.App.auditMergedFilter='counted'; window.App.renderAuditView();">
+                            ✅ تم العد (${countedAny})
+                        </button>
+                        <button type="button" class="audit-filter-chip ${currentFilter === 'partial' ? 'active' : ''}" onclick="window.App.auditMergedFilter='partial'; window.App.renderAuditView();">
+                            ⚠️ عد ناقص (${partialCount})
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Merged Cards -->
+            ${mergedList.length === 0 ? `
+                <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
+                    <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
+                    <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة</p>
+                </div>
+            ` : `
+                <div style="display:flex; flex-direction:column; gap:12px;">
+                    ${mergedList.map(item => this.renderMergedMedicineCard(item, activeLocs)).join('')}
+                </div>
+            `}
+        `;
+    },
+
+    renderMergedMedicineCard(item, allSessionLocs) {
+        const { med, locations, totalQty, mergedBatches, countedLocs, totalLocs, isCounted } = item;
+        const imgUrl = (typeof Categories !== 'undefined' && Categories.getMedicineImage) ? Categories.getMedicineImage(med) : (med.imagePath || 'assets/icons/default-med.png');
+        const primaryName = med.nameEN || med.nameAR || 'دواء';
+        const secondaryName = (med.nameAR && med.nameAR !== med.nameEN) ? med.nameAR : '';
+
+        const statusBadge = !isCounted
+            ? `<span style="font-size:10px; font-weight:700; padding:2px 8px; border-radius:6px; background:rgba(59,130,246,0.1); color:var(--primary);">⏳ لم يُعد بعد</span>`
+            : (countedLocs < totalLocs
+                ? `<span style="font-size:10px; font-weight:700; padding:2px 8px; border-radius:6px; background:rgba(245,158,11,0.15); color:#92400e;">⚠️ تم في ${countedLocs}/${totalLocs} مكان</span>`
+                : `<span style="font-size:10px; font-weight:700; padding:2px 8px; border-radius:6px; background:rgba(16,185,129,0.15); color:#065f46;">✅ تم في كل الأماكن</span>`
+            );
+
+        const locsHtml = locations.map(loc => {
+            const batchPills = loc.batches.map(b => {
+                const badge = this.calcExpiryBadge(b.expiryDate);
+                return `<span style="font-size:9px; font-weight:600; padding:1px 5px; border-radius:4px; background:${badge.bg}; color:${badge.color}; display:inline-flex; align-items:center; gap:2px; white-space:nowrap;">
+                    ${b.quantity} × ${b.expiryDate || 'غير محدد'}
+                </span>`;
+            }).join(' ');
+
+            return `
+                <div style="display:flex; align-items:flex-start; gap:8px; padding:6px 10px; background:var(--bg-secondary); border-radius:8px;">
+                    <i class='bx ${loc.locIcon}' style="font-size:16px; color:${loc.locColor}; margin-top:2px;"></i>
+                    <div style="flex:1; min-width:0;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+                            <strong style="font-size:11px;">${Utils.escapeHTML(loc.locName)}</strong>
+                            <span style="font-size:11px; font-weight:800; color:var(--primary);">${loc.qty} وحدة</span>
+                        </div>
+                        <div style="display:flex; gap:4px; flex-wrap:wrap;">${batchPills}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        const mergedBatchesHtml = mergedBatches.length > 0 ? mergedBatches.map(b => {
+            const badge = this.calcExpiryBadge(b.expiryDate);
+            return `<span style="font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; background:${badge.bg}; color:${badge.color}; display:inline-flex; align-items:center; gap:2px;">
+                <i class='bx ${badge.icon}' style="font-size:11px;"></i> ${b.quantity} × ${b.expiryDate}
+            </span>`;
+        }).join(' ') : '';
+
+        // Build location buttons for counting
+        const countBtnsHtml = allSessionLocs.map(loc => `
+            <button onclick="event.stopPropagation(); window.App.openMergedCountModal('${med.id}', '${loc.id}')" style="display:flex; align-items:center; gap:4px; padding:5px 10px; border:1px solid var(--border-color); border-radius:6px; background:var(--surface); cursor:pointer; font-family:inherit; font-size:11px; font-weight:600; color:var(--text-main);">
+                <i class='bx ${loc.icon || 'bx-map-pin'}' style="color:${loc.color || 'var(--primary)'}; font-size:13px;"></i>
+                ${Utils.escapeHTML(loc.nameAR)}
+            </button>
+        `).join('');
+
+        return `
+            <div style="background:var(--surface); border-radius:14px; border:1px solid var(--border-color); box-shadow:var(--shadow-sm); overflow:hidden; ${isCounted ? 'border-right:3px solid #10b981;' : ''}">
+                <!-- Header -->
+                <div style="padding:12px 14px; display:flex; align-items:center; gap:10px;">
+                    <div style="width:42px; height:42px; border-radius:10px; overflow:hidden; flex-shrink:0; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                        <img src="${imgUrl}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                    </div>
+                    <div style="flex:1; min-width:0;">
+                        <h3 style="margin:0; font-size:13px; font-weight:800; line-height:1.3;">${Utils.escapeHTML(primaryName)}</h3>
+                        ${secondaryName ? `<div style="font-size:10px; color:var(--text-muted); line-height:1.2;">${Utils.escapeHTML(secondaryName)}</div>` : ''}
+                    </div>
+                    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+                        ${statusBadge}
+                        ${isCounted ? `<strong style="font-size:16px; color:var(--primary);">${totalQty}</strong>` : ''}
+                    </div>
+                </div>
+
+                ${isCounted ? `
+                    <!-- Per-Location Breakdown -->
+                    <div style="padding:0 14px 10px; display:flex; flex-direction:column; gap:6px;">
+                        ${locsHtml}
+                    </div>
+
+                    ${mergedBatches.length > 0 ? `
+                        <!-- Merged Totals -->
+                        <div style="padding:8px 14px; background:rgba(59,130,246,0.04); border-top:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                            <span style="font-size:11px; font-weight:700; color:var(--text-muted);">📅 الصلاحيات المدمجة:</span>
+                            <div style="display:flex; gap:4px; flex-wrap:wrap;">${mergedBatchesHtml}</div>
+                        </div>
+                    ` : ''}
+                ` : ''}
+
+                <!-- Count Action Buttons -->
+                <div style="padding:8px 14px 10px; border-top:1px solid var(--border-color); display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                    <span style="font-size:10px; font-weight:700; color:var(--text-muted); white-space:nowrap;">📋 عد في:</span>
+                    ${countBtnsHtml}
+                </div>
+            </div>
+        `;
+    },
+
+    // Open count modal from merged view — sets the location context then opens the modal
+    async openMergedCountModal(medicineId, locationId) {
+        this.selectedAuditLocationId = locationId;
+        await this.openCountModal(medicineId);
     },
 
     async renderAuditCategoriesLevel(container, session) {
