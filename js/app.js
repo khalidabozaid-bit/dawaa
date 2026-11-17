@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.11.9', // Custom Excel export builder with full control
+    VERSION: '18.12.0', // Extended drug catalog 27K+ Egyptian medicines with lazy loading
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1311,6 +1311,8 @@ const App = {
 
     async openAddMedicine(preSelectedCatId = null) {
         try {
+            // Pre-warm the extended drug catalog
+            EgyptianDrugs.preload();
             const cats = await Categories.getAllSorted();
             const allLocs = (await Locations.getAll()) || [];
 
@@ -2316,7 +2318,7 @@ const App = {
         return this.openAddMedicine(catId);
     },
 
-    // --- Egyptian Drug Catalog Auto-Complete (v18.6.0) ---
+    // --- Egyptian Drug Catalog Auto-Complete (v18.12.0 — 27K+ drugs) ---
     handleDrugCatalogSearch(query, prefix = 'qa') {
         const container = document.getElementById(`${prefix}-catalog-suggestions`);
         if (!container) return;
@@ -2327,7 +2329,20 @@ const App = {
             return;
         }
 
-        const results = EgyptianDrugs.search(query, 6);
+        // Use sync search (which lazy-loads extended catalog in background)
+        const results = EgyptianDrugs.search(query, 8);
+
+        // If extended catalog not loaded yet and we got builtin results,
+        // schedule an async re-search after load completes
+        if (!EgyptianDrugs.isExtendedLoaded && results.length < 8) {
+            EgyptianDrugs.searchAsync(query, 8).then(asyncResults => {
+                if (asyncResults.length > results.length) {
+                    // Re-render with better results
+                    this.handleDrugCatalogSearch(query, prefix);
+                }
+            });
+        }
+
         if (results.length === 0) {
             container.style.display = 'none';
             container.innerHTML = '';
@@ -2335,6 +2350,9 @@ const App = {
         }
 
         container.style.display = 'block';
+        const sizeLabel = EgyptianDrugs.isExtendedLoaded
+            ? `<div style="text-align:center; padding:4px; font-size:10px; color:var(--text-muted); border-top:1px solid var(--border);">💊 يبحث في ${EgyptianDrugs.catalogSize.toLocaleString()} دواء مصري</div>`
+            : '';
         container.innerHTML = results.map((item, idx) => {
             const catName = Categories.getCategoryNameAR(item.categoryId);
             return `
@@ -2351,7 +2369,7 @@ const App = {
                     </span>
                 </div>
             `;
-        }).join('');
+        }).join('') + sizeLabel;
 
         this._activeCatalogResults = results;
     },

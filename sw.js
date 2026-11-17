@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'dawaa-cache-v18.11.9';
+const CACHE_NAME = 'dawaa-cache-v18.12.0';
 const IMAGE_CACHE_NAME = 'dawaa-images-v1';
 const MAX_IMAGES = 1000;
 
@@ -10,6 +10,7 @@ const ASSETS_TO_CACHE = [
   './assets/icons/default-med.png',
   './assets/icons/icon-192.png',
   './assets/icons/icon-512.png',
+  './data/eg_drugs_slim.json',
   './css/modules/base.css',
   './css/modules/layout.css',
   './css/modules/components.css',
