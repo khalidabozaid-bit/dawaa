@@ -79,7 +79,7 @@
             <div class="app-logo">
                 <i class='bx bxs-capsule'></i>
                 <h1>دواء</h1>
-                <span id="app-version-tag" style="display: none;">v18.14.1</span>
+                <span id="app-version-tag" style="display: none;">v18.14.2</span>
                 <span id="network-status" style="display: none;"></span>
             </div>
             
@@ -207,14 +207,14 @@
 
             <!-- Section 1: Medicines Management -->
             <div id="wh-meds-section">
-                <div class="section-actions mb-15" style="display: flex; gap: 10px; align-items: center;">
-                    <div class="search-bar" style="flex: 1; min-width: 0; margin: 0; position: relative;">
+                <div class="section-actions mb-15" style="display: flex; gap: 8px; align-items: center;">
+                    <div class="search-bar" style="flex: 1; min-width: 0; margin: 0;">
                         <i class='bx bx-search'></i>
-                        <input type="text" id="global-search" placeholder="بحث فوري بالاسم أو الباركود..." style="padding-left: 36px;">
-                        <button type="button" class="btn-ghost" onclick="window.App.startBarcodeScanner('global-search')" title="مسح باركود بالكاميرا" style="position: absolute; left: 8px; color: var(--primary); padding: 4px; border: none; background: transparent; cursor: pointer;">
-                            <i class='bx bx-barcode-reader' style="font-size: 20px;"></i>
-                        </button>
+                        <input type="text" id="global-search" placeholder="بحث فوري بالاسم أو الباركود...">
                     </div>
+                    <button type="button" class="btn-ghost sm-btn" onclick="window.App.startBarcodeScanner('global-search')" title="بحث بمسح الباركود بالكاميرا" style="white-space: nowrap; flex-shrink: 0; width: auto; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: 10px;">
+                        <i class='bx bx-barcode-reader' style="font-size: 20px; color: var(--primary);"></i>
+                    </button>
                     <button class="btn-primary sm-btn" onclick="window.App.openQuickAdd()" title="إضافة دواء جديد" style="white-space: nowrap; flex-shrink: 0; width: auto;">
                         <i class='bx bx-plus'></i> دواء جديد
                     </button>

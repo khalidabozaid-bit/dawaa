@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.14.1', // Unmerged category/active header rows placed directly in medicine name column
+    VERSION: '18.14.2', // Separate barcode field with external camera/delete buttons + fix search focus/keyboard across all views
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1360,24 +1360,21 @@ const App = {
                         <input type="text" id="m-name-ar" class="form-input" placeholder="مثلاً: بنادول إكسترا">
                     </div>
 
-                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:12px;">
-                        <div class="form-group">
-                            <label class="form-label">المادة الفعالة (اختياري):</label>
-                            <input type="text" id="m-active" class="form-input" placeholder="Paracetamol">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label" style="display:flex; justify-content:space-between; align-items:center;">
-                                <span>الباركود:</span>
-                                <button type="button" class="btn-ghost sm-btn" onclick="window.App.startBarcodeScanner('m-barcode')" style="font-size:10px; color:var(--primary); padding:1px 6px; border:1px solid var(--border-color); border-radius:6px; cursor:pointer;">
-                                    <i class='bx bx-camera'></i> 📷 مسح
-                                </button>
-                            </label>
-                            <div style="position:relative;">
-                                <input type="text" id="m-barcode" class="form-input" placeholder="الباركود إن وجد" style="padding-left:32px;">
-                                <button type="button" class="btn-ghost" onclick="window.App.startBarcodeScanner('m-barcode')" title="مسح بالكاميرا" style="position:absolute; left:4px; top:50%; transform:translateY(-50%); padding:4px; color:var(--primary); cursor:pointer; border:none; background:transparent;">
-                                    <i class='bx bx-barcode-reader' style="font-size:18px;"></i>
-                                </button>
-                            </div>
+                    <div class="form-group mb-12">
+                        <label class="form-label">المادة الفعالة (اختياري):</label>
+                        <input type="text" id="m-active" class="form-input" placeholder="Paracetamol">
+                    </div>
+
+                    <div class="form-group mb-12">
+                        <label class="form-label" for="m-barcode">باركود العبوة (اختياري — منفصل عن كود النظام):</label>
+                        <div style="display:flex; gap:6px; align-items:center;">
+                            <input type="text" id="m-barcode" class="form-input" placeholder="اكتب الباركود أو استخدم زر الكاميرا" style="flex:1; font-family:monospace;">
+                            <button type="button" class="btn-ghost sm-btn" onclick="window.App.startBarcodeScanner('m-barcode')" title="قراءة بالكاميرا" style="padding:8px 10px; border:1px solid var(--border-color); border-radius:8px; color:var(--primary); flex-shrink:0;">
+                                <i class='bx bx-camera' style="font-size:18px;"></i>
+                            </button>
+                            <button type="button" class="btn-ghost sm-btn" onclick="const el=document.getElementById('m-barcode'); if(el) el.value='';" title="مسح الباركود" style="padding:8px 10px; border:1px solid rgba(239,68,68,0.35); border-radius:8px; color:var(--danger); flex-shrink:0;">
+                                <i class='bx bx-trash' style="font-size:17px;"></i>
+                            </button>
                         </div>
                     </div>
 
@@ -1491,29 +1488,26 @@ const App = {
                         <input type="text" id="e-name-ar" class="form-input" value="${Utils.escapeHTML(med.nameAR || '')}">
                     </div>
 
-                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:12px;">
-                        <div class="form-group">
-                            <label class="form-label">المادة الفعالة:</label>
-                            <input type="text" id="e-active" class="form-input" value="${Utils.escapeHTML(med.activeIngredient || '')}">
+                    <div class="form-group mb-12">
+                        <label class="form-label">المادة الفعالة:</label>
+                        <input type="text" id="e-active" class="form-input" value="${Utils.escapeHTML(med.activeIngredient || '')}">
+                    </div>
+
+                    <div class="form-group mb-12" style="padding:10px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:6px; flex-wrap:wrap;">
+                            <label class="form-label" for="e-barcode" style="margin:0;">باركود العبوة (قابل للتعديل أو الحذف):</label>
+                            <span style="font-size:11px; color:var(--text-muted); font-family:monospace; background:var(--surface); padding:2px 7px; border-radius:6px; border:1px solid var(--border-color);">
+                                كود النظام: #${Utils.escapeHTML(med.id)}
+                            </span>
                         </div>
-                        <div class="form-group">
-                            <label class="form-label" style="display:flex; justify-content:space-between; align-items:center; gap:4px;">
-                                <span>الباركود <small style="color:var(--text-muted); font-weight:normal;">(#${Utils.escapeHTML(med.id)})</small>:</span>
-                                <div style="display:flex; gap:4px;">
-                                    <button type="button" class="btn-ghost sm-btn" onclick="window.App.startBarcodeScanner('e-barcode')" style="font-size:10px; color:var(--primary); padding:1px 6px; border:1px solid var(--border-color); border-radius:6px; cursor:pointer;" title="مسح بالكاميرا">
-                                        <i class='bx bx-camera'></i> كاميرا
-                                    </button>
-                                    <button type="button" class="btn-ghost sm-btn" onclick="const el=document.getElementById('e-barcode'); if(el){el.value=''; window.UI.showToast('تم مسح الباركود — اضغط حفظ للتأكيد 🗑️', 'info');}" style="font-size:10px; color:var(--danger); padding:1px 6px; border:1px solid rgba(239,68,68,0.35); border-radius:6px; cursor:pointer;" title="مسح الباركود بدون المساس بكود النظام">
-                                        <i class='bx bx-trash'></i> مسح
-                                    </button>
-                                </div>
-                            </label>
-                            <div style="position:relative;">
-                                <input type="text" id="e-barcode" class="form-input" placeholder="باركود العبوة (اختياري)" value="${Utils.escapeHTML(med.barcode && String(med.barcode).trim() !== String(med.id) ? med.barcode : '')}" style="padding-left:32px;">
-                                <button type="button" class="btn-ghost" onclick="window.App.startBarcodeScanner('e-barcode')" title="مسح بالكاميرا" style="position:absolute; left:4px; top:50%; transform:translateY(-50%); padding:4px; color:var(--primary); cursor:pointer; border:none; background:transparent;">
-                                    <i class='bx bx-barcode-reader' style="font-size:18px;"></i>
-                                </button>
-                            </div>
+                        <div style="display:flex; gap:6px; align-items:center;">
+                            <input type="text" id="e-barcode" class="form-input" placeholder="لا يوجد باركود — اكتب أو امسح بالكاميرا" value="${Utils.escapeHTML(med.barcode && String(med.barcode).trim() !== String(med.id) ? med.barcode : '')}" style="flex:1; font-family:monospace; background:var(--surface);">
+                            <button type="button" class="btn-ghost sm-btn" onclick="window.App.startBarcodeScanner('e-barcode')" title="قراءة الباركود بالكاميرا" style="padding:8px 10px; border:1px solid var(--border-color); border-radius:8px; color:var(--primary); background:var(--surface); flex-shrink:0;">
+                                <i class='bx bx-camera' style="font-size:18px;"></i>
+                            </button>
+                            <button type="button" class="btn-ghost sm-btn" onclick="const el=document.getElementById('e-barcode'); if(el){el.value=''; window.UI.showToast('تم مسح الباركود — اضغط حفظ للتأكيد 🗑️', 'info');}" title="مسح الباركود (دون المساس بكود النظام)" style="padding:8px 10px; border:1px solid rgba(239,68,68,0.35); border-radius:8px; color:var(--danger); background:var(--surface); flex-shrink:0;">
+                                <i class='bx bx-trash' style="font-size:17px;"></i>
+                            </button>
                         </div>
                     </div>
 
@@ -4303,23 +4297,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             const viewMode = this.whCatViewMode || 'categories';
             const searchQuery = this.whCatSearch || '';
             const sortMode = this.whCatSortMode || 'en';
+            this._whCatAllMedsCache = allMeds;
 
             // Filter & sort medicines for "all-meds" mode
-            let displayedMeds = [...allMeds];
-            if (searchQuery.trim()) {
-                const q = searchQuery.trim().toLowerCase();
-                displayedMeds = displayedMeds.filter(m =>
-                    (m.nameEN || '').toLowerCase().includes(q) ||
-                    (m.nameAR || '').toLowerCase().includes(q) ||
-                    (m.activeIngredient || '').toLowerCase().includes(q) ||
-                    (m.barcode || '').includes(q)
-                );
-            }
-            // Sort
-            displayedMeds.sort((a, b) => {
-                if (sortMode === 'ar') return (a.nameAR || '').localeCompare(b.nameAR || '', 'ar');
-                return (a.nameEN || '').localeCompare(b.nameEN || '', 'en');
-            });
+            let displayedMeds = this._filterAndSortWhMeds(allMeds, searchQuery, sortMode);
 
             const catCount = cats.length;
 
@@ -4355,12 +4336,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     <div class="audit-toolbar" style="margin-bottom:10px;">
                         <div class="audit-search-wrapper" style="width:100%;">
                             <i class='bx bx-search'></i>
-                            <input type="text" class="audit-search-input" placeholder="🔍 بحث باسم الدواء أو الباركود..." value="${Utils.escapeHTML(searchQuery)}" oninput="window.App.handleWhCatSearch(this.value)">
-                            ${searchQuery ? `
-                                <button type="button" onclick="window.App.handleWhCatSearch('')" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:flex; align-items:center;">
-                                    <i class='bx bx-x' style="font-size:18px;"></i>
-                                </button>
-                            ` : ''}
+                            <input type="text" id="wh-cat-search-input" class="audit-search-input" placeholder="🔍 بحث باسم الدواء أو الباركود..." value="${Utils.escapeHTML(searchQuery)}" oninput="window.App.handleWhCatSearch(this.value)">
+                            <button type="button" id="wh-cat-clear-btn" onclick="window.App.handleWhCatSearch('', true)" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:${searchQuery ? 'flex' : 'none'}; align-items:center;">
+                                <i class='bx bx-x' style="font-size:18px;"></i>
+                            </button>
                         </div>
                     </div>
 
@@ -4373,17 +4352,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         </select>
                     </div>
 
-                    <!-- Medicine Cards Grid -->
-                    ${displayedMeds.length === 0 ? `
-                        <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color);">
-                            <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
-                            <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة للبحث</p>
-                        </div>
-                    ` : `
-                        <div class="audit-square-grid">
-                            ${displayedMeds.map(m => this._renderWhMedicineCard(m)).join('')}
-                        </div>
-                    `}
+                    <!-- Medicine Cards Grid (Updated in-place on search — never loses focus!) -->
+                    <div id="wh-cat-results-box">
+                        ${this._renderWhMedsGridHtml(displayedMeds, null, searchQuery)}
+                    </div>
                 ` : `
                     <!-- Categories Grid -->
                     <div class="audit-square-grid">
@@ -4430,25 +4402,15 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     // Render a single category's medicines (replaces the grid in-place)
     async _renderWhCatDetail(container, cats, allMeds) {
         const cat = cats.find(c => c.id === this.whSelectedCatId) || { id: this.whSelectedCatId, nameAR: 'غير مصنفة', icon: 'bx-help-circle', color: '#94a3b8' };
-        let medsInCat = allMeds.filter(m => (m.categoryId || 'uncategorized') === this.whSelectedCatId);
-        const totalInCat = medsInCat.length;
+        const allInCat = allMeds.filter(m => (m.categoryId || 'uncategorized') === this.whSelectedCatId);
+        const totalInCat = allInCat.length;
         const isUncategorized = this.whSelectedCatId === 'uncategorized';
 
         const searchQuery = this.whCatSearch || '';
         const sortMode = this.whCatSortMode || 'en';
+        this._whCatDetailCache = { cat, allInCat };
 
-        if (searchQuery.trim()) {
-            const q = searchQuery.trim().toLowerCase();
-            medsInCat = medsInCat.filter(m =>
-                (m.nameEN || '').toLowerCase().includes(q) ||
-                (m.nameAR || '').toLowerCase().includes(q) ||
-                (m.activeIngredient || '').toLowerCase().includes(q)
-            );
-        }
-        medsInCat.sort((a, b) => {
-            if (sortMode === 'ar') return (a.nameAR || '').localeCompare(b.nameAR || '', 'ar');
-            return (a.nameEN || '').localeCompare(b.nameEN || '', 'en');
-        });
+        const medsInCat = this._filterAndSortWhMeds(allInCat, searchQuery, sortMode);
 
         container.innerHTML = `
             <!-- Back Button + Category Header -->
@@ -4484,12 +4446,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             <div class="audit-toolbar" style="margin-bottom:10px;">
                 <div class="audit-search-wrapper" style="width:100%;">
                     <i class='bx bx-search'></i>
-                    <input type="text" class="audit-search-input" placeholder="🔍 بحث في ${Utils.escapeHTML(cat.nameAR)}..." value="${Utils.escapeHTML(searchQuery)}" oninput="window.App.handleWhCatSearch(this.value)">
-                    ${searchQuery ? `
-                        <button type="button" onclick="window.App.handleWhCatSearch('')" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:flex; align-items:center;">
-                            <i class='bx bx-x' style="font-size:18px;"></i>
-                        </button>
-                    ` : ''}
+                    <input type="text" id="wh-cat-search-input" class="audit-search-input" placeholder="🔍 بحث في ${Utils.escapeHTML(cat.nameAR)}..." value="${Utils.escapeHTML(searchQuery)}" oninput="window.App.handleWhCatSearch(this.value)">
+                    <button type="button" id="wh-cat-clear-btn" onclick="window.App.handleWhCatSearch('', true)" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:${searchQuery ? 'flex' : 'none'}; align-items:center;">
+                        <i class='bx bx-x' style="font-size:18px;"></i>
+                    </button>
                 </div>
             </div>
 
@@ -4502,18 +4462,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </select>
             </div>
 
-            <!-- Medicine Cards Grid -->
-            ${medsInCat.length === 0 ? `
-                <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color);">
-                    <i class='bx bx-capsule' style="font-size:32px; color:var(--text-muted); opacity:0.5;"></i>
-                    <p style="margin:8px 0; font-size:13px; color:var(--text-muted);">${searchQuery ? 'لا توجد أدوية مطابقة للبحث' : 'لا توجد أدوية في هذا القسم'}</p>
-                    ${!searchQuery ? `<button class="btn-primary sm-btn" onclick="window.App.openAddMedicineWithCat('${cat.id}')"><i class='bx bx-plus'></i> إضافة أول دواء</button>` : ''}
-                </div>
-            ` : `
-                <div class="audit-square-grid">
-                    ${medsInCat.map(m => this._renderWhMedicineCard(m, cat.id)).join('')}
-                </div>
-            `}
+            <!-- Medicine Cards Grid (Updated in-place on search — never loses focus!) -->
+            <div id="wh-cat-results-box">
+                ${this._renderWhMedsGridHtml(medsInCat, cat.id, searchQuery)}
+            </div>
         `;
     },
 
@@ -4577,8 +4529,63 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         this.renderWarehouseCategories();
     },
 
-    handleWhCatSearch(query) {
-        this.whCatSearch = query;
+    _filterAndSortWhMeds(list, query = '', sortMode = 'en') {
+        let res = [...(list || [])];
+        if (query && query.trim()) {
+            const q = query.trim().toLowerCase();
+            const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(q) : q;
+            res = res.filter(m => {
+                const en = (m.nameEN || '').toLowerCase();
+                const ar = (m.nameAR || '').toLowerCase();
+                const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
+                const act = (m.activeIngredient || '').toLowerCase();
+                const bc = String(m.barcode || '').toLowerCase();
+                const id = String(m.id || '').toLowerCase();
+                return en.includes(q) || ar.includes(q) || arNorm.includes(qNorm) || act.includes(q) || bc.includes(q) || id.includes(q);
+            });
+        }
+        res.sort((a, b) => {
+            if (sortMode === 'ar') return (a.nameAR || '').localeCompare(b.nameAR || '', 'ar');
+            return (a.nameEN || '').localeCompare(b.nameEN || '', 'en');
+        });
+        return res;
+    },
+
+    _renderWhMedsGridHtml(meds, catId = null, searchQuery = '') {
+        if (!meds || meds.length === 0) {
+            return `
+                <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color);">
+                    <i class='bx ${searchQuery ? 'bx-search-alt' : 'bx-capsule'}' style="font-size:32px; color:var(--text-muted); opacity:0.55;"></i>
+                    <p style="margin:8px 0; font-size:13px; color:var(--text-muted);">${searchQuery ? 'لا توجد أدوية مطابقة للبحث' : 'لا توجد أدوية في هذا القسم'}</p>
+                    ${!searchQuery && catId ? `<button class="btn-primary sm-btn" onclick="window.App.openAddMedicineWithCat('${catId}')"><i class='bx bx-plus'></i> إضافة أول دواء</button>` : ''}
+                </div>
+            `;
+        }
+        return `<div class="audit-square-grid">${meds.map(m => this._renderWhMedicineCard(m, catId)).join('')}</div>`;
+    },
+
+    handleWhCatSearch(query, resetInput = false) {
+        this.whCatSearch = query || '';
+        const clearBtn = document.getElementById('wh-cat-clear-btn');
+        if (clearBtn) clearBtn.style.display = this.whCatSearch ? 'flex' : 'none';
+        if (resetInput) {
+            const inp = document.getElementById('wh-cat-search-input');
+            if (inp) { inp.value = ''; inp.focus(); }
+        }
+        const resultsBox = document.getElementById('wh-cat-results-box');
+        if (resultsBox) {
+            const sortMode = this.whCatSortMode || 'en';
+            if (this.whCatViewMode === 'cat-detail' && this._whCatDetailCache) {
+                const filtered = this._filterAndSortWhMeds(this._whCatDetailCache.allInCat, this.whCatSearch, sortMode);
+                resultsBox.innerHTML = this._renderWhMedsGridHtml(filtered, this._whCatDetailCache.cat.id, this.whCatSearch);
+                return;
+            }
+            if (this.whCatViewMode === 'all-meds' && this._whCatAllMedsCache) {
+                const filtered = this._filterAndSortWhMeds(this._whCatAllMedsCache, this.whCatSearch, sortMode);
+                resultsBox.innerHTML = this._renderWhMedsGridHtml(filtered, null, this.whCatSearch);
+                return;
+            }
+        }
         this.renderWarehouseCategories();
     },
 
@@ -4694,19 +4701,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const totalInLoc = medsInLoc.length;
         const searchQuery = this.whLocSearch || '';
         const sortMode = this.whLocSortMode || 'en';
+        this._whLocDetailCache = { loc, allInLoc: [...medsInLoc] };
 
-        if (searchQuery.trim()) {
-            const q = searchQuery.trim().toLowerCase();
-            medsInLoc = medsInLoc.filter(m =>
-                (m.nameEN || '').toLowerCase().includes(q) ||
-                (m.nameAR || '').toLowerCase().includes(q) ||
-                (m.activeIngredient || '').toLowerCase().includes(q)
-            );
-        }
-        medsInLoc.sort((a, b) => {
-            if (sortMode === 'ar') return (a.nameAR || '').localeCompare(b.nameAR || '', 'ar');
-            return (a.nameEN || '').localeCompare(b.nameEN || '', 'en');
-        });
+        medsInLoc = this._filterAndSortWhMeds(medsInLoc, searchQuery, sortMode);
 
         container.innerHTML = `
             <!-- Back + Location Header -->
@@ -4730,12 +4727,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             <div class="audit-toolbar" style="margin-bottom:10px;">
                 <div class="audit-search-wrapper" style="width:100%;">
                     <i class='bx bx-search'></i>
-                    <input type="text" class="audit-search-input" placeholder="🔍 بحث في ${Utils.escapeHTML(loc.nameAR)}..." value="${Utils.escapeHTML(searchQuery)}" oninput="window.App.handleWhLocSearch(this.value)">
-                    ${searchQuery ? `
-                        <button type="button" onclick="window.App.handleWhLocSearch('')" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:flex; align-items:center;">
-                            <i class='bx bx-x' style="font-size:18px;"></i>
-                        </button>
-                    ` : ''}
+                    <input type="text" id="wh-loc-search-input" class="audit-search-input" placeholder="🔍 بحث في ${Utils.escapeHTML(loc.nameAR)}..." value="${Utils.escapeHTML(searchQuery)}" oninput="window.App.handleWhLocSearch(this.value)">
+                    <button type="button" id="wh-loc-clear-btn" onclick="window.App.handleWhLocSearch('', true)" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:${searchQuery ? 'flex' : 'none'}; align-items:center;">
+                        <i class='bx bx-x' style="font-size:18px;"></i>
+                    </button>
                 </div>
             </div>
 
@@ -4748,19 +4743,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </select>
             </div>
 
-            <!-- Medicine Cards -->
-            ${medsInLoc.length === 0 ? `
-                <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color);">
-                    <i class='bx bx-map-pin' style="font-size:32px; color:var(--text-muted); opacity:0.5;"></i>
-                    <p style="margin:8px 0; font-size:13px; color:var(--text-muted);">${searchQuery ? 'لا توجد أدوية مطابقة للبحث' : 'لا توجد أدوية في هذا المكان'}</p>
-                </div>
-            ` : `
-                <div class="audit-square-grid">
-                    ${medsInLoc.map(m => {
-                        return this._renderWhMedicineCard(m);
-                    }).join('')}
-                </div>
-            `}
+            <!-- Medicine Cards (Updated in-place on search — never loses focus!) -->
+            <div id="wh-loc-results-box">
+                ${this._renderWhMedsGridHtml(medsInLoc, null, searchQuery)}
+            </div>
         `;
     },
 
@@ -4784,8 +4770,20 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         this.renderWarehouseLocations();
     },
 
-    handleWhLocSearch(query) {
-        this.whLocSearch = query;
+    handleWhLocSearch(query, resetInput = false) {
+        this.whLocSearch = query || '';
+        const clearBtn = document.getElementById('wh-loc-clear-btn');
+        if (clearBtn) clearBtn.style.display = this.whLocSearch ? 'flex' : 'none';
+        if (resetInput) {
+            const inp = document.getElementById('wh-loc-search-input');
+            if (inp) { inp.value = ''; inp.focus(); }
+        }
+        const box = document.getElementById('wh-loc-results-box');
+        if (box && this._whLocDetailCache) {
+            const filtered = this._filterAndSortWhMeds(this._whLocDetailCache.allInLoc, this.whLocSearch, this.whLocSortMode || 'en');
+            box.innerHTML = this._renderWhMedsGridHtml(filtered, null, this.whLocSearch);
+            return;
+        }
         this.renderWarehouseLocations();
     },
 
@@ -6492,14 +6490,20 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             mergedList = mergedList.filter(m => m.isCounted && !m.isFullyCounted);
         }
 
+        // Cache pre-search list for instant in-place search without closing mobile keyboard
+        this._auditMergedCache = { baseList: [...mergedList], activeLocs };
+
         // Search
         const searchQuery = (this.auditMergedSearch || '').trim().toLowerCase();
         if (searchQuery) {
+            const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(searchQuery) : searchQuery;
             mergedList = mergedList.filter(m => {
                 const en = (m.med.nameEN || '').toLowerCase();
                 const ar = (m.med.nameAR || '').toLowerCase();
+                const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
                 const active = (m.med.activeIngredient || '').toLowerCase();
-                return en.includes(searchQuery) || ar.includes(searchQuery) || active.includes(searchQuery);
+                const bc = String(m.med.barcode || '').toLowerCase();
+                return en.includes(searchQuery) || ar.includes(searchQuery) || arNorm.includes(qNorm) || active.includes(searchQuery) || bc.includes(searchQuery);
             });
         }
 
@@ -6538,7 +6542,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 <div style="display:flex; gap:8px; align-items:center; width:100%;">
                     <div class="audit-search-wrapper" style="flex:1; min-width:200px;">
                         <i class='bx bx-search'></i>
-                        <input type="text" class="audit-search-input" placeholder="بحث بالاسم العربي أو الإنجليزي..." value="${this.auditMergedSearch || ''}" oninput="window.App.auditMergedSearch=this.value; window.App.renderAuditView();">
+                        <input type="text" id="audit-merged-search-input" class="audit-search-input" placeholder="بحث بالاسم العربي أو الإنجليزي..." value="${Utils.escapeHTML(this.auditMergedSearch || '')}" oninput="window.App.handleAuditMergedSearch(this.value)">
+                        <button type="button" id="audit-merged-clear-btn" onclick="window.App.handleAuditMergedSearch('', true)" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:${this.auditMergedSearch ? 'flex' : 'none'}; align-items:center;">
+                            <i class='bx bx-x' style="font-size:18px;"></i>
+                        </button>
                     </div>
                 </div>
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-top:8px;">
@@ -6559,18 +6566,60 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             </div>
 
-            <!-- Merged Cards -->
-            ${mergedList.length === 0 ? `
+            <!-- Merged Cards (Updated in-place on search — never loses focus!) -->
+            <div id="audit-merged-results-box">
+                ${mergedList.length === 0 ? `
+                    <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
+                        <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
+                        <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة</p>
+                    </div>
+                ` : `
+                    <div style="display:flex; flex-direction:column; gap:12px;">
+                        ${mergedList.map(item => this.renderMergedMedicineCard(item, activeLocs)).join('')}
+                    </div>
+                `}
+            </div>
+        `;
+    },
+
+    handleAuditMergedSearch(query, resetInput = false) {
+        this.auditMergedSearch = query || '';
+        const clearBtn = document.getElementById('audit-merged-clear-btn');
+        if (clearBtn) clearBtn.style.display = this.auditMergedSearch ? 'flex' : 'none';
+        if (resetInput) {
+            const inp = document.getElementById('audit-merged-search-input');
+            if (inp) { inp.value = ''; inp.focus(); }
+        }
+        const box = document.getElementById('audit-merged-results-box');
+        if (box && this._auditMergedCache) {
+            const { baseList, activeLocs } = this._auditMergedCache;
+            const q = this.auditMergedSearch.trim().toLowerCase();
+            const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(q) : q;
+            let list = baseList;
+            if (q) {
+                list = list.filter(m => {
+                    const en = (m.med.nameEN || '').toLowerCase();
+                    const ar = (m.med.nameAR || '').toLowerCase();
+                    const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
+                    const active = (m.med.activeIngredient || '').toLowerCase();
+                    const bc = String(m.med.barcode || '').toLowerCase();
+                    return en.includes(q) || ar.includes(q) || arNorm.includes(qNorm) || active.includes(q) || bc.includes(q);
+                });
+            }
+            list = [...list].sort((a, b) => {
+                if (a.isCounted !== b.isCounted) return a.isCounted ? 1 : -1;
+                if (a.isFullyCounted !== b.isFullyCounted) return a.isFullyCounted ? 1 : -1;
+                return (a.med.nameEN || '').localeCompare(b.med.nameEN || '');
+            });
+            box.innerHTML = list.length === 0 ? `
                 <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
                     <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
                     <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة</p>
                 </div>
-            ` : `
-                <div style="display:flex; flex-direction:column; gap:12px;">
-                    ${mergedList.map(item => this.renderMergedMedicineCard(item, activeLocs)).join('')}
-                </div>
-            `}
-        `;
+            ` : `<div style="display:flex; flex-direction:column; gap:12px;">${list.map(item => this.renderMergedMedicineCard(item, activeLocs)).join('')}</div>`;
+            return;
+        }
+        this.renderAuditView();
     },
 
     renderMergedMedicineCard(item, allSessionLocs) {
@@ -6686,6 +6735,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const viewMode = hasSearch ? 'all-meds' : (this.auditLocViewMode || 'categories');
         const currentLocFilter = this.auditLocFilter || 'all';
         const sortMode = this.auditSortMode || 'status';
+        this._auditLocCache = { allLocMeds, categories, totalCount, countedCount, uncountedCount, sortMode, currentLocFilter };
 
         let displayedMeds = allLocMeds;
         if (currentLocFilter === 'uncounted') {
@@ -6736,12 +6786,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             <div class="audit-toolbar" style="margin-bottom:10px;">
                 <div class="audit-search-wrapper" style="width:100%;">
                     <i class='bx bx-search'></i>
-                    <input type="text" id="audit-loc-search" class="audit-search-input" placeholder="🔍 ابحث عن دواء في ${Utils.escapeHTML(loc.nameAR)} (عربي / إنجليزي)..." value="${this.auditLocSearch || ''}" oninput="window.App.handleAuditLocSearch(this.value)">
-                    ${hasSearch ? `
-                        <button type="button" onclick="window.App.handleAuditLocSearch('')" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:flex; align-items:center;">
-                            <i class='bx bx-x' style="font-size:18px;"></i>
-                        </button>
-                    ` : ''}
+                    <input type="text" id="audit-loc-search" class="audit-search-input" placeholder="🔍 ابحث عن دواء في ${Utils.escapeHTML(loc.nameAR)} (عربي / إنجليزي)..." value="${Utils.escapeHTML(this.auditLocSearch || '')}" oninput="window.App.handleAuditLocSearch(this.value)">
+                    <button type="button" id="audit-loc-clear-btn" onclick="window.App.handleAuditLocSearch('', true)" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:${hasSearch ? 'flex' : 'none'}; align-items:center;">
+                        <i class='bx bx-x' style="font-size:18px;"></i>
+                    </button>
                 </div>
             </div>
 
@@ -6776,8 +6824,16 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             </div>
 
-            <!-- Content Area: Categories Grid OR All Medicines Grid -->
-            ${viewMode === 'categories' ? `
+            <!-- Content Area: Categories Grid OR All Medicines Grid (Updated in-place on search — never loses focus!) -->
+            <div id="audit-loc-results-box">
+                ${this._renderAuditLocContentHtml(viewMode, categories, allLocMeds, displayedMeds, currentLocFilter, totalCount, countedCount, uncountedCount)}
+            </div>
+        `;
+    },
+
+    _renderAuditLocContentHtml(viewMode, categories, allLocMeds, displayedMeds, currentLocFilter, totalCount, countedCount, uncountedCount) {
+        if (viewMode === 'categories') {
+            return `
                 <div class="audit-square-grid">
                     ${categories.map(cat => {
                         const catMeds = allLocMeds.filter(m => m.categoryId === cat.id);
@@ -6796,30 +6852,29 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         `;
                     }).join('')}
                 </div>
-            ` : `
-                <!-- All-Meds Filter Chips (When in all medicines view) -->
-                <div class="audit-filters-row" style="margin-bottom:10px;">
-                    <button type="button" class="audit-filter-chip ${currentLocFilter === 'all' ? 'active' : ''}" onclick="window.App.setAuditLocFilter('all')">
-                        الكل (${totalCount})
-                    </button>
-                    <button type="button" class="audit-filter-chip ${currentLocFilter === 'uncounted' ? 'active' : ''}" onclick="window.App.setAuditLocFilter('uncounted')">
-                        ⏳ بانتظار العد (${uncountedCount})
-                    </button>
-                    <button type="button" class="audit-filter-chip ${currentLocFilter === 'counted' ? 'active' : ''}" onclick="window.App.setAuditLocFilter('counted')">
-                        ✅ تم العد (${countedCount})
-                    </button>
+            `;
+        }
+        return `
+            <div class="audit-filters-row" style="margin-bottom:10px;">
+                <button type="button" class="audit-filter-chip ${currentLocFilter === 'all' ? 'active' : ''}" onclick="window.App.setAuditLocFilter('all')">
+                    الكل (${totalCount})
+                </button>
+                <button type="button" class="audit-filter-chip ${currentLocFilter === 'uncounted' ? 'active' : ''}" onclick="window.App.setAuditLocFilter('uncounted')">
+                    ⏳ بانتظار العد (${uncountedCount})
+                </button>
+                <button type="button" class="audit-filter-chip ${currentLocFilter === 'counted' ? 'active' : ''}" onclick="window.App.setAuditLocFilter('counted')">
+                    ✅ تم العد (${countedCount})
+                </button>
+            </div>
+            ${displayedMeds.length === 0 ? `
+                <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
+                    <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
+                    <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة لبحثك في هذا المكان</p>
                 </div>
-
-                ${displayedMeds.length === 0 ? `
-                    <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
-                        <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
-                        <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة لبحثك في هذا المكان</p>
-                    </div>
-                ` : `
-                    <div class="audit-square-grid">
-                        ${displayedMeds.map(med => this.renderAuditMedicineCard(med)).join('')}
-                    </div>
-                `}
+            ` : `
+                <div class="audit-square-grid">
+                    ${displayedMeds.map(med => this.renderAuditMedicineCard(med)).join('')}
+                </div>
             `}
         `;
     },
@@ -7072,8 +7127,29 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         this.renderAuditView();
     },
 
-    handleAuditMedSearch(query) {
-        this.auditMedSearch = query;
+    handleAuditMedSearch(query, resetInput = false) {
+        this.auditMedSearch = query || '';
+        const clearBtn = document.getElementById('audit-med-clear-btn');
+        if (clearBtn) clearBtn.style.display = this.auditMedSearch ? 'flex' : 'none';
+        if (resetInput) {
+            const inp = document.getElementById('audit-med-search');
+            if (inp) { inp.value = ''; inp.focus(); }
+        }
+        const box = document.getElementById('audit-med-results-box');
+        if (box && this._auditMedCache) {
+            let list = [...this._auditMedCache.baseMeds];
+            if (this.auditMedSearch.trim()) {
+                list = this.filterAuditMedicines(list, this.auditMedSearch);
+            }
+            list = this.sortAuditMedicines(list, this._auditMedCache.sortMode);
+            box.innerHTML = list.length === 0 ? `
+                <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
+                    <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
+                    <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة لبحثك أو الفلتر المحدد</p>
+                </div>
+            ` : `<div class="audit-square-grid">${list.map(med => this.renderAuditMedicineCard(med)).join('')}</div>`;
+            return;
+        }
         this.renderAuditView();
     },
 
@@ -7082,8 +7158,27 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         this.renderAuditView();
     },
 
-    handleAuditLocSearch(query) {
-        this.auditLocSearch = query;
+    handleAuditLocSearch(query, resetInput = false) {
+        this.auditLocSearch = query || '';
+        const hasSearch = !!(this.auditLocSearch && this.auditLocSearch.trim());
+        const clearBtn = document.getElementById('audit-loc-clear-btn');
+        if (clearBtn) clearBtn.style.display = hasSearch ? 'flex' : 'none';
+        if (resetInput) {
+            const inp = document.getElementById('audit-loc-search');
+            if (inp) { inp.value = ''; inp.focus(); }
+        }
+        const box = document.getElementById('audit-loc-results-box');
+        if (box && this._auditLocCache) {
+            const c = this._auditLocCache;
+            const viewMode = hasSearch ? 'all-meds' : (this.auditLocViewMode || 'categories');
+            let displayed = c.allLocMeds;
+            if (c.currentLocFilter === 'uncounted') displayed = displayed.filter(m => !m.isCounted);
+            else if (c.currentLocFilter === 'counted') displayed = displayed.filter(m => m.isCounted);
+            if (hasSearch) displayed = this.filterAuditMedicines(displayed, this.auditLocSearch);
+            displayed = this.sortAuditMedicines(displayed, c.sortMode);
+            box.innerHTML = this._renderAuditLocContentHtml(viewMode, c.categories, c.allLocMeds, displayed, c.currentLocFilter, c.totalCount, c.countedCount, c.uncountedCount);
+            return;
+        }
         this.renderAuditView();
     },
 
@@ -7232,6 +7327,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             filteredMedicines = filteredMedicines.filter(m => m.isCounted);
         }
 
+        this._auditMedCache = { baseMeds: [...filteredMedicines], sortMode };
+
         if (this.auditMedSearch && this.auditMedSearch.trim()) {
             filteredMedicines = this.filterAuditMedicines(filteredMedicines, this.auditMedSearch);
         }
@@ -7293,12 +7390,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 <div style="display:flex; gap:8px; align-items:center; width:100%; flex-wrap:wrap;">
                     <div class="audit-search-wrapper" style="flex:1; min-width:200px;">
                         <i class='bx bx-search'></i>
-                        <input type="text" id="audit-med-search" class="audit-search-input" placeholder="بحث سريع باسم الدواء الإنجليزي أو العربي..." value="${this.auditMedSearch || ''}" oninput="window.App.handleAuditMedSearch(this.value)">
-                        ${this.auditMedSearch ? `
-                            <button type="button" onclick="window.App.handleAuditMedSearch('')" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:flex; align-items:center;">
-                                <i class='bx bx-x' style="font-size:18px;"></i>
-                            </button>
-                        ` : ''}
+                        <input type="text" id="audit-med-search" class="audit-search-input" placeholder="بحث سريع باسم الدواء الإنجليزي أو العربي..." value="${Utils.escapeHTML(this.auditMedSearch || '')}" oninput="window.App.handleAuditMedSearch(this.value)">
+                        <button type="button" id="audit-med-clear-btn" onclick="window.App.handleAuditMedSearch('', true)" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:${this.auditMedSearch ? 'flex' : 'none'}; align-items:center;">
+                            <i class='bx bx-x' style="font-size:18px;"></i>
+                        </button>
                     </div>
                     <button class="btn-primary sm-btn" onclick="window.App.addMedicineDuringAudit('${cat.id}')" style="font-size:11px; display:flex; align-items:center; gap:3px; padding:6px 10px; border-radius:8px; white-space:nowrap;">
                         <i class='bx bx-plus-medical'></i> دواء جديد
@@ -7328,17 +7423,19 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             </div>
 
-            <!-- Square Medicines Grid with Smart Sorting -->
-            ${filteredMedicines.length === 0 ? `
-                <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
-                    <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
-                    <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة لبحثك أو الفلتر المحدد</p>
-                </div>
-            ` : `
-                <div class="audit-square-grid">
-                    ${filteredMedicines.map(med => this.renderAuditMedicineCard(med)).join('')}
-                </div>
-            `}
+            <!-- Square Medicines Grid with Smart Sorting (Updated in-place on search — never loses focus!) -->
+            <div id="audit-med-results-box">
+                ${filteredMedicines.length === 0 ? `
+                    <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
+                        <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
+                        <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة لبحثك أو الفلتر المحدد</p>
+                    </div>
+                ` : `
+                    <div class="audit-square-grid">
+                        ${filteredMedicines.map(med => this.renderAuditMedicineCard(med)).join('')}
+                    </div>
+                `}
+            </div>
         `;
     },
 
