@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.13.1', // Fix IndexedDB cloud reconciliation, zero-qty no-confirm/no-expiry, no mobile keyboard popup
+    VERSION: '18.14.0', // Active ingredient analytics & export grouping, numbered clean Excel exports, separate clearable barcode
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1120,7 +1120,9 @@ const App = {
             const safePrimary = (typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(primaryName) : primaryName;
             const safeSecondary = (typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(secondaryName) : secondaryName;
             const safeActive = (med.activeIngredient && typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(med.activeIngredient) : (med.activeIngredient || '');
-            const safeBarcode = med.barcode || med.id || '';
+            // v18.14.0: Keep commercial barcode strictly separate from internal DB id
+            const realBarcode = (med.barcode && String(med.barcode).trim() !== '' && String(med.barcode).trim() !== String(med.id)) ? String(med.barcode).trim() : '';
+            const safeBarcode = realBarcode ? Utils.escapeHTML(realBarcode) : '';
 
             // Fetch physical storage locations in the clinic building
             const allLocations = (await Locations.getAll()) || [];
@@ -1168,15 +1170,20 @@ const App = {
                     </div>
                 </div>
 
-                <!-- Barcode & Identification Quick Bar -->
+                <!-- Barcode & Identification Quick Bar (Strictly separate from internal DB #id) -->
                 ${safeBarcode ? `
-                    <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px; padding:8px 12px; margin-bottom:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px; padding:8px 12px; margin-bottom:16px; flex-wrap:wrap;">
                         <span style="font-size:12px; font-weight:bold; color:var(--text-muted); display:flex; align-items:center; gap:6px;">
                             <i class='bx bx-barcode' style="font-size:16px; color:var(--primary);"></i> الباركود: <code style="color:var(--text-main);">${safeBarcode}</code>
                         </span>
-                        <button type="button" class="btn-ghost sm-btn" onclick="navigator.clipboard.writeText('${safeBarcode}'); window.UI.showToast('تم نسخ الباركود 📋', 'info');" style="font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--border-color);">
-                            نسخ <i class='bx bx-copy'></i>
-                        </button>
+                        <div style="display:flex; gap:6px;">
+                            <button type="button" class="btn-ghost sm-btn" onclick="navigator.clipboard.writeText('${safeBarcode}'); window.UI.showToast('تم نسخ الباركود 📋', 'info');" style="font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--border-color);">
+                                نسخ <i class='bx bx-copy'></i>
+                            </button>
+                            <button type="button" class="btn-ghost sm-btn" onclick="window.App.clearMedicineBarcode('${Utils.escapeHTML(med.id)}')" title="مسح الباركود (دون المساس بكود الدواء في القاعدة)" style="font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid rgba(239,68,68,0.35); color:var(--danger);">
+                                مسح <i class='bx bx-trash'></i>
+                            </button>
+                        </div>
                     </div>
                 ` : ''}
 
@@ -1490,14 +1497,19 @@ const App = {
                             <input type="text" id="e-active" class="form-input" value="${Utils.escapeHTML(med.activeIngredient || '')}">
                         </div>
                         <div class="form-group">
-                            <label class="form-label" style="display:flex; justify-content:space-between; align-items:center;">
-                                <span>الباركود:</span>
-                                <button type="button" class="btn-ghost sm-btn" onclick="window.App.startBarcodeScanner('e-barcode')" style="font-size:10px; color:var(--primary); padding:1px 6px; border:1px solid var(--border-color); border-radius:6px; cursor:pointer;">
-                                    <i class='bx bx-camera'></i> 📷 مسح
-                                </button>
+                            <label class="form-label" style="display:flex; justify-content:space-between; align-items:center; gap:4px;">
+                                <span>الباركود <small style="color:var(--text-muted); font-weight:normal;">(#${Utils.escapeHTML(med.id)})</small>:</span>
+                                <div style="display:flex; gap:4px;">
+                                    <button type="button" class="btn-ghost sm-btn" onclick="window.App.startBarcodeScanner('e-barcode')" style="font-size:10px; color:var(--primary); padding:1px 6px; border:1px solid var(--border-color); border-radius:6px; cursor:pointer;" title="مسح بالكاميرا">
+                                        <i class='bx bx-camera'></i> كاميرا
+                                    </button>
+                                    <button type="button" class="btn-ghost sm-btn" onclick="const el=document.getElementById('e-barcode'); if(el){el.value=''; window.UI.showToast('تم مسح الباركود — اضغط حفظ للتأكيد 🗑️', 'info');}" style="font-size:10px; color:var(--danger); padding:1px 6px; border:1px solid rgba(239,68,68,0.35); border-radius:6px; cursor:pointer;" title="مسح الباركود بدون المساس بكود النظام">
+                                        <i class='bx bx-trash'></i> مسح
+                                    </button>
+                                </div>
                             </label>
                             <div style="position:relative;">
-                                <input type="text" id="e-barcode" class="form-input" value="${Utils.escapeHTML(med.barcode || med.id || '')}" style="padding-left:32px;">
+                                <input type="text" id="e-barcode" class="form-input" placeholder="باركود العبوة (اختياري)" value="${Utils.escapeHTML(med.barcode && String(med.barcode).trim() !== String(med.id) ? med.barcode : '')}" style="padding-left:32px;">
                                 <button type="button" class="btn-ghost" onclick="window.App.startBarcodeScanner('e-barcode')" title="مسح بالكاميرا" style="position:absolute; left:4px; top:50%; transform:translateY(-50%); padding:4px; color:var(--primary); cursor:pointer; border:none; background:transparent;">
                                     <i class='bx bx-barcode-reader' style="font-size:18px;"></i>
                                 </button>
@@ -1807,7 +1819,8 @@ const App = {
             }
             this._activeImageData = null;
 
-            const medId = barcode || (await Categories.generateNextId()) || ('med_' + Date.now());
+            // v18.14.0: Always separate permanent DB id from optional commercial barcode
+            const medId = (await Categories.generateNextId()) || ('med_' + Date.now());
             const now = new Date().toISOString();
 
             const data = {
@@ -1816,7 +1829,7 @@ const App = {
                 nameAR,
                 activeIngredient,
                 categoryId,
-                barcode: barcode || medId,
+                barcode: barcode || '',
                 type,
                 primaryLocation: primaryLoc || null,
                 allowedLocations: selectedLocIds.length > 0 ? selectedLocIds : null,
@@ -1923,7 +1936,8 @@ const App = {
                 nameEN: document.getElementById('e-name-en').value.trim(),
                 nameAR: document.getElementById('e-name-ar').value.trim() || document.getElementById('e-name-en').value.trim(),
                 activeIngredient: (document.getElementById('e-active')?.value || '').trim(),
-                barcode: (document.getElementById('e-barcode')?.value || med.barcode || med.id).trim(),
+                // v18.14.0: Allow clearing barcode cleanly without touching med.id
+                barcode: (document.getElementById('e-barcode')?.value || '').trim(),
                 categoryId: document.getElementById('e-category').value,
                 type: document.getElementById('e-type').value,
                 primaryLocation: primaryLoc || null,
@@ -2529,7 +2543,7 @@ const App = {
             try { saved = JSON.parse(localStorage.getItem('dawaa_export_prefs') || '{}'); } catch(e) {}
 
             const nameVal = saved.nameMode || 'both';
-            const groupVal = saved.groupByCat !== false;
+            const groupModeVal = saved.groupMode || (saved.groupByCat === false ? 'none' : 'category');
             const locModeVal = saved.locationMode || 'columns';
             const expiryVal = saved.expiryMode || 'all';
             const sortVal = saved.sortMode || 'name';
@@ -2567,12 +2581,13 @@ const App = {
                     </div>
                 </div>
 
-                <!-- 2. Group by category -->
+                <!-- 2. Grouping -->
                 <div class="cex-section" style="margin-bottom:16px;">
-                    <h4 style="margin-bottom:8px; font-size:14px;">🗂️ التجميع بالتصنيف</h4>
+                    <h4 style="margin-bottom:8px; font-size:14px;">🗂️ طريقة التجميع</h4>
                     <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                        <label style="cursor:pointer;"><input type="radio" name="cex-group" value="yes" ${groupVal?'checked':''}> مجمّع بالتصنيفات</label>
-                        <label style="cursor:pointer;"><input type="radio" name="cex-group" value="no" ${!groupVal?'checked':''}> قائمة مسطحة</label>
+                        <label style="cursor:pointer;"><input type="radio" name="cex-group" value="category" ${groupModeVal==='category'?'checked':''}> مجمّع بالتصنيفات</label>
+                        <label style="cursor:pointer;"><input type="radio" name="cex-group" value="active" ${groupModeVal==='active'?'checked':''}> مجمّع بالمادة الفعالة 🧬</label>
+                        <label style="cursor:pointer;"><input type="radio" name="cex-group" value="none" ${groupModeVal==='none'?'checked':''}> قائمة مسطحة</label>
                     </div>
                 </div>
 
@@ -2648,7 +2663,7 @@ const App = {
         const source = document.querySelector('input[name="cex-source"]:checked')?.value || 'inventory';
         const sessionId = source === 'audit' ? (document.getElementById('cex-session-select')?.value || null) : null;
         const nameMode = document.querySelector('input[name="cex-name"]:checked')?.value || 'both';
-        const groupByCat = (document.querySelector('input[name="cex-group"]:checked')?.value || 'yes') === 'yes';
+        const groupMode = document.querySelector('input[name="cex-group"]:checked')?.value || 'category';
         const locationMode = document.querySelector('input[name="cex-loc"]:checked')?.value || 'columns';
         const expiryMode = document.querySelector('input[name="cex-exp"]:checked')?.value || 'all';
         const sortMode = document.querySelector('input[name="cex-sort"]:checked')?.value || 'name';
@@ -2660,12 +2675,12 @@ const App = {
         // Save preferences
         try {
             localStorage.setItem('dawaa_export_prefs', JSON.stringify({
-                nameMode, groupByCat, locationMode, expiryMode, sortMode
+                nameMode, groupMode, locationMode, expiryMode, sortMode
             }));
         } catch(e) {}
 
         UI.closeModal();
-        this.exportCustomInventory({ source, sessionId, nameMode, groupByCat, locationMode, expiryMode, sortMode, selectedCats, selectedLocs });
+        this.exportCustomInventory({ source, sessionId, nameMode, groupMode, locationMode, expiryMode, sortMode, selectedCats, selectedLocs });
     },
 
     async exportCustomInventory(opts) {
@@ -2714,6 +2729,7 @@ const App = {
                             id: medId,
                             nameEN: med.nameEN || '',
                             nameAR: med.nameAR || med.nameEN || '',
+                            activeIngredient: (med.activeIngredient || '').trim(),
                             categoryId: med.categoryId || 'uncategorized',
                             perLoc: {},
                             total: 0,
@@ -2754,6 +2770,7 @@ const App = {
                         id: med.id,
                         nameEN: med.nameEN || '',
                         nameAR: med.nameAR || med.nameEN || '',
+                        activeIngredient: (med.activeIngredient || '').trim(),
                         categoryId: med.categoryId || 'uncategorized',
                         perLoc: {},
                         total: 0,
@@ -2840,25 +2857,50 @@ const App = {
             };
 
             // --- Step 4: Build sheet ---
-            if (opts.groupByCat) {
-                // === GROUPED BY CATEGORY ===
-                const catGroups = new Map();
-                for (const d of medsArray) {
-                    const cid = d.categoryId;
-                    if (!catGroups.has(cid)) catGroups.set(cid, []);
-                    catGroups.get(cid).push(d);
+            const groupMode = opts.groupMode || (opts.groupByCat === false ? 'none' : 'category');
+
+            if (groupMode === 'category' || groupMode === 'active') {
+                // === GROUPED BY CATEGORY OR ACTIVE INGREDIENT ===
+                const groups = new Map(); // groupKey -> { label, meds[] }
+
+                if (groupMode === 'category') {
+                    for (const d of medsArray) {
+                        const cid = d.categoryId;
+                        if (!groups.has(cid)) {
+                            const cat = catMap.get(cid);
+                            groups.set(cid, {
+                                key: cid,
+                                label: Categories.getCategoryDisplayName(cat || cid, opts.nameMode, catMap),
+                                isLast: cid === 'uncategorized',
+                                meds: []
+                            });
+                        }
+                        groups.get(cid).meds.push(d);
+                    }
+                } else {
+                    // Group by normalized active ingredient
+                    for (const d of medsArray) {
+                        const normKey = this._normalizeActiveKey(d.activeIngredient);
+                        const groupKey = normKey || '__no_active__';
+                        if (!groups.has(groupKey)) {
+                            groups.set(groupKey, {
+                                key: groupKey,
+                                label: normKey ? d.activeIngredient.trim() : 'بدون مادة فعالة',
+                                isLast: !normKey,
+                                meds: []
+                            });
+                        }
+                        groups.get(groupKey).meds.push(d);
+                    }
                 }
 
-                const sortedCatIds = Array.from(catGroups.keys()).sort((a, b) => {
-                    if (a === 'uncategorized') return 1;
-                    if (b === 'uncategorized') return -1;
-                    const nameA = Categories.getCategoryDisplayName(catMap.get(a) || a, opts.nameMode, catMap);
-                    const nameB = Categories.getCategoryDisplayName(catMap.get(b) || b, opts.nameMode, catMap);
-                    return nameA.localeCompare(nameB);
+                const sortedGroups = Array.from(groups.values()).sort((a, b) => {
+                    if (a.isLast !== b.isLast) return a.isLast ? 1 : -1;
+                    return a.label.localeCompare(b.label);
                 });
 
-                // Headers
-                const headers = [];
+                // Headers (with sequential numbering column 'م')
+                const headers = ['م'];
                 if (opts.nameMode === 'both' || opts.nameMode === 'en') headers.push('Medicine Name (EN)');
                 if (opts.nameMode === 'both' || opts.nameMode === 'ar') headers.push('اسم الدواء (AR)');
 
@@ -2877,24 +2919,20 @@ const App = {
                 }
 
                 const aoa = [headers];
-                const categoryRowIndices = [];
-                let grandTotal = 0;
+                const groupRowIndices = [];
+                let rowCounter = 1;
 
-                for (const catId of sortedCatIds) {
-                    const cat = catMap.get(catId);
-                    const catName = Categories.getCategoryDisplayName(cat || catId, opts.nameMode, catMap);
-                    const meds = catGroups.get(catId);
-                    const catTotal = meds.reduce((s, m) => s + m.total, 0);
+                for (const grp of sortedGroups) {
+                    // Clean group header row (NO "صنف — وحدة" clutter!)
+                    const prefix = groupMode === 'active' ? '🧬 ' : '◼ ';
+                    const grpRow = [`${prefix}${grp.label}`];
+                    for (let i = 1; i < headers.length; i++) grpRow.push('');
+                    groupRowIndices.push(aoa.length);
+                    aoa.push(grpRow);
 
-                    // Category header
-                    const catRow = [`◼ ${catName} (${meds.length} صنف — ${catTotal} وحدة)`];
-                    for (let i = 1; i < headers.length; i++) catRow.push('');
-                    categoryRowIndices.push(aoa.length);
-                    aoa.push(catRow);
-
-                    // Medicine rows
-                    for (const m of meds) {
-                        const row = [];
+                    // Medicine rows with sequential numbering
+                    for (const m of grp.meds) {
+                        const row = [rowCounter++];
                         if (opts.nameMode === 'both' || opts.nameMode === 'en') row.push(m.nameEN);
                         if (opts.nameMode === 'both' || opts.nameMode === 'ar') row.push(m.nameAR);
 
@@ -2923,32 +2961,27 @@ const App = {
                         aoa.push(row);
                     }
 
-                    grandTotal += catTotal;
-                }
-
-                // Grand total
-                const totalRow = [];
-                if (opts.nameMode === 'both') { totalRow.push(''); totalRow.push('الإجمالي الكلي'); }
-                else totalRow.push('الإجمالي الكلي');
-
-                if (opts.locationMode === 'columns') {
-                    for (const loc of locColumns) {
-                        const locTotal = medsArray.reduce((s, m) => s + (m.perLoc[loc.id]?.qty || 0), 0);
-                        totalRow.push(locTotal);
+                    // For active ingredient grouping, when a group has 2+ alternatives, add merged active total row
+                    if (groupMode === 'active' && grp.meds.length > 1 && !grp.isLast) {
+                        const activeTotal = grp.meds.reduce((s, m) => s + m.total, 0);
+                        const subRow = ['', `إجمالي المادة الفعالة (${grp.label})`];
+                        while (subRow.length < headers.length) subRow.push('');
+                        const totalColIdx = headers.indexOf('الإجمالي');
+                        if (totalColIdx >= 0) subRow[totalColIdx] = activeTotal;
+                        aoa.push(subRow);
                     }
-                } else if (opts.locationMode === 'single') {
-                    totalRow.push('');
                 }
 
-                totalRow.push(grandTotal);
-                if (opts.expiryMode !== 'none') totalRow.push('');
-
+                // Bottom summary row: Total number of medicines (instead of grand quantity total)
+                const countRow = ['', 'إجمالي عدد الأدوية', medsArray.length];
+                while (countRow.length < headers.length) countRow.push('');
                 aoa.push([]);
-                aoa.push(totalRow);
+                aoa.push(countRow);
 
                 // Build sheet
                 const ws = XLSX.utils.aoa_to_sheet(aoa);
                 ws['!cols'] = headers.map((h, i) => {
+                    if (i === 0) return { wch: 6 };
                     let maxLen = h.length;
                     for (const row of aoa) {
                         const cellLen = String(row[i] || '').length;
@@ -2957,22 +2990,24 @@ const App = {
                     return { wch: Math.min(maxLen + 3, 55) };
                 });
 
-                // Merge category headers (0-based row index in SheetJS)
-                const merges = categoryRowIndices.map(rowIdx => ({
+                // Merge group headers (0-based row index in SheetJS)
+                const merges = groupRowIndices.map(rowIdx => ({
                     s: { r: rowIdx, c: 0 },
                     e: { r: rowIdx, c: headers.length - 1 }
                 }));
                 if (merges.length > 0) ws['!merges'] = merges;
 
                 const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, 'المخزون');
-                XLSX.writeFile(wb, `${exportFileName}_${new Date().toISOString().split('T')[0]}.xlsx`);
-                UI.showToast(`تم تصدير ${medsArray.length} صنف ✅`, 'success');
+                const sheetTitle = groupMode === 'active' ? 'حسب المادة الفعالة' : 'المخزون';
+                XLSX.utils.book_append_sheet(wb, ws, sheetTitle);
+                const suffix = groupMode === 'active' ? '_مادة_فعالة' : '';
+                XLSX.writeFile(wb, `${exportFileName}${suffix}_${new Date().toISOString().split('T')[0]}.xlsx`);
+                UI.showToast(`تم تصدير ${medsArray.length} دواء ✅`, 'success');
 
             } else {
-                // === FLAT LIST ===
-                const finalRows = medsArray.map(m => {
-                    const row = {};
+                // === FLAT LIST (with sequential numbering 'م' + total medicine count footer) ===
+                const finalRows = medsArray.map((m, idx) => {
+                    const row = { 'م': idx + 1 };
                     if (opts.nameMode === 'both' || opts.nameMode === 'en') row['Medicine Name (EN)'] = m.nameEN;
                     if (opts.nameMode === 'both' || opts.nameMode === 'ar') row['اسم الدواء (AR)'] = m.nameAR;
 
@@ -3016,8 +3051,21 @@ const App = {
                     return;
                 }
 
+                // Append empty row + total medicine count row
+                const keys = Object.keys(finalRows[0]);
+                const emptyRow = {};
+                const countRow = {};
+                keys.forEach((k, i) => {
+                    emptyRow[k] = '';
+                    if (i === 1) countRow[k] = 'إجمالي عدد الأدوية';
+                    else if (i === 2) countRow[k] = medsArray.length;
+                    else countRow[k] = '';
+                });
+                finalRows.push(emptyRow, countRow);
+
                 const ws = XLSX.utils.json_to_sheet(finalRows);
-                ws['!cols'] = Object.keys(finalRows[0]).map(key => {
+                ws['!cols'] = keys.map((key, idx) => {
+                    if (idx === 0) return { wch: 6 };
                     const maxLen = Math.max(key.length, ...finalRows.map(r => String(r[key] || '').length));
                     return { wch: Math.min(maxLen + 4, 55) };
                 });
@@ -3025,7 +3073,7 @@ const App = {
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws, 'المخزون');
                 XLSX.writeFile(wb, `${exportFileName}_${new Date().toISOString().split('T')[0]}.xlsx`);
-                UI.showToast(`تم تصدير ${finalRows.length} صنف ✅`, 'success');
+                UI.showToast(`تم تصدير ${medsArray.length} دواء ✅`, 'success');
             }
 
         } catch (err) {
@@ -3484,6 +3532,320 @@ const App = {
         }
     },
     // ===================== End Smart Catalog Enricher =====================
+
+    // ===================== Clear Barcode Safely (Separate from DB ID) =====================
+    async clearMedicineBarcode(medId) {
+        try {
+            const med = await DB.get('medicineMaster', medId);
+            if (!med) return;
+            med.barcode = '';
+            med.lastUpdated = new Date().toISOString();
+            med.v = (med.v || 1) + 1;
+            await DB.put('medicineMaster', med);
+            if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+                window.Sync.push(med.id).catch(e => console.warn('Sync push clear barcode error:', e));
+            }
+            UI.showToast('تم مسح الباركود بنجاح (كود الدواء في القاعدة كما هو) 🗑️✅', 'success');
+            await this.openMedicineDetails(medId);
+        } catch (err) {
+            console.error('Clear barcode error:', err);
+            UI.showToast('تعذر مسح الباركود', 'danger');
+        }
+    },
+
+    // ===================== Active Ingredient Analytics & Grouping =====================
+    _normalizeActiveKey(str) {
+        if (!str) return '';
+        const cleaned = String(str)
+            .toLowerCase()
+            .replace(/\s*\([^)]*\)\s*/g, ' ') // normalize parenthetical aliases like paracetamol(acetaminophen)
+            .replace(/[,;/]+/g, '+')
+            .split('+')
+            .map(p => p.trim().replace(/\s+/g, ' '))
+            .filter(Boolean)
+            .sort()
+            .join(' + ');
+        return cleaned;
+    },
+
+    async openActiveIngredientAnalysisModal(sourceKey = 'inventory') {
+        try {
+            const allSessions = (await Audit.getAllSessions()) || [];
+            this._activeAnalysisState = {
+                sourceKey: sourceKey || 'inventory',
+                sessions: allSessions,
+                filter: 'all', // 'all' | 'multi' | 'critical' | 'missing'
+                search: '',
+                groups: []
+            };
+            await this._buildActiveAnalysisData();
+            this._renderActiveAnalysisModal();
+        } catch (err) {
+            console.error('Active ingredient analysis error:', err);
+            UI.showToast('تعذر فتح شاشة التحليل بالمادة الفعالة', 'danger');
+        }
+    },
+
+    async _buildActiveAnalysisData() {
+        const st = this._activeAnalysisState;
+        if (!st) return;
+
+        const allMeds = (await DB.getAll('medicineMaster')) || [];
+        const qtyMap = new Map(); // medId -> totalQty
+
+        if (st.sourceKey === 'inventory') {
+            const inv = (await DB.getAll('inventory')) || [];
+            for (const entry of inv) {
+                const q = parseFloat(entry.quantity) || 0;
+                qtyMap.set(entry.medicineId, (qtyMap.get(entry.medicineId) || 0) + q);
+            }
+        } else {
+            const session = await Audit.getSession(st.sourceKey);
+            if (session && session.counts) {
+                for (const [key, rec] of Object.entries(session.counts)) {
+                    const [, medId] = key.split('___');
+                    const batches = (rec.batches && rec.batches.length > 0)
+                        ? rec.batches
+                        : [{ quantity: rec.quantity }];
+                    const sum = batches.reduce((s, b) => s + (parseFloat(b.quantity) || 0), 0);
+                    qtyMap.set(medId, (qtyMap.get(medId) || 0) + sum);
+                }
+            }
+        }
+
+        const groupMap = new Map();
+        for (const med of allMeds) {
+            const rawAct = (med.activeIngredient || '').trim();
+            const normKey = this._normalizeActiveKey(rawAct);
+            const gKey = normKey || '__missing__';
+
+            if (!groupMap.has(gKey)) {
+                groupMap.set(gKey, {
+                    key: gKey,
+                    label: normKey ? rawAct : 'بدون مادة فعالة مسجلة',
+                    isMissing: !normKey,
+                    meds: [],
+                    totalQty: 0
+                });
+            }
+            const g = groupMap.get(gKey);
+            const medQty = qtyMap.get(med.id) || 0;
+            g.meds.push({
+                id: med.id,
+                nameEN: med.nameEN || '',
+                nameAR: med.nameAR || '',
+                qty: medQty
+            });
+            g.totalQty += medQty;
+        }
+
+        // Sort meds inside each group by qty desc then name
+        for (const g of groupMap.values()) {
+            g.meds.sort((a, b) => b.qty - a.qty || (a.nameEN || a.nameAR).localeCompare(b.nameEN || b.nameAR));
+        }
+
+        // Sort groups: multi-brand alternatives first, then alphabetical, missing at end
+        st.groups = Array.from(groupMap.values()).sort((a, b) => {
+            if (a.isMissing !== b.isMissing) return a.isMissing ? 1 : -1;
+            if ((b.meds.length > 1) !== (a.meds.length > 1)) return (b.meds.length > 1) ? 1 : -1;
+            if (b.meds.length !== a.meds.length) return b.meds.length - a.meds.length;
+            return a.label.localeCompare(b.label);
+        });
+    },
+
+    _renderActiveAnalysisModal() {
+        const st = this._activeAnalysisState;
+        if (!st) return;
+
+        const validGroups = st.groups.filter(g => !g.isMissing);
+        const multiCount = validGroups.filter(g => g.meds.length >= 2).length;
+        const criticalCount = validGroups.filter(g => g.totalQty <= 5).length;
+        const missingGroup = st.groups.find(g => g.isMissing);
+        const missingCount = missingGroup ? missingGroup.meds.length : 0;
+
+        const sessionOpts = (st.sessions || []).map(s => {
+            const icon = (s.status === 'completed' || s.status === 'finalized') ? '✅' : '🔄';
+            return `<option value="${s.id}" ${st.sourceKey === s.id ? 'selected' : ''}>${icon} جرد: ${Utils.escapeHTML(s.name || 'جلسة')}</option>`;
+        }).join('');
+
+        UI.showModal(`
+            <div class="sheet-handle"></div>
+            <div class="modal-header" style="margin-bottom:10px;">
+                <h2 style="font-size:16px; display:flex; align-items:center; gap:6px;">
+                    <i class='bx bx-dna' style="color:#7c3aed;"></i> التحليل وتجميع الأرصدة بالمادة الفعالة
+                </h2>
+                <p class="text-muted" style="font-size:11.5px; margin-top:3px;">
+                    تجميع المثائل والبدائل ومعرفة إجمالي الرصيد المدمج لكل مادة فعالة
+                </p>
+            </div>
+
+            <!-- Source Selector -->
+            <div style="margin-bottom:10px; display:flex; gap:8px; align-items:center;">
+                <label style="font-size:12px; font-weight:700; white-space:nowrap;">📂 مصدر الأرصدة:</label>
+                <select onchange="window.App._onActiveAnalysisSourceChange(this.value)" style="flex:1; padding:6px 8px; border-radius:8px; border:1px solid var(--border-color); background:var(--surface); color:var(--text-main); font-size:12px;">
+                    <option value="inventory" ${st.sourceKey === 'inventory' ? 'selected' : ''}>📦 المخزون الحالي</option>
+                    ${sessionOpts}
+                </select>
+            </div>
+
+            <!-- Summary Strip -->
+            <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:10px; text-align:center;">
+                <div style="padding:7px; border-radius:8px; background:rgba(139,92,246,0.08); border:1px solid rgba(139,92,246,0.25);">
+                    <div style="font-size:15px; font-weight:800; color:#7c3aed;">${validGroups.length}</div>
+                    <div style="font-size:10px; color:var(--text-muted);">🧬 مادة فعالة</div>
+                </div>
+                <div style="padding:7px; border-radius:8px; background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.25);">
+                    <div style="font-size:15px; font-weight:800; color:var(--primary);">${multiCount}</div>
+                    <div style="font-size:10px; color:var(--text-muted);">🔗 مواد لها بدائل (2+)</div>
+                </div>
+                <div style="padding:7px; border-radius:8px; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25);">
+                    <div style="font-size:15px; font-weight:800; color:#dc2626;">${criticalCount}</div>
+                    <div style="font-size:10px; color:var(--text-muted);">⚠️ رصيد حرج / صفر</div>
+                </div>
+            </div>
+
+            <!-- Filter Tabs + Search -->
+            <div style="display:flex; gap:5px; margin-bottom:8px; flex-wrap:wrap;">
+                <button type="button" id="act-tab-all" onclick="window.App._setActiveAnalysisFilter('all')" class="${st.filter==='all'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:11px; padding:5px 8px; border-radius:8px; ${st.filter!=='all'?'border:1px solid var(--border-color);':''}">الكل</button>
+                <button type="button" id="act-tab-multi" onclick="window.App._setActiveAnalysisFilter('multi')" class="${st.filter==='multi'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:11px; padding:5px 8px; border-radius:8px; ${st.filter!=='multi'?'border:1px solid var(--border-color);':''}">🔗 لها بدائل (${multiCount})</button>
+                <button type="button" id="act-tab-critical" onclick="window.App._setActiveAnalysisFilter('critical')" class="${st.filter==='critical'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:11px; padding:5px 8px; border-radius:8px; ${st.filter!=='critical'?'border:1px solid var(--border-color);':''}">⚠️ حرج/صفر (${criticalCount})</button>
+                ${missingCount > 0 ? `<button type="button" id="act-tab-missing" onclick="window.App._setActiveAnalysisFilter('missing')" class="${st.filter==='missing'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:11px; padding:5px 8px; border-radius:8px; ${st.filter!=='missing'?'border:1px solid var(--border-color);':''}">بدون مادة (${missingCount})</button>` : ''}
+            </div>
+
+            <div class="audit-search-wrapper" style="width:100%; margin-bottom:10px;">
+                <i class='bx bx-search'></i>
+                <input type="text" id="act-analysis-search" class="audit-search-input" placeholder="🔍 ابحث بالمادة الفعالة أو باسم الدواء..." value="${Utils.escapeHTML(st.search)}" oninput="window.App._setActiveAnalysisSearch(this.value)">
+            </div>
+
+            <!-- Groups List -->
+            <div id="active-analysis-list" style="max-height:42vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:2px;"></div>
+
+            <!-- Footer -->
+            <div class="form-actions mt-15" style="display:flex; gap:8px; justify-content:space-between; flex-wrap:wrap;">
+                <button type="button" class="btn-ghost sm-btn" onclick="window.App.exportActiveIngredientAnalysis()" style="border:1px solid rgba(139,92,246,0.4); color:#7c3aed; font-size:12px;">
+                    <i class='bx bx-download'></i> تصدير إكسيل بالمادة الفعالة
+                </button>
+                <button type="button" class="btn-primary sm-btn" onclick="window.UI.closeModal()">إغلاق</button>
+            </div>
+        `);
+
+        this._renderActiveAnalysisList();
+    },
+
+    async _onActiveAnalysisSourceChange(newSource) {
+        if (!this._activeAnalysisState) return;
+        this._activeAnalysisState.sourceKey = newSource;
+        await this._buildActiveAnalysisData();
+        this._renderActiveAnalysisModal();
+    },
+
+    _setActiveAnalysisFilter(f) {
+        if (!this._activeAnalysisState) return;
+        this._activeAnalysisState.filter = f;
+        ['all', 'multi', 'critical', 'missing'].forEach(key => {
+            const btn = document.getElementById(`act-tab-${key}`);
+            if (!btn) return;
+            if (key === f) {
+                btn.className = 'btn-primary sm-btn';
+                btn.style.border = 'none';
+            } else {
+                btn.className = 'btn-ghost sm-btn';
+                btn.style.border = '1px solid var(--border-color)';
+            }
+        });
+        this._renderActiveAnalysisList();
+    },
+
+    _setActiveAnalysisSearch(q) {
+        if (!this._activeAnalysisState) return;
+        this._activeAnalysisState.search = q || '';
+        this._renderActiveAnalysisList();
+    },
+
+    _renderActiveAnalysisList() {
+        const st = this._activeAnalysisState;
+        const container = document.getElementById('active-analysis-list');
+        if (!st || !container) return;
+
+        const q = (st.search || '').trim().toLowerCase();
+        const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(q) : q;
+
+        const visible = st.groups.filter(g => {
+            if (st.filter === 'multi' && (g.isMissing || g.meds.length < 2)) return false;
+            if (st.filter === 'critical' && (g.isMissing || g.totalQty > 5)) return false;
+            if (st.filter === 'missing' && !g.isMissing) return false;
+
+            if (q) {
+                const labelMatch = g.label.toLowerCase().includes(q);
+                const medMatch = g.meds.some(m => {
+                    const en = (m.nameEN || '').toLowerCase();
+                    const ar = (m.nameAR || '').toLowerCase();
+                    const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
+                    return en.includes(q) || ar.includes(q) || arNorm.includes(qNorm);
+                });
+                if (!labelMatch && !medMatch) return false;
+            }
+            return true;
+        });
+
+        if (visible.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state" style="padding:24px; text-align:center; background:var(--bg-secondary); border-radius:12px;">
+                    <i class='bx bx-dna' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
+                    <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد نتائج مطابقة</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = visible.map(g => {
+            const qtyColor = g.totalQty === 0 ? '#dc2626' : (g.totalQty <= 5 ? '#d97706' : '#059669');
+            const qtyBg = g.totalQty === 0 ? 'rgba(239,68,68,0.1)' : (g.totalQty <= 5 ? 'rgba(245,158,11,0.12)' : 'rgba(16,185,129,0.12)');
+            return `
+                <div style="padding:10px 12px; border-radius:10px; background:var(--surface); border:1px solid ${g.meds.length >= 2 && !g.isMissing ? 'rgba(139,92,246,0.35)' : 'var(--border-color)'};">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;">
+                        <div style="min-width:0; flex:1;">
+                            <div style="font-size:12.5px; font-weight:800; color:${g.isMissing ? 'var(--text-muted)' : '#7c3aed'}; word-break:break-word;">
+                                ${g.isMissing ? '⚪' : '🧬'} ${Utils.escapeHTML(g.label)}
+                            </div>
+                            <div style="font-size:10.5px; color:var(--text-muted); margin-top:1px;">
+                                ${g.meds.length} ${g.meds.length > 1 ? 'بدائل مسجلة' : 'صنف مسجل'}
+                            </div>
+                        </div>
+                        <span style="padding:4px 9px; border-radius:8px; background:${qtyBg}; color:${qtyColor}; font-weight:800; font-size:12px; white-space:nowrap;">
+                            الإجمالي: ${g.totalQty}
+                        </span>
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:4px; border-top:1px dashed var(--border-color); padding-top:6px;">
+                        ${g.meds.map(m => `
+                            <div onclick="window.App.openMedicineDetails('${Utils.escapeHTML(m.id)}')" style="display:flex; justify-content:space-between; align-items:center; gap:6px; padding:4px 6px; border-radius:6px; background:var(--bg-secondary); cursor:pointer; font-size:11.5px;">
+                                <span style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; color:var(--text-main);">
+                                    ${Utils.escapeHTML(m.nameEN || m.nameAR)}${m.nameAR && m.nameAR !== m.nameEN ? ` <small style="color:var(--text-muted);">(${Utils.escapeHTML(m.nameAR)})</small>` : ''}
+                                </span>
+                                <strong style="color:${m.qty === 0 ? '#dc2626' : 'var(--primary)'}; white-space:nowrap;">${m.qty}</strong>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    },
+
+    exportActiveIngredientAnalysis() {
+        const st = this._activeAnalysisState;
+        if (!st) return;
+        const opts = {
+            source: st.sourceKey === 'inventory' ? 'inventory' : 'audit',
+            sessionId: st.sourceKey === 'inventory' ? null : st.sourceKey,
+            nameMode: 'both',
+            groupMode: 'active',
+            locationMode: 'columns',
+            expiryMode: 'all',
+            sortMode: 'name'
+        };
+        this.exportCustomInventory(opts);
+    },
+    // ===================== End Active Ingredient Analytics =====================
 
     async openManageCategories() {
         try {
@@ -3979,6 +4341,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     </button>
                     <button class="btn-ghost sm-btn" onclick="window.App.openCatalogEnricherModal()" style="display:flex; align-items:center; gap:5px; padding:8px 12px; border-radius:10px; font-size:12px; font-weight:800; border:1px solid rgba(16,185,129,0.4); color:#059669; background:rgba(16,185,129,0.06);">
                         <i class='bx bx-sparkles'></i> تكميل بيانات الأدوية
+                    </button>
+                    <button class="btn-ghost sm-btn" onclick="window.App.openActiveIngredientAnalysisModal()" style="display:flex; align-items:center; gap:5px; padding:8px 12px; border-radius:10px; font-size:12px; font-weight:800; border:1px solid rgba(139,92,246,0.4); color:#7c3aed; background:rgba(139,92,246,0.06);">
+                        <i class='bx bx-dna'></i> بالمادة الفعالة
                     </button>
                 </div>
 
@@ -5905,28 +6270,26 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             });
 
             // --- Step 4: Build rows array-of-arrays for XLSX ---
-            // Header row
-            const headers = ['اسم الدواء (EN)', 'اسم الدواء (AR)', ...locColumns, 'الإجمالي', 'الصلاحيات'];
+            // Header row (with sequential numbering 'م')
+            const headers = ['م', 'اسم الدواء (EN)', 'اسم الدواء (AR)', ...locColumns, 'الإجمالي', 'الصلاحيات'];
             const aoa = [headers];
             const categoryRowIndices = []; // Track category header rows for styling
-            let grandTotal = 0;
+            let rowCounter = 1;
 
             for (const catId of sortedCatIds) {
                 const cat = catMap.get(catId);
                 const catName = Categories.getCategoryDisplayName(cat || catId, 'both', catMap);
                 const meds = catGroups.get(catId);
-                const catTotal = meds.reduce((s, m) => s + m.total, 0);
 
-                // Category header row
-                const catRow = [`◼ ${catName} (${meds.length} صنف — ${catTotal} وحدة)`];
-                // Fill remaining columns with empty
+                // Clean category header row (no "صنف — وحدة")
+                const catRow = [`◼ ${catName}`];
                 for (let i = 1; i < headers.length; i++) catRow.push('');
                 categoryRowIndices.push(aoa.length); // 0-based index
                 aoa.push(catRow);
 
-                // Medicine rows
+                // Medicine rows with sequential numbering
                 for (const m of meds) {
-                    const row = [m.nameEN, m.nameAR];
+                    const row = [rowCounter++, m.nameEN, m.nameAR];
                     // Location columns
                     for (const locName of locColumns) {
                         row.push(m.locations[locName] || 0);
@@ -5940,20 +6303,13 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     row.push(expiryParts.join(' | '));
                     aoa.push(row);
                 }
-
-                grandTotal += catTotal;
             }
 
-            // Grand total row
-            const totalRow = ['', 'الإجمالي الكلي'];
-            for (const locName of locColumns) {
-                const locTotal = Array.from(medData.values()).reduce((s, m) => s + (m.locations[locName] || 0), 0);
-                totalRow.push(locTotal);
-            }
-            totalRow.push(grandTotal);
-            totalRow.push('');
+            // Bottom summary row: Total number of medicines (instead of grand quantity sum)
+            const countRow = ['', 'إجمالي عدد الأدوية', medData.size];
+            while (countRow.length < headers.length) countRow.push('');
             aoa.push([]);  // Empty row separator
-            aoa.push(totalRow);
+            aoa.push(countRow);
 
             // --- Step 5: Export with XLSX ---
             if (!window.XLSX) {
@@ -5965,6 +6321,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
             // Auto column widths
             ws['!cols'] = headers.map((h, i) => {
+                if (i === 0) return { wch: 6 };
                 let maxLen = h.length;
                 for (const row of aoa) {
                     const cellLen = String(row[i] || '').length;
