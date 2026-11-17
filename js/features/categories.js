@@ -410,6 +410,27 @@ export const Categories = {
 
     async deleteCategory(id) {
         if (id === 'uncategorized') return false; // Protected system category
+        // Save deleted category snapshot to Recycle Bin (Trash)
+        try {
+            const existingCat = await DB.get('categories', id);
+            if (existingCat) {
+                const deletedBy = (typeof window.Users !== 'undefined' && window.Users.getActive?.()) ? window.Users.getActive().name : 'صيدلي';
+                const trashItem = {
+                    id: `trash_cat_${id}_${Date.now()}`,
+                    itemType: 'category',
+                    originalId: id,
+                    data: existingCat,
+                    deletedAt: new Date().toISOString(),
+                    deletedBy,
+                    syncStatus: 'local'
+                };
+                await DB.put('trash', trashItem);
+                if (typeof window.Sync !== 'undefined' && window.Sync.pushTrashItem) {
+                    window.Sync.pushTrashItem(trashItem).catch(() => {});
+                }
+            }
+        } catch (te) { console.warn('Trash backup category notice:', te); }
+
         await DB.delete('categories', id);
 
         // Migrate all medicines belonging to this deleted category to 'uncategorized'
@@ -517,27 +538,148 @@ export const Categories = {
     },
 
     async deleteMedicine(id) {
+        // v18.15.0: Soft-delete to Recycle Bin (Trash) + clean orphan counts from open audit sessions!
+        let med = null;
+        try { med = await DB.get('medicineMaster', id); } catch (e) {}
+
+        // Backup inventory entries for this medicine
+        const inv = (await DB.getAll('inventory')) || [];
+        const invBackup = inv.filter(item => item.medicineId === id);
+
+        // Backup & clean counts for this medicine inside open (non-finalized) audit sessions
+        const auditCountsBackup = [];
         try {
-            const med = await DB.get('medicineMaster', id);
-            if (med?.imagePath && typeof window.App?.deleteStorageImage === 'function') {
-                window.App.deleteStorageImage(med.imagePath).catch(() => {});
+            const sessions = (await DB.getAll('audit_sessions')) || [];
+            for (const session of sessions) {
+                if (!session || !session.counts) continue;
+                const keysToRemove = Object.keys(session.counts).filter(k => {
+                    const parts = k.split('___');
+                    return parts[1] === String(id);
+                });
+                if (keysToRemove.length > 0 && session.status !== 'finalized') {
+                    for (const k of keysToRemove) {
+                        auditCountsBackup.push({ sessionId: session.id, key: k, record: session.counts[k] });
+                        delete session.counts[k];
+                    }
+                    session.updatedAt = new Date().toISOString();
+                    await DB.put('audit_sessions', session);
+                    if (typeof window.Sync !== 'undefined' && window.Sync.deleteAuditCountKeys) {
+                        window.Sync.deleteAuditCountKeys(session.id, keysToRemove).catch(() => {});
+                    }
+                }
             }
-        } catch (e) {}
+        } catch (ae) { console.warn('Audit orphan cleanup on delete notice:', ae); }
+
+        // Save snapshot into Recycle Bin (Trash) — keep storage image intact until permanent delete!
+        if (med) {
+            try {
+                const deletedBy = (typeof window.Users !== 'undefined' && window.Users.getActive?.()) ? window.Users.getActive().name : 'صيدلي';
+                const trashItem = {
+                    id: `trash_med_${id}_${Date.now()}`,
+                    itemType: 'medicine',
+                    originalId: id,
+                    data: med,
+                    inventoryBackup: invBackup,
+                    auditCountsBackup,
+                    deletedAt: new Date().toISOString(),
+                    deletedBy,
+                    syncStatus: 'local'
+                };
+                await DB.put('trash', trashItem);
+                if (typeof window.Sync !== 'undefined' && window.Sync.pushTrashItem) {
+                    window.Sync.pushTrashItem(trashItem).catch(() => {});
+                }
+            } catch (te) { console.warn('Trash backup medicine notice:', te); }
+        }
 
         await DB.delete('medicineMaster', id);
-        // Also cleanup inventory for this medicine
-        const inv = await DB.getAll('inventory');
-        for (const item of inv) {
-            if (item.medicineId === id) {
-                await DB.delete('inventory', item.id);
-                if (typeof window.Sync !== 'undefined' && window.Sync.deleteInventoryEntry) {
-                    window.Sync.deleteInventoryEntry(item.id).catch(() => {});
-                }
+        for (const item of invBackup) {
+            await DB.delete('inventory', item.id);
+            if (typeof window.Sync !== 'undefined' && window.Sync.deleteInventoryEntry) {
+                window.Sync.deleteInventoryEntry(item.id).catch(() => {});
             }
         }
         if (typeof window.Sync !== 'undefined' && window.Sync.deleteMedicine) {
             window.Sync.deleteMedicine(id).catch(() => {});
         }
         return true;
+    },
+
+    // --- Recycle Bin (Trash) Operations ---
+    async getTrashItems() {
+        const items = (await DB.getAll('trash')) || [];
+        return items.sort((a, b) => new Date(b.deletedAt || 0) - new Date(a.deletedAt || 0));
+    },
+
+    async restoreFromTrash(trashId) {
+        const trashItem = await DB.get('trash', trashId);
+        if (!trashItem || !trashItem.data) return false;
+
+        if (trashItem.itemType === 'category') {
+            const cat = { ...trashItem.data, updatedAt: new Date().toISOString() };
+            await this.saveCategory(cat);
+        } else {
+            // Restore medicine with its exact original id
+            const med = { ...trashItem.data, lastUpdated: new Date().toISOString(), v: (trashItem.data.v || 1) + 1 };
+            await DB.put('medicineMaster', med);
+            if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+                window.Sync.push(med.id).catch(() => {});
+            }
+            // Restore backed-up inventory entries
+            if (Array.isArray(trashItem.inventoryBackup)) {
+                for (const invItem of trashItem.inventoryBackup) {
+                    await DB.put('inventory', invItem);
+                    if (typeof window.Sync !== 'undefined' && window.Sync.pushInventoryEntry) {
+                        window.Sync.pushInventoryEntry(invItem).catch(() => {});
+                    }
+                }
+            }
+            // Restore backed-up counts into still-open audit sessions
+            if (Array.isArray(trashItem.auditCountsBackup)) {
+                const bySession = new Map();
+                for (const entry of trashItem.auditCountsBackup) {
+                    if (!bySession.has(entry.sessionId)) bySession.set(entry.sessionId, []);
+                    bySession.get(entry.sessionId).push(entry);
+                }
+                for (const [sid, entries] of bySession) {
+                    const session = await DB.get('audit_sessions', sid);
+                    if (session && session.status !== 'finalized') {
+                        if (!session.counts) session.counts = {};
+                        for (const e of entries) session.counts[e.key] = e.record;
+                        session.updatedAt = new Date().toISOString();
+                        await DB.put('audit_sessions', session);
+                        if (typeof window.Sync !== 'undefined' && window.Sync.pushAuditSession) {
+                            window.Sync.pushAuditSession(session).catch(() => {});
+                        }
+                    }
+                }
+            }
+        }
+
+        await DB.delete('trash', trashId);
+        if (typeof window.Sync !== 'undefined' && window.Sync.deleteTrashItem) {
+            window.Sync.deleteTrashItem(trashId).catch(() => {});
+        }
+        return true;
+    },
+
+    async permanentDeleteFromTrash(trashId) {
+        const trashItem = await DB.get('trash', trashId);
+        if (trashItem?.itemType === 'medicine' && trashItem.data?.imagePath && typeof window.App?.deleteStorageImage === 'function') {
+            window.App.deleteStorageImage(trashItem.data.imagePath).catch(() => {});
+        }
+        await DB.delete('trash', trashId);
+        if (typeof window.Sync !== 'undefined' && window.Sync.deleteTrashItem) {
+            window.Sync.deleteTrashItem(trashId).catch(() => {});
+        }
+        return true;
+    },
+
+    async emptyTrash() {
+        const items = await this.getTrashItems();
+        for (const item of items) {
+            await this.permanentDeleteFromTrash(item.id);
+        }
+        return items.length;
     }
 };

@@ -108,6 +108,24 @@ export const Sync = {
                 }
             } catch (ie) { console.warn('Sync pull inventory notice:', ie.message); }
 
+            // 6. Pull Recycle Bin (Trash) items
+            try {
+                const trashSnap = await firestore.collection('trash').get();
+                const cloudTrashIds = new Set();
+                if (!trashSnap.empty) {
+                    for (const doc of trashSnap.docs) {
+                        cloudTrashIds.add(doc.id);
+                        await DB.put('trash', { ...doc.data(), id: doc.id });
+                    }
+                }
+                const localTrash = (await DB.getAll('trash')) || [];
+                for (const t of localTrash) {
+                    if (!cloudTrashIds.has(t.id) && t.syncStatus !== 'local') {
+                        await DB.delete('trash', t.id);
+                    }
+                }
+            } catch (te) { console.warn('Sync pull trash notice:', te.message); }
+
             console.log('Sync: Full cloud state synchronization complete ✅');
             // v18.11.6: Invalidate dashboard cache so fresh data renders immediately
             if (window.App) {
@@ -227,6 +245,21 @@ export const Sync = {
         }
     },
 
+    async deleteAuditCountKeys(sessionId, keys = []) {
+        const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+        const fv = (window.firebase || firebase)?.firestore?.FieldValue;
+        if (!firestore || !fv || !sessionId || !Array.isArray(keys) || keys.length === 0) return;
+        try {
+            const updates = { updatedAt: fv.serverTimestamp() };
+            for (const k of keys) {
+                updates[`counts.${k}`] = fv.delete();
+            }
+            await firestore.collection('audit_sessions').doc(sessionId).update(updates);
+        } catch (e) {
+            console.warn('Sync deleteAuditCountKeys notice:', e.message);
+        }
+    },
+
     // --- Inventory Stock Entries Cloud Sync ---
     async pushInventoryEntry(entry) {
         const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
@@ -250,6 +283,32 @@ export const Sync = {
             console.log(`Sync: Inventory Entry "${id}" deleted from cloud ðŸ—‘ï¸`);
         } catch (e) {
             console.warn('Sync deleteInventoryEntry notice:', e.message);
+        }
+    },
+
+    // --- Recycle Bin (Trash) Cloud Sync ---
+    async pushTrashItem(item) {
+        const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+        if (!firestore || !item || !item.id) return;
+        try {
+            const payload = { ...item, syncStatus: 'synced' };
+            if (payload.data?.imagePath?.startsWith('data:image') && payload.data.imagePath.length > 120000) {
+                payload.data = { ...payload.data, imagePath: '' };
+            }
+            await firestore.collection('trash').doc(item.id).set(payload, { merge: true });
+            await DB.put('trash', payload);
+        } catch (e) {
+            console.warn('Sync pushTrashItem notice:', e.message);
+        }
+    },
+
+    async deleteTrashItem(id) {
+        const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+        if (!firestore || !id) return;
+        try {
+            await firestore.collection('trash').doc(id).delete();
+        } catch (e) {
+            console.warn('Sync deleteTrashItem notice:', e.message);
         }
     },
 

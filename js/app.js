@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.14.4', // Styled Excel exports (Bold 14pt category headers without square symbol, xlsx-js-style)
+    VERSION: '18.15.0', // Cloud-synced Recycle Bin (Trash), auto-skip Unknown orphans in Excel, orphan audit count inspector & cleaner
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2194,14 +2194,11 @@ const App = {
     },
 
     async deleteMasterMedicine(id) {
-        if (!confirm('🚨 تحذير: حذف الصنف سيحذف كافة بيانات الجرد والمخزون المرتبطة به من المستودع. هل أنت متأكد؟')) return;
+        if (!confirm('هل تريد نقل هذا الصنف إلى سلة المهملات؟ (يمكنك استعادته لاحقاً من سلة المهملات)')) return;
         try {
-            UI.showToast('جاري حذف الصنف... 🗑️', 'info');
+            UI.showToast('جاري نقل الصنف لسلة المهملات... 🗑️', 'info');
             await Categories.deleteMedicine(id);
-            if (typeof Sync !== 'undefined' && Sync.deleteMedicine) {
-                await Sync.deleteMedicine(id);
-            }
-            UI.showToast('تم حذف الصنف والجرد بالكامل 🗑️', 'warning');
+            UI.showToast('تم نقل الصنف إلى سلة المهملات 🗑️ (يمكنك استعادته بأي وقت)', 'warning');
             UI.closeModal();
             await this.refreshAllViews();
         } catch (err) {
@@ -2711,11 +2708,17 @@ const App = {
                 }
                 exportFileName = `جرد_${(session.name || 'جلسة').replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '_')}`;
 
+                let skippedOrphans = 0;
                 for (const [key, record] of Object.entries(session.counts)) {
                     const [locId, medId] = key.split('___');
                     if (!locFilter.has(locId)) continue;
 
-                    const med = masterMap.get(medId) || { nameEN: 'Unknown', nameAR: 'غير معروف', categoryId: 'uncategorized' };
+                    const med = masterMap.get(medId);
+                    if (!med) {
+                        // v18.15.0: Skip deleted/orphan medicines so "Unknown" never pollutes Excel exports
+                        skippedOrphans++;
+                        continue;
+                    }
                     if (!catFilter.has(med.categoryId || 'uncategorized')) continue;
 
                     if (!medData.has(medId)) {
@@ -3903,6 +3906,243 @@ const App = {
     },
     // ===================== End Active Ingredient Analytics =====================
 
+    // ===================== Recycle Bin (Trash) & Orphan Audit Inspector =====================
+    async _scanOrphanAuditCounts() {
+        const masterMeds = (await DB.getAll('medicineMaster')) || [];
+        const masterIds = new Set(masterMeds.map(m => String(m.id)));
+        const sessions = (await Audit.getAllSessions()) || [];
+        const locs = (await Locations.getAll()) || [];
+        const locMap = new Map(locs.map(l => [l.id, l.nameAR || l.id]));
+
+        const orphans = [];
+        for (const s of sessions) {
+            if (!s || !s.counts) continue;
+            for (const [key, rec] of Object.entries(s.counts)) {
+                const [locId, medId] = key.split('___');
+                if (!masterIds.has(String(medId))) {
+                    const batches = (rec.batches && rec.batches.length > 0)
+                        ? rec.batches
+                        : [{ quantity: rec.quantity, expiryDate: rec.expiryDate }];
+                    const qty = batches.reduce((sum, b) => sum + (parseFloat(b.quantity) || 0), 0);
+                    const exps = batches.filter(b => (parseFloat(b.quantity) || 0) > 0 && b.expiryDate).map(b => `${b.expiryDate} (${b.quantity})`);
+                    orphans.push({
+                        sessionId: s.id,
+                        sessionName: s.name || 'جلسة جرد',
+                        sessionStatus: s.status || 'active',
+                        key,
+                        locId,
+                        locName: locMap.get(locId) || locId,
+                        medId,
+                        qty,
+                        expText: exps.join(' | ') || 'بدون صلاحية',
+                        userName: rec.userName || s.host || '—',
+                        countedAt: rec.countedAt ? new Date(rec.countedAt).toLocaleString('ar-EG') : '—'
+                    });
+                }
+            }
+        }
+        return orphans;
+    },
+
+    async openTrashModal(activeTab = null) {
+        try {
+            const trashItems = await Categories.getTrashItems();
+            const orphans = await this._scanOrphanAuditCounts();
+            // If trash is empty and there are orphan audit records, open directly on orphans tab so user sees them immediately!
+            const tab = activeTab || (trashItems.length === 0 && orphans.length > 0 ? 'orphans' : 'trash');
+
+            UI.showModal(`
+                <div class="sheet-handle"></div>
+                <div class="modal-header" style="margin-bottom:10px;">
+                    <h2 style="font-size:16px; display:flex; align-items:center; gap:6px;">
+                        <i class='bx bx-trash' style="color:var(--danger);"></i> سلة المهملات وتنظيف الجرد
+                    </h2>
+                    <p class="text-muted" style="font-size:11.5px; margin-top:3px;">
+                        استعد الأصناف المحذوفة أو افحص ونظّف الأصناف المجهولة (Unknown) العالقة في الجرد
+                    </p>
+                </div>
+
+                <!-- Tabs -->
+                <div style="display:flex; gap:6px; margin-bottom:12px;">
+                    <button type="button" onclick="window.App.openTrashModal('trash')" class="${tab === 'trash' ? 'btn-primary' : 'btn-ghost'} sm-btn" style="flex:1; font-size:12px; padding:7px 10px; border-radius:9px; ${tab !== 'trash' ? 'border:1px solid var(--border-color);' : ''}">
+                        🗑️ سلة المهملات (${trashItems.length})
+                    </button>
+                    <button type="button" onclick="window.App.openTrashModal('orphans')" class="${tab === 'orphans' ? 'btn-primary' : 'btn-ghost'} sm-btn" style="flex:1; font-size:12px; padding:7px 10px; border-radius:9px; ${tab !== 'orphans' ? 'border:1px solid var(--border-color);' : ''}">
+                        🧹 عوالق الجرد Unknown (${orphans.length})
+                    </button>
+                </div>
+
+                <div style="max-height:52vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:2px;">
+                    ${tab === 'trash' ? (
+                        trashItems.length === 0 ? `
+                            <div class="empty-state" style="padding:28px; text-align:center; background:var(--bg-secondary); border-radius:12px;">
+                                <i class='bx bx-check-shield' style="font-size:36px; color:#10b981;"></i>
+                                <p style="margin:8px 0 0 0; font-size:13px; color:var(--text-muted);">سلة المهملات فارغة حالياً</p>
+                                <small class="text-muted">أي دواء أو قسم تحذفه من الآن سيظهر هنا مع إمكانية استعادته بالكامل</small>
+                            </div>
+                        ` : trashItems.map(item => {
+                            const isCat = item.itemType === 'category';
+                            const titleEN = isCat ? (item.data?.nameEN || '') : (item.data?.nameEN || item.data?.nameAR || 'دواء');
+                            const titleAR = isCat ? (item.data?.nameAR || 'قسم') : (item.data?.nameAR || '');
+                            const delDate = item.deletedAt ? new Date(item.deletedAt).toLocaleString('ar-EG') : '';
+                            return `
+                                <div style="padding:10px 12px; border-radius:10px; background:var(--surface); border:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+                                    <div style="flex:1; min-width:160px;">
+                                        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                                            <span style="font-size:10px; padding:2px 6px; border-radius:5px; background:${isCat ? 'rgba(245,158,11,0.12)' : 'rgba(59,130,246,0.12)'}; color:${isCat ? '#d97706' : 'var(--primary)'}; font-weight:800;">
+                                                ${isCat ? '🏷️ قسم' : '💊 دواء'}
+                                            </span>
+                                            <strong style="font-size:13px; color:var(--text-main);">${Utils.escapeHTML(isCat ? titleAR : titleEN)}</strong>
+                                        </div>
+                                        ${(!isCat && titleAR && titleAR !== titleEN) ? `<div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${Utils.escapeHTML(titleAR)}</div>` : ''}
+                                        <div style="font-size:10px; color:var(--text-muted); margin-top:3px;">
+                                            حُذف بواسطة: ${Utils.escapeHTML(item.deletedBy || '—')} &bull; ${delDate}
+                                        </div>
+                                    </div>
+                                    <div style="display:flex; gap:6px; flex-shrink:0;">
+                                        <button type="button" class="btn-primary sm-btn" onclick="window.App.restoreTrashItem('${Utils.escapeHTML(item.id)}')" style="font-size:11px; padding:5px 9px; border-radius:7px; background:#10b981;">
+                                            <i class='bx bx-undo'></i> استعادة
+                                        </button>
+                                        <button type="button" class="btn-ghost sm-btn" onclick="window.App.permanentDeleteTrashItem('${Utils.escapeHTML(item.id)}')" style="font-size:11px; padding:5px 8px; border-radius:7px; border:1px solid rgba(239,68,68,0.35); color:var(--danger);" title="حذف نهائي">
+                                            <i class='bx bx-x'></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')
+                    ) : (
+                        orphans.length === 0 ? `
+                            <div class="empty-state" style="padding:28px; text-align:center; background:var(--bg-secondary); border-radius:12px;">
+                                <i class='bx bx-check-circle' style="font-size:36px; color:#10b981;"></i>
+                                <p style="margin:8px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أي أصناف مجهولة (Unknown) عالقة في جلسات الجرد ✅</p>
+                            </div>
+                        ` : orphans.map(o => `
+                            <div style="padding:10px 12px; border-radius:10px; background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.35);">
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+                                    <div style="flex:1; min-width:0;">
+                                        <div style="font-size:12.5px; font-weight:800; color:var(--text-main);">
+                                            ⚠️ صنف محذوف — كود: <code style="color:var(--danger);">#${Utils.escapeHTML(o.medId)}</code>
+                                        </div>
+                                        <div style="font-size:11.5px; color:var(--text-muted); margin-top:3px;">
+                                            📋 الجلسة: <strong>${Utils.escapeHTML(o.sessionName)}</strong> &bull; 📍 المكان: <strong>${Utils.escapeHTML(o.locName)}</strong>
+                                        </div>
+                                        <div style="font-size:11.5px; color:var(--text-main); margin-top:3px;">
+                                            📦 الكمية المسجلة: <strong style="color:var(--primary);">${o.qty}</strong> &bull; 📅 الصلاحية: ${Utils.escapeHTML(o.expText)}
+                                        </div>
+                                        <div style="font-size:10.5px; color:var(--text-muted); margin-top:2px;">
+                                            👤 عدّه: ${Utils.escapeHTML(o.userName)} &bull; ${o.countedAt}
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn-ghost sm-btn" onclick="window.App.deleteOrphanAuditCount('${Utils.escapeHTML(o.sessionId)}', '${Utils.escapeHTML(o.key)}')" style="font-size:11px; padding:6px 9px; border-radius:8px; border:1px solid rgba(239,68,68,0.4); color:var(--danger); flex-shrink:0;">
+                                        <i class='bx bx-trash'></i> حذف
+                                    </button>
+                                </div>
+                            </div>
+                        `).join('')
+                    )}
+                </div>
+
+                <div class="form-actions mt-15" style="display:flex; gap:8px; justify-content:space-between; flex-wrap:wrap;">
+                    ${tab === 'trash' && trashItems.length > 0 ? `
+                        <button type="button" class="btn-ghost sm-btn" onclick="window.App.emptyTrashConfirm()" style="color:var(--danger); border:1px solid rgba(239,68,68,0.35); font-size:11.5px;">
+                            🧹 تفريغ السلة نهائياً
+                        </button>
+                    ` : (tab === 'orphans' && orphans.length > 0 ? `
+                        <button type="button" class="btn-primary sm-btn" onclick="window.App.cleanAllOrphanAuditCounts()" style="background:#ef4444; font-size:11.5px;">
+                            🧹 تنظيف كل العوالق (${orphans.length})
+                        </button>
+                    ` : '<span></span>')}
+                    <button type="button" class="btn-ghost sm-btn" onclick="window.UI.closeModal()">إغلاق</button>
+                </div>
+            `);
+        } catch (err) {
+            console.error('Open trash modal error:', err);
+            UI.showToast('تعذر فتح سلة المهملات', 'danger');
+        }
+    },
+
+    async restoreTrashItem(trashId) {
+        try {
+            const ok = await Categories.restoreFromTrash(trashId);
+            if (ok) {
+                UI.showToast('تمت الاستعادة بنجاح ومزامنتها سحابياً ♻️✅', 'success');
+                await this.refreshAllViews();
+                await this.openTrashModal('trash');
+            }
+        } catch (err) {
+            console.error('Restore trash error:', err);
+            UI.showToast('فشل الاستعادة: ' + err.message, 'danger');
+        }
+    },
+
+    async permanentDeleteTrashItem(trashId) {
+        if (!confirm('حذف نهائي لا يمكن التراجع عنه؟')) return;
+        try {
+            await Categories.permanentDeleteFromTrash(trashId);
+            UI.showToast('تم الحذف النهائي 🗑️', 'info');
+            await this.openTrashModal('trash');
+        } catch (err) {
+            UI.showToast('فشل الحذف النهائي', 'danger');
+        }
+    },
+
+    async emptyTrashConfirm() {
+        if (!confirm('هل أنت متأكد من تفريغ سلة المهملات بالكامل؟ لا يمكن التراجع عن هذا الإجراء.')) return;
+        try {
+            const n = await Categories.emptyTrash();
+            UI.showToast(`تم تفريغ سلة المهملات (${n} عنصر) 🧹`, 'info');
+            await this.openTrashModal('trash');
+        } catch (err) {
+            UI.showToast('فشل تفريغ السلة', 'danger');
+        }
+    },
+
+    async deleteOrphanAuditCount(sessionId, countKey) {
+        try {
+            const session = await Audit.getSession(sessionId);
+            if (!session || !session.counts) return;
+            delete session.counts[countKey];
+            session.updatedAt = new Date().toISOString();
+            await DB.put('audit_sessions', session);
+            if (typeof Sync !== 'undefined' && Sync.deleteAuditCountKeys) {
+                await Sync.deleteAuditCountKeys(sessionId, [countKey]);
+            }
+            UI.showToast('تم تنظيف السجل المجهول من الجلسة ومزامنتها ✅', 'success');
+            await this.openTrashModal('orphans');
+        } catch (err) {
+            console.error('Delete orphan count error:', err);
+            UI.showToast('تعذر حذف السجل', 'danger');
+        }
+    },
+
+    async cleanAllOrphanAuditCounts() {
+        try {
+            const orphans = await this._scanOrphanAuditCounts();
+            if (orphans.length === 0) return;
+            const bySession = new Map();
+            for (const o of orphans) {
+                if (!bySession.has(o.sessionId)) bySession.set(o.sessionId, []);
+                bySession.get(o.sessionId).push(o.key);
+            }
+            for (const [sid, keys] of bySession) {
+                const session = await Audit.getSession(sid);
+                if (!session || !session.counts) continue;
+                for (const k of keys) delete session.counts[k];
+                session.updatedAt = new Date().toISOString();
+                await DB.put('audit_sessions', session);
+                if (typeof Sync !== 'undefined' && Sync.deleteAuditCountKeys) {
+                    await Sync.deleteAuditCountKeys(sid, keys);
+                }
+            }
+            UI.showToast(`تم تنظيف ${orphans.length} سجل مجهول من جلسات الجرد بنجاح 🧹✅`, 'success');
+            await this.openTrashModal('orphans');
+        } catch (err) {
+            console.error('Clean all orphans error:', err);
+            UI.showToast('فشل تنظيف العوالق', 'danger');
+        }
+    },
+    // ===================== End Recycle Bin & Orphan Audit Inspector =====================
+
     async openManageCategories() {
         try {
             const cats = await Categories.getAllSorted();
@@ -4387,6 +4627,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     </button>
                     <button class="btn-ghost sm-btn" onclick="window.App.openActiveIngredientAnalysisModal()" style="display:flex; align-items:center; gap:5px; padding:8px 12px; border-radius:10px; font-size:12px; font-weight:800; border:1px solid rgba(139,92,246,0.4); color:#7c3aed; background:rgba(139,92,246,0.06);">
                         <i class='bx bx-dna'></i> بالمادة الفعالة
+                    </button>
+                    <button class="btn-ghost sm-btn" onclick="window.App.openTrashModal()" style="display:flex; align-items:center; gap:5px; padding:8px 12px; border-radius:10px; font-size:12px; font-weight:800; border:1px solid rgba(239,68,68,0.35); color:var(--danger); background:rgba(239,68,68,0.05);">
+                        <i class='bx bx-trash'></i> سلة المهملات
                     </button>
                 </div>
 
@@ -5984,7 +6227,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             const items = [];
             for (const [key, record] of Object.entries(counts)) {
                 const [locId, medId] = key.split('___');
-                const med = masterMap.get(medId) || { nameEN: 'Unknown', nameAR: 'غير معروف' };
+                const med = masterMap.get(medId);
+                if (!med) continue; // v18.15.0: Skip deleted/orphan medicines (no "Unknown" rows)
                 const loc = locMap.get(locId) || 'المستودع';
                 const batches = (record.batches && record.batches.length > 0)
                     ? record.batches
@@ -6059,7 +6303,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             // --- Step 1: Build raw rows ---
             for (const [key, record] of Object.entries(counts)) {
                 const [locId, medId] = key.split('___');
-                const med = masterMap.get(medId) || { nameEN: 'Unknown', nameAR: 'غير معروف' };
+                const med = masterMap.get(medId);
+                if (!med) continue; // v18.15.0: Skip deleted/orphan medicines (no "Unknown" rows)
                 const loc = locMap.get(locId) || 'المستودع';
                 const batches = (record.batches && record.batches.length > 0)
                     ? record.batches
@@ -6272,7 +6517,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
             for (const [key, record] of Object.entries(counts)) {
                 const [locId, medId] = key.split('___');
-                const med = masterMap.get(medId) || { nameEN: 'Unknown', nameAR: 'غير معروف', categoryId: 'uncategorized' };
+                const med = masterMap.get(medId);
+                if (!med) continue; // v18.15.0: Skip deleted/orphan medicines (no "Unknown" rows)
                 const loc = locMap.get(locId);
                 const locName = loc ? loc.nameAR : 'المستودع';
                 const batches = (record.batches && record.batches.length > 0)

@@ -6,7 +6,7 @@
  */
 
 const DB_NAME = 'DawaaMedicalDB';
-const DB_VERSION = 8; // v11.0.0: High-Performance Audit Indexing
+const DB_VERSION = 9; // v18.15.0: Added cloud-synced Recycle Bin (trash) store
 
 const STORES = {
     MASTER: 'medicineMaster', 
@@ -15,7 +15,8 @@ const STORES = {
     SETTINGS: 'settings',
     AUDITS: 'audits',
     LOCATIONS: 'locations',
-    AUDIT_SESSIONS: 'audit_sessions'
+    AUDIT_SESSIONS: 'audit_sessions',
+    TRASH: 'trash'
 };
 
 export const DB = {
@@ -77,6 +78,11 @@ export const DB = {
                 // Audit Sessions Store (v18.0.0)
                 if (!db.objectStoreNames.contains(STORES.AUDIT_SESSIONS)) {
                     db.createObjectStore(STORES.AUDIT_SESSIONS, { keyPath: 'id' });
+                }
+
+                // Recycle Bin / Trash Store (v18.15.0)
+                if (!db.objectStoreNames.contains(STORES.TRASH)) {
+                    db.createObjectStore(STORES.TRASH, { keyPath: 'id' });
                 }
             };
 
