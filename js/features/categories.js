@@ -298,6 +298,47 @@ export const Categories = {
         return catId;
     },
 
+    getCategoryDisplayName(catOrId, mode = 'both', catMap = null) {
+        const isRawAutoId = (val) => !val || /^cat_\d+$/i.test(String(val).trim()) || /^\d+$/.test(String(val).trim());
+        let cat = null;
+        let catId = '';
+
+        if (catOrId && typeof catOrId === 'object') {
+            cat = catOrId;
+            catId = cat.id || '';
+        } else {
+            catId = catOrId || 'uncategorized';
+            if (catMap && typeof catMap.get === 'function') {
+                cat = catMap.get(catId) || null;
+            }
+            if (!cat) {
+                const cache = this.cache || this._cache;
+                if (cache) cat = cache.find(c => c.id === catId) || null;
+            }
+        }
+
+        if (!catId || catId === 'uncategorized') {
+            if (mode === 'en') return 'Uncategorized';
+            if (mode === 'ar') return 'أدوية غير مصنفة';
+            return 'أدوية غير مصنفة (Uncategorized)';
+        }
+
+        const mapped = CATEGORY_MAP[catId] || null;
+        const nameAR = (cat?.nameAR && !isRawAutoId(cat.nameAR) ? cat.nameAR.trim() : '')
+            || mapped?.ar
+            || (!isRawAutoId(catId) ? catId : 'بدون تصنيف');
+        const nameEN = (cat?.nameEN && !isRawAutoId(cat.nameEN) ? cat.nameEN.trim() : '')
+            || mapped?.en
+            || (!isRawAutoId(catId) ? catId : '');
+
+        if (mode === 'en') return nameEN || nameAR;
+        if (mode === 'ar') return nameAR || nameEN;
+        if (nameAR && nameEN && nameAR.toLowerCase() !== nameEN.toLowerCase()) {
+            return `${nameAR} (${nameEN})`;
+        }
+        return nameAR || nameEN;
+    },
+
     getCategoryIcon(catId) {
         if (!catId || catId === 'uncategorized') return 'bx-help-circle';
         const cache = this.cache || this._cache;
@@ -331,10 +372,14 @@ export const Categories = {
         try {
             const fromDb = await DB.get('categories', id);
             if (fromDb) {
+                const isRawAutoId = /^cat_\d+$/i.test(String(id || '')) || /^\d+$/.test(String(id || ''));
+                const cleanDbEn = (fromDb.nameEN && !/^cat_\d+$/i.test(String(fromDb.nameEN).trim()) && !/^\d+$/.test(String(fromDb.nameEN).trim()))
+                    ? fromDb.nameEN.trim()
+                    : '';
                 return {
                     id: fromDb.id,
                     nameAR: fromDb.nameAR || (CATEGORY_MAP[id] && CATEGORY_MAP[id].ar) || id,
-                    nameEN: fromDb.nameEN || (CATEGORY_MAP[id] && CATEGORY_MAP[id].en) || id,
+                    nameEN: cleanDbEn || (CATEGORY_MAP[id] && CATEGORY_MAP[id].en) || (isRawAutoId ? '' : id),
                     icon: fromDb.icon || (CATEGORY_MAP[id] && CATEGORY_MAP[id].icon) || 'bx-category',
                     color: fromDb.color || (CATEGORY_MAP[id] && CATEGORY_MAP[id].color) || '#3b82f6',
                     isSystem: fromDb.isSystem || false

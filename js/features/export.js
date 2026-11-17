@@ -1,5 +1,6 @@
 import { DB } from '../core/db.js';
 import { Inventory } from './inventory.js';
+import { Categories } from './categories.js';
 
 /**
  * Excel Export Feature
@@ -57,10 +58,14 @@ export const Exporter = {
             return;
         }
 
+        const allCats = (await Categories.getAllSorted()) || [];
+        const catMap = new Map(allCats.map(c => [c.id, c]));
+
         const worksheetData = data.map(item => ({
             'اسم الدواء (إنجليزي)': item.nameEN || 'Unknown',
             'اسم الدواء (عربي)': item.nameAR || '-',
-            'التصنيف': item.categoryId || 'عام',
+            'التصنيف (عربي)': Categories.getCategoryDisplayName(item.categoryId, 'ar', catMap),
+            'التصنيف (إنجليزي)': Categories.getCategoryDisplayName(item.categoryId, 'en', catMap),
             'الكمية المتوفرة': item.totalQuantity !== undefined ? item.totalQuantity : (item.quantity || 0),
             'تاريخ الصلاحية': item.earliestExpiry || item.expiryDate || 'N/A',
             'الموقع بالمستودع': item.location || 'المستودع الرئيسي'

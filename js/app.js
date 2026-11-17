@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.12.1', // Custom export with audit session source selection
+    VERSION: '18.12.2', // Pull medicines into category by search + fix category EN/AR names in all exports
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2493,9 +2493,9 @@ const App = {
 
             // Build category checkboxes
             const catChecks = allCats.map(c => {
-                const label = c.name || c.id;
+                const label = Categories.getCategoryDisplayName(c, 'both');
                 return `<label style="display:flex; align-items:center; gap:6px; padding:4px 0; cursor:pointer;">
-                    <input type="checkbox" value="${c.id}" checked class="cex-cat-cb"> ${label}
+                    <input type="checkbox" value="${c.id}" checked class="cex-cat-cb"> ${Utils.escapeHTML(label)}
                 </label>`;
             }).join('');
 
@@ -2503,16 +2503,16 @@ const App = {
             const locChecks = allLocs.map(l => {
                 const label = l.nameAR || l.id;
                 return `<label style="display:flex; align-items:center; gap:6px; padding:4px 0; cursor:pointer;">
-                    <input type="checkbox" value="${l.id}" checked class="cex-loc-cb"> ${label}
+                    <input type="checkbox" value="${l.id}" checked class="cex-loc-cb"> ${Utils.escapeHTML(label)}
                 </label>`;
             }).join('');
 
             // Build audit session options
             const sessionOptions = allSessions.map(s => {
-                const statusIcon = s.status === 'completed' ? '✅' : '🔄';
+                const statusIcon = (s.status === 'completed' || s.status === 'finalized') ? '✅' : '🔄';
                 const countNum = Object.keys(s.counts || {}).length;
                 const dateStr = s.startedAt ? new Date(s.startedAt).toLocaleDateString('ar-EG') : '';
-                return `<option value="${s.id}">${statusIcon} ${s.name || 'جلسة'} — ${countNum} صنف معدود — ${dateStr}</option>`;
+                return `<option value="${s.id}">${statusIcon} ${Utils.escapeHTML(s.name || 'جلسة')} — ${countNum} صنف معدود — ${dateStr}</option>`;
             }).join('');
 
             // Load saved preferences
@@ -2843,7 +2843,9 @@ const App = {
                 const sortedCatIds = Array.from(catGroups.keys()).sort((a, b) => {
                     if (a === 'uncategorized') return 1;
                     if (b === 'uncategorized') return -1;
-                    return (catMap.get(a)?.name || a).localeCompare(catMap.get(b)?.name || b);
+                    const nameA = Categories.getCategoryDisplayName(catMap.get(a) || a, opts.nameMode, catMap);
+                    const nameB = Categories.getCategoryDisplayName(catMap.get(b) || b, opts.nameMode, catMap);
+                    return nameA.localeCompare(nameB);
                 });
 
                 // Headers
@@ -2871,7 +2873,7 @@ const App = {
 
                 for (const catId of sortedCatIds) {
                     const cat = catMap.get(catId);
-                    const catName = cat ? cat.name : (catId === 'uncategorized' ? 'بدون تصنيف' : catId);
+                    const catName = Categories.getCategoryDisplayName(cat || catId, opts.nameMode, catMap);
                     const meds = catGroups.get(catId);
                     const catTotal = meds.reduce((s, m) => s + m.total, 0);
 
@@ -2946,10 +2948,10 @@ const App = {
                     return { wch: Math.min(maxLen + 3, 55) };
                 });
 
-                // Merge category headers
+                // Merge category headers (0-based row index in SheetJS)
                 const merges = categoryRowIndices.map(rowIdx => ({
-                    s: { r: rowIdx + 1, c: 0 },
-                    e: { r: rowIdx + 1, c: headers.length - 1 }
+                    s: { r: rowIdx, c: 0 },
+                    e: { r: rowIdx, c: headers.length - 1 }
                 }));
                 if (merges.length > 0) ws['!merges'] = merges;
 
@@ -2966,7 +2968,14 @@ const App = {
                     if (opts.nameMode === 'both' || opts.nameMode === 'ar') row['اسم الدواء (AR)'] = m.nameAR;
 
                     const cat = catMap.get(m.categoryId);
-                    row['التصنيف'] = cat ? cat.name : (m.categoryId === 'uncategorized' ? 'بدون تصنيف' : m.categoryId);
+                    if (opts.nameMode === 'en') {
+                        row['Category'] = Categories.getCategoryDisplayName(cat || m.categoryId, 'en', catMap);
+                    } else if (opts.nameMode === 'ar') {
+                        row['التصنيف'] = Categories.getCategoryDisplayName(cat || m.categoryId, 'ar', catMap);
+                    } else {
+                        row['التصنيف (AR)'] = Categories.getCategoryDisplayName(cat || m.categoryId, 'ar', catMap);
+                        row['Category (EN)'] = Categories.getCategoryDisplayName(cat || m.categoryId, 'en', catMap);
+                    }
 
                     if (opts.locationMode === 'columns') {
                         for (const loc of locColumns) {
@@ -3646,6 +3655,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 <button class="btn-primary sm-btn" onclick="window.App.openAddMedicineWithCat('${cat.id}')" style="display:flex; align-items:center; gap:5px; padding:7px 12px; border-radius:10px; font-size:11.5px; font-weight:800;">
                     <i class='bx bx-plus-medical'></i> إضافة دواء جديد
                 </button>
+                <button class="btn-ghost sm-btn" onclick="window.App.openPullMedToCategoryModal('${cat.id}')" style="display:flex; align-items:center; gap:5px; padding:7px 12px; border-radius:10px; font-size:11.5px; font-weight:800; border:1px solid var(--primary); color:var(--primary); background:rgba(59,130,246,0.06);">
+                    <i class='bx bx-transfer'></i> نقل دواء لهذا القسم
+                </button>
             </div>
 
             <!-- Search Bar -->
@@ -4085,6 +4097,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         <button class="btn-primary sm-btn" onclick="window.App.openAddMedicineWithCat('${catId}')" title="إضافة دواء جديد لهذا القسم">
                             <i class='bx bx-plus'></i> دواء جديد
                         </button>
+                        <button class="btn-ghost sm-btn" onclick="window.App.openPullMedToCategoryModal('${catId}')" title="نقل دواء موجود لهذا القسم" style="border:1px solid var(--primary); color:var(--primary);">
+                            <i class='bx bx-transfer'></i> نقل دواء
+                        </button>
                         ${!isUncategorized ? `
                             <button class="btn-ghost sm-btn" onclick="window.App.openEditCategoryModal('${catId}')" title="تعديل بيانات التصنيف">
                                 <i class='bx bx-edit'></i>
@@ -4164,7 +4179,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         <select id="move-target-cat" class="form-select" required>
                             <option value="">-- حدد التصنيف المستهدف --</option>
                             ${cats.filter(c => c.id !== med.categoryId).map(c => `
-                                <option value="${c.id}">${c.nameAR} (${c.nameEN || c.id})</option>
+                                <option value="${c.id}">${Utils.escapeHTML(Categories.getCategoryDisplayName(c, 'both'))}</option>
                             `).join('')}
                         </select>
                     </div>
@@ -4214,6 +4229,219 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         } catch (err) {
             console.error('Error saving moved category:', err);
             UI.showToast('فشل حفظ النقل', 'danger');
+        }
+    },
+
+    // --- Pull / Move Existing Medicine INTO Current Category by Search ---
+    async openPullMedToCategoryModal(targetCatId) {
+        try {
+            const allCats = (await Categories.getAllSorted()) || [];
+            const allMeds = (await DB.getAll('medicineMaster')) || [];
+            const catMap = new Map(allCats.map(c => [c.id, c]));
+            const targetCat = catMap.get(targetCatId) || { id: targetCatId, nameAR: Categories.getCategoryDisplayName(targetCatId, 'ar', catMap), icon: 'bx-category', color: 'var(--primary)' };
+
+            this._pullCatState = {
+                targetCatId,
+                targetCatName: targetCat.nameAR || Categories.getCategoryDisplayName(targetCatId, 'ar', catMap),
+                allMeds,
+                catMap,
+                query: '',
+                onlyUncat: false,
+                movedIds: new Set()
+            };
+
+            const isTargetUncat = targetCatId === 'uncategorized';
+
+            UI.showModal(`
+                <div class="sheet-handle"></div>
+                <div class="modal-header" style="margin-bottom:10px;">
+                    <h2 style="display:flex; align-items:center; gap:8px; font-size:16px;">
+                        <i class='bx bx-transfer' style="color:${targetCat.color || 'var(--primary)'};"></i>
+                        نقل دواء إلى: ${Utils.escapeHTML(this._pullCatState.targetCatName)}
+                    </h2>
+                    <p class="text-muted" style="font-size:12px; margin-top:4px;">ابحث عن أي دواء بالاسم العربي أو الإنجليزي أو المادة الفعالة وانقله فوراً</p>
+                </div>
+
+                <!-- Search Input -->
+                <div class="audit-search-wrapper" style="width:100%; margin-bottom:10px;">
+                    <i class='bx bx-search'></i>
+                    <input type="text" id="pull-med-search" class="audit-search-input"
+                        placeholder="🔍 ابحث باسم الدواء (عربي / إنجليزي)..."
+                        oninput="window.App.filterPullMedToCategory(this.value)" autofocus>
+                </div>
+
+                ${!isTargetUncat ? `
+                    <div style="display:flex; gap:6px; margin-bottom:10px;">
+                        <button type="button" id="pull-filter-all" class="btn-primary sm-btn" onclick="window.App.setPullMedFilter(false)" style="flex:1; font-size:11.5px; padding:6px 10px; border-radius:8px;">
+                            كل الأقسام الأخرى
+                        </button>
+                        <button type="button" id="pull-filter-uncat" class="btn-ghost sm-btn" onclick="window.App.setPullMedFilter(true)" style="flex:1; font-size:11.5px; padding:6px 10px; border-radius:8px; border:1px solid var(--border-color);">
+                            غير المصنفة فقط
+                        </button>
+                    </div>
+                ` : ''}
+
+                <div id="pull-med-results" style="max-height:52vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:2px;"></div>
+
+                <div class="form-actions mt-15" style="display:flex; justify-content:space-between; align-items:center;">
+                    <span id="pull-med-counter" style="font-size:12px; color:var(--text-muted); font-weight:700;"></span>
+                    <button type="button" class="btn-primary sm-btn" onclick="window.UI.closeModal()">تم / إغلاق</button>
+                </div>
+            `);
+
+            this.filterPullMedToCategory('');
+            setTimeout(() => document.getElementById('pull-med-search')?.focus(), 80);
+        } catch (err) {
+            console.error('Error opening pull-to-category modal:', err);
+            UI.showToast('تعذر فتح نافذة نقل الأدوية', 'danger');
+        }
+    },
+
+    setPullMedFilter(onlyUncat) {
+        if (!this._pullCatState) return;
+        this._pullCatState.onlyUncat = !!onlyUncat;
+        const btnAll = document.getElementById('pull-filter-all');
+        const btnUncat = document.getElementById('pull-filter-uncat');
+        if (btnAll && btnUncat) {
+            if (onlyUncat) {
+                btnAll.className = 'btn-ghost sm-btn';
+                btnAll.style.border = '1px solid var(--border-color)';
+                btnUncat.className = 'btn-primary sm-btn';
+                btnUncat.style.border = 'none';
+            } else {
+                btnAll.className = 'btn-primary sm-btn';
+                btnAll.style.border = 'none';
+                btnUncat.className = 'btn-ghost sm-btn';
+                btnUncat.style.border = '1px solid var(--border-color)';
+            }
+        }
+        this.filterPullMedToCategory(this._pullCatState.query);
+    },
+
+    filterPullMedToCategory(query = '') {
+        const state = this._pullCatState;
+        const container = document.getElementById('pull-med-results');
+        const counter = document.getElementById('pull-med-counter');
+        if (!state || !container) return;
+
+        state.query = query;
+        const qRaw = String(query || '').trim().toLowerCase();
+        const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(qRaw) : qRaw;
+
+        // Filter candidates: medicines NOT originally in targetCatId (or just moved in this modal session)
+        let matches = state.allMeds.filter(m => {
+            const curCat = m.categoryId || 'uncategorized';
+            const justMoved = state.movedIds.has(m.id);
+            if (!justMoved && curCat === state.targetCatId) return false;
+            if (!justMoved && state.onlyUncat && curCat !== 'uncategorized') return false;
+
+            if (!qRaw) return true;
+            const en = (m.nameEN || '').toLowerCase();
+            const ar = (m.nameAR || '').toLowerCase();
+            const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
+            const act = (m.activeIngredient || '').toLowerCase();
+            const actNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(act) : act;
+            const bc = String(m.barcode || '').toLowerCase();
+
+            return en.includes(qRaw) || ar.includes(qRaw) || arNorm.includes(qNorm) ||
+                   act.includes(qRaw) || actNorm.includes(qNorm) || bc.includes(qRaw);
+        });
+
+        // Sort: uncategorized first when no search, then alphabetical
+        matches.sort((a, b) => {
+            if (!qRaw) {
+                const aUncat = (a.categoryId || 'uncategorized') === 'uncategorized' ? 0 : 1;
+                const bUncat = (b.categoryId || 'uncategorized') === 'uncategorized' ? 0 : 1;
+                if (aUncat !== bUncat) return aUncat - bUncat;
+            }
+            return (a.nameEN || a.nameAR || '').localeCompare(b.nameEN || b.nameAR || '');
+        });
+
+        const totalMatches = matches.length;
+        const shown = matches.slice(0, 60);
+
+        if (counter) {
+            const movedCount = state.movedIds.size;
+            counter.textContent = movedCount > 0
+                ? `تم نقل ${movedCount} دواء ✅`
+                : `${totalMatches} دواء متاح للنقل`;
+        }
+
+        if (shown.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state" style="padding:26px; text-align:center; background:var(--bg-secondary); border-radius:12px;">
+                    <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
+                    <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">
+                        ${qRaw ? 'لا توجد أدوية مطابقة للبحث في الأقسام الأخرى' : 'كل الأدوية موجودة بالفعل في هذا القسم'}
+                    </p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = shown.map(m => {
+            const isMoved = state.movedIds.has(m.id);
+            const curCatName = Categories.getCategoryDisplayName(m.categoryId || 'uncategorized', 'ar', state.catMap);
+            const img = Categories.getMedicineImage(m);
+            const primary = Utils.escapeHTML(m.nameEN || m.nameAR || 'دواء');
+            const secondary = (m.nameAR && m.nameAR !== m.nameEN) ? Utils.escapeHTML(m.nameAR) : '';
+
+            return `
+                <div style="display:flex; align-items:center; gap:10px; padding:9px 11px; background:${isMoved ? 'rgba(16,185,129,0.08)' : 'var(--bg-secondary)'}; border:1px solid ${isMoved ? 'var(--success, #10b981)' : 'var(--border-color)'}; border-radius:10px;">
+                    <div style="width:36px; height:36px; border-radius:8px; overflow:hidden; flex-shrink:0;">
+                        <img src="${img}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                    </div>
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:13px; font-weight:800; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${primary}</div>
+                        ${secondary ? `<div style="font-size:11px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${secondary}</div>` : ''}
+                        <div style="font-size:10.5px; color:${isMoved ? 'var(--success, #10b981)' : 'var(--text-muted)'}; margin-top:2px;">
+                            ${isMoved ? `✅ تم نقله إلى ${Utils.escapeHTML(state.targetCatName)}` : `القسم الحالي: <strong>${Utils.escapeHTML(curCatName)}</strong>`}
+                        </div>
+                    </div>
+                    ${isMoved ? `
+                        <span style="font-size:11px; font-weight:800; color:var(--success, #10b981); padding:5px 8px; white-space:nowrap;">تم ✅</span>
+                    ` : `
+                        <button type="button" class="btn-primary sm-btn" onclick="window.App.executePullMedToCategory('${m.id}')" style="font-size:11.5px; padding:6px 10px; border-radius:8px; white-space:nowrap; flex-shrink:0;">
+                            <i class='bx bx-transfer'></i> نقل هنا
+                        </button>
+                    `}
+                </div>
+            `;
+        }).join('') + (totalMatches > 60 ? `<div style="text-align:center; font-size:11px; color:var(--text-muted); padding:6px;">اكتب اسم الدواء لتضييق النتائج (يعرض أول 60 من ${totalMatches})</div>` : '');
+    },
+
+    async executePullMedToCategory(medId) {
+        const state = this._pullCatState;
+        if (!state) return;
+
+        try {
+            const med = await DB.get('medicineMaster', medId);
+            if (!med) return;
+
+            med.categoryId = state.targetCatId;
+            med.lastUpdated = new Date().toISOString();
+            med.v = (med.v || 1) + 1;
+            await DB.put('medicineMaster', med);
+
+            if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+                window.Sync.push(med.id).catch(e => console.warn('Sync push pull category error:', e));
+            }
+
+            // Update local modal state & UI immediately without closing modal
+            state.movedIds.add(medId);
+            const inState = state.allMeds.find(x => x.id === medId);
+            if (inState) inState.categoryId = state.targetCatId;
+
+            this.filterPullMedToCategory(state.query);
+            UI.showToast(`تم نقل «${med.nameEN || med.nameAR}» إلى «${state.targetCatName}» ✅`, 'success');
+
+            // Refresh underlying category view smoothly in background
+            if (typeof this.renderWarehouseCategories === 'function') {
+                this.renderWarehouseCategories();
+            }
+        } catch (err) {
+            console.error('Error pulling medicine to category:', err);
+            UI.showToast('فشل نقل الدواء', 'danger');
         }
     },
 
@@ -4460,7 +4688,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
                 <div class="form-group mb-12">
                     <label class="form-label">اسم التصنيف بالإنجليزية:</label>
-                    <input type="text" id="cat-name-en" class="form-input" value="${Utils.escapeHTML(cat.nameEN || cat.id || '')}">
+                    <input type="text" id="cat-name-en" class="form-input" placeholder="مثال: Eye Drops & Ointments" value="${Utils.escapeHTML(cat.nameEN && !/^cat_\d+$/i.test(cat.nameEN) && !/^\d+$/.test(cat.nameEN) ? cat.nameEN : '')}">
                 </div>
                 <div class="form-group mb-12">
                     <label class="form-label">الأيقونة:</label>
@@ -5207,9 +5435,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             const sortedCatIds = Array.from(catGroups.keys()).sort((a, b) => {
                 if (a === 'uncategorized') return 1;
                 if (b === 'uncategorized') return -1;
-                const catA = catMap.get(a);
-                const catB = catMap.get(b);
-                return (catA?.name || a).localeCompare(catB?.name || b);
+                const nameA = Categories.getCategoryDisplayName(catMap.get(a) || a, 'both', catMap);
+                const nameB = Categories.getCategoryDisplayName(catMap.get(b) || b, 'both', catMap);
+                return nameA.localeCompare(nameB);
             });
 
             // --- Step 4: Build rows array-of-arrays for XLSX ---
@@ -5221,7 +5449,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
             for (const catId of sortedCatIds) {
                 const cat = catMap.get(catId);
-                const catName = cat ? cat.name : (catId === 'uncategorized' ? 'بدون تصنيف' : catId);
+                const catName = Categories.getCategoryDisplayName(cat || catId, 'both', catMap);
                 const meds = catGroups.get(catId);
                 const catTotal = meds.reduce((s, m) => s + m.total, 0);
 
@@ -5281,12 +5509,12 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 return { wch: Math.min(maxLen + 3, 50) };
             });
 
-            // Merge category header rows across all columns
+            // Merge category header rows across all columns (0-based row index in SheetJS)
             const merges = [];
             for (const rowIdx of categoryRowIndices) {
                 merges.push({
-                    s: { r: rowIdx + 1, c: 0 },  // +1 because aoa index 0 = header row 1
-                    e: { r: rowIdx + 1, c: headers.length - 1 }
+                    s: { r: rowIdx, c: 0 },
+                    e: { r: rowIdx, c: headers.length - 1 }
                 });
             }
             // Don't set merges if not supported (some XLSX versions)
