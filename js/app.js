@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.17.3', // Enricher overwrite mode on manual link/dropdown change/reopen + per-card save & edit/replace buttons
+    VERSION: '18.18.0', // GS1 DataMatrix & QR 2D Pharma Scanner — auto-extracts EAN-13 barcode + Expiry Date + Batch
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1709,10 +1709,113 @@ const App = {
     },
 
     /**
-     * Universal Camera Barcode Scanner (v18.16.0)
-     * Accepts either a targetInputId (string) OR a callback function (code) => void.
+     * Parse Pharmaceutical 2D GS1 DataMatrix / QR / Digital Link / 1D Barcodes (v18.18.0)
+     * Extracts:
+     * - barcode: standard 13-digit EAN (strips leading '0' from 14-digit GS1 GTIN-01)
+     * - gtin14: full 14-digit GTIN if GS1
+     * - expiry: 'YYYY-MM' from AI (17) YYMMDD
+     * - batch: Lot/Batch string from AI (10)
+     */
+    parsePharmaBarcode(rawValue) {
+        const original = String(rawValue || '').trim();
+        if (!original) return { barcode: '', raw: '', gtin14: null, expiry: null, batch: null, isGS1: false };
+
+        // Strip common scanner symbology prefixes (]d2 = GS1 DataMatrix, ]C1 = GS1-128, ]Q3 = GS1 QR)
+        let s = original.replace(/^\](?:d2|C1|Q3|e0|E0)/, '').replace(/^\u001d+/, '');
+        let gtin14 = null;
+        let expiry = null;
+        let batch = null;
+        let isGS1 = false;
+
+        const formatYYMMDD = (yymmdd) => {
+            if (!yymmdd || !/^\d{6}$/.test(yymmdd)) return null;
+            const yy = parseInt(yymmdd.slice(0, 2), 10);
+            const mm = parseInt(yymmdd.slice(2, 4), 10);
+            if (mm < 1 || mm > 12) return null;
+            const yyyy = 2000 + yy;
+            return `${yyyy}-${String(mm).padStart(2, '0')}`;
+        };
+
+        // 1. GS1 Digital Link URL (e.g. https://.../01/06221045011279/10/LOT?17=271231)
+        const dlGtin = s.match(/\/01\/(\d{13,14})(?:[/?#]|$)/);
+        if (dlGtin) {
+            isGS1 = true;
+            gtin14 = dlGtin[1].length === 13 ? '0' + dlGtin[1] : dlGtin[1];
+            const dlExp = s.match(/(?:[?&/]17[=/])(\d{6})/);
+            if (dlExp) expiry = formatYYMMDD(dlExp[1]);
+            const dlBatch = s.match(/(?:[?&/]10[=/])([^&/?#]+)/);
+            if (dlBatch) batch = decodeURIComponent(dlBatch[1]);
+        }
+
+        // 2. Parenthesized GS1 format: (01)0622...(17)271231(10)ABC
+        if (!isGS1 && /\(01\)\s*\d{13,14}/.test(s)) {
+            isGS1 = true;
+            const m01 = s.match(/\(01\)\s*(\d{13,14})/);
+            if (m01) gtin14 = m01[1].length === 13 ? '0' + m01[1] : m01[1];
+            const m17 = s.match(/\(17\)\s*(\d{6})/);
+            if (m17) expiry = formatYYMMDD(m17[1]);
+            const m10 = s.match(/\(10\)\s*([^(]+)/);
+            if (m10) batch = m10[1].trim();
+        }
+
+        // 3. Raw GS1 DataMatrix / GS1-128 stream: 01<14d>17<6d>10<lot>\x1d21<serial>
+        if (!isGS1 && /^01\d{14}/.test(s) && s.length >= 16) {
+            isGS1 = true;
+            let idx = 0;
+            const GS = '\u001d';
+            while (idx < s.length) {
+                while (s[idx] === GS) idx++;
+                if (idx >= s.length) break;
+                const ai2 = s.slice(idx, idx + 2);
+                const ai3 = s.slice(idx, idx + 3);
+                if (ai2 === '01' && /^\d{14}/.test(s.slice(idx + 2, idx + 16))) {
+                    gtin14 = s.slice(idx + 2, idx + 16);
+                    idx += 16;
+                } else if (ai2 === '17' && /^\d{6}/.test(s.slice(idx + 2, idx + 8))) {
+                    expiry = formatYYMMDD(s.slice(idx + 2, idx + 8));
+                    idx += 8;
+                } else if (['11', '13', '15', '16'].includes(ai2) && /^\d{6}/.test(s.slice(idx + 2, idx + 8))) {
+                    idx += 8; // production/packaging/best-before dates
+                } else if (ai2 === '10') {
+                    const end = s.indexOf(GS, idx + 2);
+                    batch = (end === -1 ? s.slice(idx + 2) : s.slice(idx + 2, end)).trim();
+                    idx = end === -1 ? s.length : end + 1;
+                } else if (ai2 === '21') {
+                    const end = s.indexOf(GS, idx + 2);
+                    idx = end === -1 ? s.length : end + 1;
+                } else if (['240', '241', '710', '711', '712', '713', '714', '715'].includes(ai3)) {
+                    const end = s.indexOf(GS, idx + 3);
+                    idx = end === -1 ? s.length : end + 1;
+                } else {
+                    break;
+                }
+            }
+            // Fallback if scanner stripped \x1d separators before AI 17:
+            if (!expiry && gtin14) {
+                const rest = s.slice(16);
+                const expMatch = rest.match(/17(2[4-9]|3[0-9])(0[1-9]|1[0-2])([0-3]\d)/);
+                if (expMatch) expiry = formatYYMMDD(expMatch[1] + expMatch[2] + expMatch[3]);
+            }
+        }
+
+        // 4. Plain 14-digit GTIN starting with 0 (e.g. 06221045011279 -> 6221045011279)
+        if (!gtin14 && /^0\d{13}$/.test(s)) {
+            gtin14 = s;
+        }
+
+        // Convert GTIN-14 with leading 0 -> standard 13-digit EAN barcode (matches Egyptian DB!)
+        const barcode = gtin14
+            ? (gtin14.startsWith('0') ? gtin14.slice(1) : gtin14)
+            : s;
+
+        return { barcode, raw: original, gtin14, expiry, batch, isGS1 };
+    },
+
+    /**
+     * Universal Camera Barcode & 2D GS1 DataMatrix / QR Scanner (v18.18.0)
+     * Accepts either a targetInputId (string) OR a callback function (code, parsed) => void.
      * Supports native BarcodeDetector (Android Chrome), html5-qrcode fallback (iOS Safari),
-     * AND manual / USB-Bluetooth scanner entry.
+     * GS1 DataMatrix (extracts EAN-13 + Expiry Date automatically), QR, and USB/Manual entry.
      */
     async startBarcodeScanner(targetInputIdOrCallback, options = {}) {
         const isCallback = typeof targetInputIdOrCallback === 'function';
@@ -1786,7 +1889,8 @@ const App = {
 
         const onCodeFound = async (rawValue) => {
             if (handled) return;
-            const code = String(rawValue || '').trim();
+            const parsed = this.parsePharmaBarcode(rawValue);
+            const code = parsed.barcode;
             if (!code) return;
             handled = true;
 
@@ -1795,7 +1899,7 @@ const App = {
             await cleanup();
 
             if (isCallback) {
-                targetInputIdOrCallback(code);
+                targetInputIdOrCallback(code, parsed);
             } else {
                 const input = document.getElementById(targetInputIdOrCallback);
                 if (input) {
@@ -1803,7 +1907,10 @@ const App = {
                     input.dispatchEvent(new Event('input', { bubbles: true }));
                     input.dispatchEvent(new Event('change', { bubbles: true }));
                 }
-                UI.showToast(`تم مسح الباركود بنجاح: ${code} 🎯`, 'success');
+                const extraInfo = parsed.isGS1
+                    ? ` (2D${parsed.expiry ? ' • صلاحية: ' + parsed.expiry : ''})`
+                    : '';
+                UI.showToast(`تم المسح بنجاح: ${code}${extraInfo} 🎯`, 'success');
             }
         };
 
@@ -1825,15 +1932,24 @@ const App = {
         try {
             if (hasBarcodeDetector) {
                 stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+                    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
                 });
                 const video = overlay.querySelector('#scanner-video');
                 video.srcObject = stream;
                 await video.play();
 
-                const detector = new window.BarcodeDetector({
-                    formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code', 'upc_a', 'upc_e']
-                });
+                // Enable GS1 DataMatrix + QR + 1D formats safely by intersecting with browser-supported formats
+                const desiredFormats = ['data_matrix', 'qr_code', 'ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'itf', 'aztec', 'pdf417'];
+                let activeFormats = desiredFormats;
+                try {
+                    if (typeof window.BarcodeDetector.getSupportedFormats === 'function') {
+                        const supported = await window.BarcodeDetector.getSupportedFormats();
+                        const filtered = desiredFormats.filter(f => supported.includes(f));
+                        if (filtered.length > 0) activeFormats = filtered;
+                    }
+                } catch (e) {}
+
+                const detector = new window.BarcodeDetector({ formats: activeFormats });
 
                 const scanLoop = async () => {
                     if (handled || !overlay.parentNode) return;
@@ -1848,9 +1964,9 @@ const App = {
                 };
                 scanLoop();
             } else {
-                // iOS Safari / Firefox fallback via html5-qrcode
+                // iOS Safari / Firefox fallback via html5-qrcode (supports DataMatrix, QR, EAN-13)
                 const statusEl = overlay.querySelector('#scanner-status-text');
-                if (statusEl) statusEl.textContent = 'جاري تشغيل قارئ الباركود...';
+                if (statusEl) statusEl.textContent = 'جاري تشغيل قارئ الباركود و DataMatrix / QR...';
                 const videoEl = overlay.querySelector('#scanner-video');
                 const laserEl = overlay.querySelector('#scanner-laser-frame');
                 const fallbackDiv = overlay.querySelector('#html5qr-fallback-reader');
@@ -1861,10 +1977,18 @@ const App = {
                 const Html5Qrcode = await this._loadHtml5QrcodeFallback();
                 if (!overlay.parentNode || handled) return;
 
-                html5QrInstance = new Html5Qrcode('html5qr-fallback-reader');
+                const F = window.Html5QrcodeSupportedFormats;
+                const config = F ? {
+                    formatsToSupport: [
+                        F.DATA_MATRIX, F.QR_CODE, F.EAN_13, F.EAN_8,
+                        F.CODE_128, F.CODE_39, F.UPC_A, F.UPC_E, F.ITF, F.AZTEC, F.PDF_417
+                    ].filter(v => v !== undefined)
+                } : undefined;
+
+                html5QrInstance = new Html5Qrcode('html5qr-fallback-reader', config);
                 await html5QrInstance.start(
                     { facingMode: 'environment' },
-                    { fps: 12, qrbox: { width: 260, height: 140 } },
+                    { fps: 12, qrbox: { width: 250, height: 200 } },
                     (decodedText) => onCodeFound(decodedText),
                     () => {}
                 );
@@ -8503,7 +8627,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     },
 
     // --- Fast Multi-Batch Count Modal (Level 5) with Dedicated Add Box & Calendar ---
-    async openCountModal(medicineId) {
+    async openCountModal(medicineId, opts = {}) {
         const med = await DB.get('medicineMaster', medicineId);
         if (!med) return;
         const loc = await Locations.get(this.selectedAuditLocationId);
@@ -8513,7 +8637,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const imgUrl = Categories.getMedicineImage(med);
 
         const defaultYear = new Date().getFullYear() + 2;
-        const defaultExpiry = `${defaultYear}-12`;
+        const scannedExpiry = (opts && opts.scannedExpiry && /^\d{4}-\d{2}$/.test(opts.scannedExpiry)) ? opts.scannedExpiry : null;
+        const defaultExpiry = scannedExpiry || `${defaultYear}-12`;
 
         // Clean slate for session: if not counted in this session, start completely empty!
         let initialBatches = [];
@@ -8565,6 +8690,11 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
             <!-- 2. Dedicated Add Batch Box (صندوق إضافة دفعة جديدة) -->
             <div class="add-batch-box" style="background: rgba(59,130,246,0.04); border: 1.5px dashed var(--primary); border-radius: 12px; padding: 12px; margin-bottom: 14px;">
+                ${scannedExpiry ? `
+                    <div style="margin-bottom:8px; padding:5px 8px; border-radius:7px; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.35); color:#059669; font-size:11px; font-weight:800; display:flex; align-items:center; gap:5px;">
+                        <i class='bx bx-check-circle'></i> ✨ الصلاحية مقروءة تلقائياً من كود العلبة (${scannedExpiry})${opts.scannedBatch ? ` • تشغيلة: ${Utils.escapeHTML(opts.scannedBatch)}` : ''}
+                    </div>
+                ` : ''}
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
                     <strong style="font-size: 12px; color: var(--primary); display:flex; align-items:center; gap: 4px;">
                         <i class='bx bx-plus-circle'></i> صندوق إضافة دفعة جديدة
@@ -8834,7 +8964,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         }
     },
 
-    // ===================== Audit Barcode Scanning Workflow (v18.16.0) =====================
+    // ===================== Audit Barcode & 2D GS1 DataMatrix Scanning Workflow (v18.18.0) =====================
     async startAuditBarcodeScan() {
         if (!this.selectedAuditSessionId) {
             UI.showToast('يرجى فتح جلسة جرد أولاً', 'warning');
@@ -8842,31 +8972,44 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         }
         const loc = this.selectedAuditLocationId ? await Locations.get(this.selectedAuditLocationId) : null;
         this.startBarcodeScanner(
-            (scannedCode) => this.handleScannedAuditBarcode(scannedCode),
+            (scannedCode, parsed) => this.handleScannedAuditBarcode(scannedCode, parsed),
             {
-                title: '📷 جرد سريع بالباركود',
+                title: '📷 جرد سريع (باركود / DataMatrix / QR)',
                 subtitle: loc
-                    ? `المكان الحالي: ${loc.nameAR} — وجّه الكاميرا لباركود علبة الدواء`
-                    : 'وجّه الكاميرا لباركود علبة الدواء لفتح شاشة العد فوراً'
+                    ? `المكان الحالي: ${loc.nameAR} — وجّه الكاميرا للباركود أو المربع 2D على العلبة`
+                    : 'وجّه الكاميرا للباركود أو المربع 2D على العلبة لفتح شاشة العد والصلاحية فوراً'
             }
         );
     },
 
-    async handleScannedAuditBarcode(rawCode) {
-        const code = String(rawCode || '').trim();
+    async handleScannedAuditBarcode(rawCode, parsed = null) {
+        const info = parsed || this.parsePharmaBarcode(rawCode);
+        const code = String(info.barcode || '').trim();
+        const gtin14 = info.gtin14 ? String(info.gtin14).trim() : null;
         if (!code) return;
+
+        const scanMeta = {
+            scannedExpiry: info.expiry || null,
+            scannedBatch: info.batch || null,
+            isGS1: !!info.isGS1
+        };
 
         try {
             const masterMeds = (await DB.getAll('medicineMaster')) || [];
-            // Match by commercial barcode first, then by exact id
-            let med = masterMeds.find(m => m.barcode && String(m.barcode).trim() === code);
+            // Match by commercial barcode (EAN-13 or GTIN-14) first, then by exact id
+            let med = masterMeds.find(m => {
+                const mb = m.barcode ? String(m.barcode).trim() : '';
+                if (!mb) return false;
+                return mb === code || (gtin14 && mb === gtin14) || ('0' + mb === gtin14);
+            });
             if (!med) {
                 med = masterMeds.find(m => String(m.id).trim() === code);
             }
 
             if (med) {
-                UI.showToast(`✅ تم التعرف على: ${med.nameEN || med.nameAR}`, 'success');
-                await this._openAuditCountForScannedMed(med);
+                const expNote = scanMeta.scannedExpiry ? ` • صلاحية ${scanMeta.scannedExpiry} 📅` : '';
+                UI.showToast(`✅ ${med.nameEN || med.nameAR}${expNote}`, 'success');
+                await this._openAuditCountForScannedMed(med, scanMeta);
                 return;
             }
 
@@ -8874,20 +9017,26 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             let catalogHit = null;
             try {
                 const catalog = await EgyptianDrugs.ensureLoaded();
-                catalogHit = catalog.find(c => c.barcode && String(c.barcode).trim() === code) || null;
+                catalogHit = catalog.find(c => {
+                    const cb = c.barcode ? String(c.barcode).trim() : '';
+                    return cb && (cb === code || (gtin14 && cb === gtin14));
+                }) || null;
             } catch (e) {}
 
-            await this.openUnmatchedBarcodeModal(code, catalogHit, masterMeds);
+            await this.openUnmatchedBarcodeModal(code, catalogHit, masterMeds, scanMeta);
         } catch (err) {
             console.error('Audit barcode scan handler error:', err);
             UI.showToast('حدث خطأ أثناء البحث عن الباركود', 'danger');
         }
     },
 
-    async _openAuditCountForScannedMed(med) {
+    async _openAuditCountForScannedMed(med, scanMeta = {}) {
+        // Store pending scan metadata so location-picker click keeps expiry date!
+        this._pendingScanMeta = scanMeta || {};
+
         // If user is already inside a specific audit location, open count modal immediately!
         if (this.selectedAuditLocationId) {
-            await this.openCountModal(med.id);
+            await this.openCountModal(med.id, this._pendingScanMeta);
             return;
         }
 
@@ -8899,7 +9048,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
         if (activeLocs.length === 1) {
             this.selectedAuditLocationId = activeLocs[0].id;
-            await this.openCountModal(med.id);
+            await this.openCountModal(med.id, this._pendingScanMeta);
             return;
         }
 
@@ -8914,13 +9063,15 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             <div class="sheet-handle"></div>
             <div class="modal-header" style="margin-bottom:10px;">
                 <h2 style="font-size:15.5px;">📍 اختر المكان لجرد: ${Utils.escapeHTML(med.nameEN || med.nameAR)}</h2>
-                <p class="text-muted" style="font-size:11.5px; margin-top:3px;">اضغط على المكان لفتح نافذة إدخال الكمية فوراً</p>
+                <p class="text-muted" style="font-size:11.5px; margin-top:3px;">
+                    ${scanMeta.scannedExpiry ? `✨ الصلاحية المقروءة من العلبة: <strong>${scanMeta.scannedExpiry}</strong> — ` : ''}اضغط على المكان لإدخال الكمية فوراً
+                </p>
             </div>
             <div style="display:flex; flex-direction:column; gap:8px;">
                 ${sortedLocs.map(l => {
                     const isPrimary = l.id === med.primaryLocation;
                     return `
-                        <button type="button" class="action-card-btn" onclick="window.App.selectedAuditLocationId='${l.id}'; window.App.openCountModal('${Utils.escapeHTML(med.id)}');" style="width:100%; text-align:right; ${isPrimary ? 'border-color:var(--primary); background:rgba(59,130,246,0.06);' : ''}">
+                        <button type="button" class="action-card-btn" onclick="window.App.selectedAuditLocationId='${l.id}'; window.App.openCountModal('${Utils.escapeHTML(med.id)}', window.App._pendingScanMeta || {});" style="width:100%; text-align:right; ${isPrimary ? 'border-color:var(--primary); background:rgba(59,130,246,0.06);' : ''}">
                             <i class='bx ${l.icon || 'bx-map-pin'}' style="font-size:22px; color:${l.color || 'var(--primary)'};"></i>
                             <div style="flex:1;">
                                 <strong>${Utils.escapeHTML(l.nameAR)}</strong>
@@ -8937,12 +9088,13 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         `);
     },
 
-    async openUnmatchedBarcodeModal(code, catalogHit, masterMeds) {
+    async openUnmatchedBarcodeModal(code, catalogHit, masterMeds, scanMeta = {}) {
         // Pre-compute smart initial search if catalogHit gave us a brand name!
         const suggestedQuery = catalogHit ? (catalogHit.nameEN || '').split(/\s+/)[0] : '';
         this._linkBcState = {
             code,
             catalogHit,
+            scanMeta: scanMeta || {},
             masterMeds: masterMeds || (await DB.getAll('medicineMaster')) || []
         };
 
@@ -8953,7 +9105,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     <i class='bx bx-barcode' style="color:#7c3aed; font-size:22px;"></i> باركود غير مربوط بدواء في مستودعك
                 </h2>
                 <div style="margin-top:6px; padding:6px 10px; border-radius:8px; background:var(--bg-secondary); font-family:monospace; font-size:13px; font-weight:800; color:var(--primary); text-align:center;">
-                    🔢 ${Utils.escapeHTML(code)}
+                    🔢 ${Utils.escapeHTML(code)}${scanMeta.isGS1 ? ' <span style="font-size:10px; background:rgba(124,58,237,0.12); color:#7c3aed; padding:1px 5px; border-radius:4px;">2D GS1</span>' : ''}
+                    ${scanMeta.scannedExpiry ? `<div style="font-size:11px; color:#059669; margin-top:3px; font-family:inherit;">📅 صلاحية العلبة: ${scanMeta.scannedExpiry}</div>` : ''}
                 </div>
             </div>
 
@@ -9043,7 +9196,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 Sync.push(med.id).catch(() => {});
             }
             UI.showToast(`تم ربط الباركود بالدواء «${med.nameEN || med.nameAR}» ✅`, 'success');
-            await this._openAuditCountForScannedMed(med);
+            await this._openAuditCountForScannedMed(med, st.scanMeta || {});
         } catch (err) {
             console.error('Link barcode error:', err);
             UI.showToast('فشل ربط الباركود', 'danger');
