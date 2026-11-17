@@ -97,26 +97,9 @@ export const Categories = {
                 }
             }
 
-            // Seed Medicines only if DB is empty AND no authenticated user
-            // (logged-in users get real data from Sync.pull — no need for dummy seed)
-            const existingMeds = await DB.getAll('medicineMaster');
-            const hasAuthUser = (typeof auth !== 'undefined' && auth?.currentUser) || 
-                                (typeof firebase !== 'undefined' && firebase?.auth?.()?.currentUser);
-            if (existingMeds.length === 0 && !hasAuthUser) {
-                console.log('Dawaa Categories: Seeding default medicines (first-time, no auth)...');
-                for (const med of SEED_MEDICINES) {
-                    await DB.add('medicineMaster', {
-                        id: med.id, 
-                        nameEN: med.nameEN,
-                        nameAR: med.nameAR || med.nameEN,
-                        activeIngredient: med.activeIngredient || '',
-                        categoryId: med.categoryId || 'uncategorized',
-                        type: med.type || 'medicine',
-                        imagePath: med.imagePath,
-                        lastUpdated: new Date().toISOString()
-                    });
-                }
-            }
+            // v18.13.1: Never pre-seed 44 dummy medicines on boot before Firebase Auth resolves.
+            // Real pharmacy medicines (e.g. 178+) are pulled directly from Firestore via Sync.pull() on login.
+            // (Eliminates stale 44-medicine flash & ghost seed records in IndexedDB on fresh/incognito browsers.)
 
             // Always run cleanup and legacy migration
             await this.cleanupAndMigrate();

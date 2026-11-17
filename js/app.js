@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.13.0', // Smart Catalog Enricher + 10,849 verified EAN barcodes in 27K catalog
+    VERSION: '18.13.1', // Fix IndexedDB cloud reconciliation, zero-qty no-confirm/no-expiry, no mobile keyboard popup
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2728,17 +2728,17 @@ const App = {
 
                     for (const b of batches) {
                         const qty = parseFloat(b.quantity) || 0;
-                        const exp = b.expiryDate || null;
+                        const exp = (qty > 0 && b.expiryDate && b.expiryDate !== 'غير محدد') ? b.expiryDate : null;
 
                         if (!d.perLoc[locId]) {
                             d.perLoc[locId] = { qty: 0, expiries: {} };
                         }
                         d.perLoc[locId].qty += qty;
-                        if (exp) {
+                        if (qty > 0 && exp) {
                             d.perLoc[locId].expiries[exp] = (d.perLoc[locId].expiries[exp] || 0) + qty;
                         }
                         d.total += qty;
-                        if (exp && (!d.earliestExp || exp < d.earliestExp)) {
+                        if (qty > 0 && exp && (!d.earliestExp || exp < d.earliestExp)) {
                             d.earliestExp = exp;
                         }
                     }
@@ -2780,17 +2780,17 @@ const App = {
                     if (!locFilter.has(locId) && locId !== '__default__') continue;
 
                     const qty = parseFloat(entry.quantity) || 0;
-                    const exp = entry.expiryDate || null;
+                    const exp = (qty > 0 && entry.expiryDate && entry.expiryDate !== 'غير محدد') ? entry.expiryDate : null;
 
                     if (!d.perLoc[locId]) {
                         d.perLoc[locId] = { qty: 0, expiries: {} };
                     }
                     d.perLoc[locId].qty += qty;
-                    if (exp) {
+                    if (qty > 0 && exp) {
                         d.perLoc[locId].expiries[exp] = (d.perLoc[locId].expiries[exp] || 0) + qty;
                     }
                     d.total += qty;
-                    if (exp && (!d.earliestExp || exp < d.earliestExp)) {
+                    if (qty > 0 && exp && (!d.earliestExp || exp < d.earliestExp)) {
                         d.earliestExp = exp;
                     }
                 }
@@ -5641,13 +5641,14 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     : [{ quantity: record.quantity, expiryDate: record.expiryDate }];
 
                 for (const b of batches) {
+                    const bQty = parseFloat(b.quantity) || 0;
                     exportRows.push({
                         medId: medId,
                         nameEN: med.nameEN || '',
                         nameAR: med.nameAR || '',
                         location: loc,
-                        quantity: parseFloat(b.quantity) || 0,
-                        expiryDate: b.expiryDate || '',
+                        quantity: bQty,
+                        expiryDate: bQty > 0 ? (b.expiryDate || '') : '',
                         userName: record.userName || session.host,
                         countedAt: new Date(record.countedAt || session.startedAt).toLocaleString('ar-EG')
                     });
@@ -5870,9 +5871,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     const qty = parseFloat(b.quantity) || 0;
                     // Sum per location
                     d.locations[locName] = (d.locations[locName] || 0) + qty;
-                    // Sum per expiry
-                    const exp = b.expiryDate || 'غير محدد';
-                    d.expiries[exp] = (d.expiries[exp] || 0) + qty;
+                    // Sum per expiry ONLY for positive quantities (zero stock has no expiry)
+                    if (qty > 0 && b.expiryDate && b.expiryDate !== 'غير محدد') {
+                        d.expiries[b.expiryDate] = (d.expiries[b.expiryDate] || 0) + qty;
+                    }
                     // Total
                     d.total += qty;
                 }
@@ -6107,8 +6109,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     });
                     totalQty += locQty;
                     for (const b of batches) {
-                        const exp = b.expiryDate || 'غير محدد';
-                        batchMap.set(exp, (batchMap.get(exp) || 0) + (parseFloat(b.quantity) || 0));
+                        const bQty = parseFloat(b.quantity) || 0;
+                        if (bQty > 0 && b.expiryDate && b.expiryDate !== 'غير محدد') {
+                            batchMap.set(b.expiryDate, (batchMap.get(b.expiryDate) || 0) + bQty);
+                        }
                     }
                 }
             }
@@ -6717,12 +6721,12 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     },
 
     async recordZeroCountModal(medicineId) {
-        if (!confirm('هل تريد تسجيل هذا الصنف كغير متوفر (رصيد صفر) في هذا المكان؟')) return;
+        // v18.13.1: Direct zero-count save — no confirmation dialog & strictly no expiry date
         await Audit.recordCount(this.selectedAuditSessionId, this.selectedAuditLocationId, medicineId, {
             batches: [{ quantity: 0, expiryDate: '' }]
         });
         UI.closeModal();
-        UI.showToast('تم تسجيل رصيد الصنف كـ صفر (0) بنجاح ✅', 'info');
+        UI.showToast('تم تسجيل رصيد الصنف صفر (0) بدون صلاحية ✅', 'info');
         this.renderAuditView();
     },
 
@@ -7231,9 +7235,13 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         // Clean slate for session: if not counted in this session, start completely empty!
         let initialBatches = [];
         if (existingCount && Array.isArray(existingCount.batches) && existingCount.batches.length > 0) {
-            initialBatches = existingCount.batches.map(b => ({ ...b }));
+            initialBatches = existingCount.batches.map(b => {
+                const q = parseFloat(b.quantity) || 0;
+                return { ...b, quantity: q, expiryDate: q > 0 ? (b.expiryDate || '') : '' };
+            });
         } else if (existingCount && existingCount.quantity !== undefined) {
-            initialBatches = [{ quantity: existingCount.quantity, expiryDate: existingCount.expiryDate || defaultExpiry }];
+            const q = parseFloat(existingCount.quantity) || 0;
+            initialBatches = [{ quantity: q, expiryDate: q > 0 ? (existingCount.expiryDate || '') : '' }];
         } else {
             initialBatches = []; // Clean slate: no previous quantities lingering!
         }
@@ -7335,18 +7343,25 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         }
 
         return this._modalBatches.map((b, idx) => {
-            const badge = this.calcExpiryBadge(b.expiryDate);
+            const isZero = (parseFloat(b.quantity) || 0) <= 0;
+            const badge = (!isZero && b.expiryDate) ? this.calcExpiryBadge(b.expiryDate) : null;
             return `
                 <div class="modal-batch-card" style="display:flex; align-items:center; justify-content:space-between; background:var(--surface); border:1px solid var(--border-color); border-radius:8px; padding:6px 12px; box-shadow:0 1px 2px rgba(0,0,0,0.03);">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <strong style="font-size:14px; color:var(--primary);">${b.quantity} وحدة</strong>
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <strong style="font-size:14px; color:${isZero ? 'var(--text-muted)' : 'var(--primary)'};">${b.quantity} وحدة</strong>
                         <span style="color:var(--text-muted); font-size:12px;">&bull;</span>
-                        <span style="font-weight:bold; font-size:12px; color:var(--text-main); display:inline-flex; align-items:center; gap:3px;">
-                            <i class='bx bx-calendar'></i> ${b.expiryDate}
-                        </span>
-                        <span style="display:inline-flex; align-items:center; gap:2px; font-size:10px; font-weight:bold; padding:1px 6px; border-radius:4px; background:${badge.bg}; color:${badge.color};">
-                            <i class='bx ${badge.icon}'></i> ${badge.text}
-                        </span>
+                        ${isZero ? `
+                            <span style="font-size:11.5px; color:var(--text-muted); font-weight:600;">غير متوفر (بدون صلاحية)</span>
+                        ` : `
+                            <span style="font-weight:bold; font-size:12px; color:var(--text-main); display:inline-flex; align-items:center; gap:3px;">
+                                <i class='bx bx-calendar'></i> ${b.expiryDate || '—'}
+                            </span>
+                            ${badge ? `
+                                <span style="display:inline-flex; align-items:center; gap:2px; font-size:10px; font-weight:bold; padding:1px 6px; border-radius:4px; background:${badge.bg}; color:${badge.color};">
+                                    <i class='bx ${badge.icon}'></i> ${badge.text}
+                                </span>
+                            ` : ''}
+                        `}
                         ${b.isSuggested ? `<span style="font-size:9px; background:rgba(59,130,246,0.1); color:var(--primary); padding:1px 4px; border-radius:3px;">سابق 📋</span>` : ''}
                     </div>
                     <div style="display:flex; gap:2px;">
@@ -7391,18 +7406,28 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
         if (!this._modalBatches) this._modalBatches = [];
 
-        // v18.11.7: Merge with existing batch if same expiry date
-        const existingIdx = this._modalBatches.findIndex(b => b.expiryDate === exp && exp !== '');
-        if (existingIdx >= 0) {
-            this._modalBatches[existingIdx].quantity += qty;
-            UI.showToast(`تم دمج الكمية مع دفعة بنفس الصلاحية (${exp}) — الإجمالي: ${this._modalBatches[existingIdx].quantity}`, 'info');
+        if (qty === 0) {
+            // v18.13.1: Zero quantity strictly has NO expiry date (ignore prefilled calendar value)
+            this._modalBatches = [{ quantity: 0, expiryDate: '' }];
         } else {
-            this._modalBatches.push({ quantity: qty, expiryDate: exp || 'غير محدد' });
+            // Remove any prior placeholder 0 batch when adding real positive stock
+            this._modalBatches = this._modalBatches.filter(b => (parseFloat(b.quantity) || 0) > 0);
+            // v18.11.7: Merge with existing batch if same expiry date
+            const existingIdx = this._modalBatches.findIndex(b => b.expiryDate === exp && exp !== '');
+            if (existingIdx >= 0) {
+                this._modalBatches[existingIdx].quantity += qty;
+                UI.showToast(`تم دمج الكمية مع دفعة بنفس الصلاحية (${exp}) — الإجمالي: ${this._modalBatches[existingIdx].quantity}`, 'info');
+            } else {
+                this._modalBatches.push({ quantity: qty, expiryDate: exp });
+            }
         }
 
-        // Reset Box Inputs
+        // Reset Box Inputs & close mobile keyboard (v18.13.1: do NOT re-focus qtyEl!)
         qtyEl.value = '';
-        qtyEl.focus();
+        qtyEl.blur();
+        if (document.activeElement && typeof document.activeElement.blur === 'function') {
+            document.activeElement.blur();
+        }
 
         // Refresh List & Total
         const listContainer = document.getElementById('modal-batches-list-container');
@@ -7474,23 +7499,40 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         // Auto-include uncommitted input from the Add Batch Box if filled
         const qtyEl = document.getElementById('new-batch-qty');
         const expEl = document.getElementById('new-batch-expiry');
-        if (qtyEl && expEl && parseFloat(qtyEl.value) > 0 && expEl.value) {
-            if (!this._modalBatches) this._modalBatches = [];
-            this._modalBatches.push({
-                quantity: parseFloat(qtyEl.value),
-                expiryDate: expEl.value.trim()
-            });
+        const rawQtyVal = qtyEl ? qtyEl.value.trim() : '';
+        const parsedQty = rawQtyVal !== '' ? parseFloat(rawQtyVal) : NaN;
+
+        if (!isNaN(parsedQty)) {
+            if (parsedQty === 0) {
+                // Direct zero save without confirmation and without expiry date
+                return this.recordZeroCountModal(medicineId);
+            } else if (parsedQty > 0 && expEl && expEl.value) {
+                if (!this._modalBatches) this._modalBatches = [];
+                this._modalBatches = this._modalBatches.filter(b => (parseFloat(b.quantity) || 0) > 0);
+                const exp = expEl.value.trim();
+                const existingIdx = this._modalBatches.findIndex(b => b.expiryDate === exp);
+                if (existingIdx >= 0) {
+                    this._modalBatches[existingIdx].quantity += parsedQty;
+                } else {
+                    this._modalBatches.push({ quantity: parsedQty, expiryDate: exp });
+                }
+            }
         }
 
         if (!this._modalBatches || this._modalBatches.length === 0) {
-            if (confirm('لم تُضف أي دفعات بعد. هل ترغب في تسجيل هذا الصنف كغير متوفر (رصيد صفر 0) في هذا المكان؟')) {
-                return this.recordZeroCountModal(medicineId);
-            }
+            // v18.13.1: No annoying confirm popup — guide user cleanly
+            UI.showToast('أدخل الكمية أو اضغط على "رصيد: 0" للتسجيل كغير متوفر', 'warning');
             return;
         }
 
+        // Sanitize: ensure zero-quantity batches never carry an expiry date
+        const sanitizedBatches = this._modalBatches.map(b => {
+            const q = parseFloat(b.quantity) || 0;
+            return { quantity: q, expiryDate: q > 0 ? (b.expiryDate || '') : '' };
+        });
+
         await Audit.recordCount(this.selectedAuditSessionId, this.selectedAuditLocationId, medicineId, {
-            batches: this._modalBatches
+            batches: sanitizedBatches
         });
 
         UI.closeModal();

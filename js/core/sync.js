@@ -38,8 +38,10 @@ export const Sync = {
             } catch (me) { console.warn('Sync pull medicines notice:', me.message); }
 
             if (Array.isArray(cloudMeds) && cloudMeds.length > 0) {
+                const cloudMedIds = new Set();
                 let syncCount = 0;
                 for (const med of cloudMeds) {
+                    cloudMedIds.add(med.id);
                     const localMed = await DB.get('medicineMaster', med.id);
                     if (localMed && localMed.imagePath?.startsWith('data:image') && (!med.imagePath || med.imagePath === '')) {
                         med.imagePath = localMed.imagePath;
@@ -49,7 +51,17 @@ export const Sync = {
                     await DB.put('medicineMaster', med);
                     syncCount++;
                 }
-                console.log(`Sync: Pulled ${syncCount} medicines from cloud. âœ…`);
+                // v18.13.1: Reconcile IndexedDB — remove deleted/stale dummy records not in cloud
+                // (preserve any unsynced offline additions with syncStatus === 'local')
+                const allLocalMeds = (await DB.getAll('medicineMaster')) || [];
+                let prunedCount = 0;
+                for (const localMed of allLocalMeds) {
+                    if (!cloudMedIds.has(localMed.id) && localMed.syncStatus !== 'local') {
+                        await DB.delete('medicineMaster', localMed.id);
+                        prunedCount++;
+                    }
+                }
+                console.log(`Sync: Pulled ${syncCount} medicines from cloud (pruned ${prunedCount} stale local records). ✅`);
             }
 
             // 2. Pull Categories

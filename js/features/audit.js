@@ -266,31 +266,39 @@ export const Audit = {
             session.participants.push(uName);
         }
 
-        // Normalize batches
+        // Normalize batches — v18.13.1: ZERO quantity must NEVER have an expiry date (no phantom '2027-12')
         let cleanBatches = [];
         if (Array.isArray(batches) && batches.length > 0) {
-            cleanBatches = batches.map(b => ({
-                quantity: parseFloat(b.quantity) || 0,
-                expiryDate: b.expiryDate ? b.expiryDate.trim() : '2027-12'
-            })).filter(b => b.quantity >= 0);
+            cleanBatches = batches.map(b => {
+                const qty = parseFloat(b.quantity) || 0;
+                const rawExp = (b.expiryDate && b.expiryDate !== 'غير محدد') ? b.expiryDate.trim() : '';
+                return {
+                    quantity: qty,
+                    expiryDate: qty > 0 ? rawExp : ''
+                };
+            }).filter(b => b.quantity >= 0);
         } else if (quantity !== undefined && quantity !== null) {
+            const qty = parseFloat(quantity) || 0;
+            const rawExp = (expiryDate && expiryDate !== 'غير محدد') ? expiryDate.trim() : '';
             cleanBatches = [{
-                quantity: parseFloat(quantity) || 0,
-                expiryDate: expiryDate ? expiryDate.trim() : '2027-12'
+                quantity: qty,
+                expiryDate: qty > 0 ? rawExp : ''
             }];
         } else {
-            // Default 0 count if zero-count requested
+            // Default 0 count — strictly no expiry date
             cleanBatches = [{
                 quantity: 0,
-                expiryDate: expiryDate ? expiryDate.trim() : '2027-12'
+                expiryDate: ''
             }];
         }
 
         const totalQty = cleanBatches.reduce((sum, b) => sum + b.quantity, 0);
-        
-        // Find earliest expiry date
-        const sortedBatches = [...cleanBatches].sort((a, b) => (a.expiryDate || '').localeCompare(b.expiryDate || ''));
-        const earliestExpiry = sortedBatches[0]?.expiryDate || '2027-12';
+
+        // Find earliest expiry date ONLY from positive-quantity batches
+        const positiveDated = cleanBatches
+            .filter(b => b.quantity > 0 && b.expiryDate)
+            .sort((a, b) => a.expiryDate.localeCompare(b.expiryDate));
+        const earliestExpiry = totalQty > 0 ? (positiveDated[0]?.expiryDate || '') : '';
 
         session.counts[key] = {
             quantity: totalQty,
