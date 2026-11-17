@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.14.0', // Active ingredient analytics & export grouping, numbered clean Excel exports, separate clearable barcode
+    VERSION: '18.14.1', // Unmerged category/active header rows placed directly in medicine name column
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2919,15 +2919,13 @@ const App = {
                 }
 
                 const aoa = [headers];
-                const groupRowIndices = [];
                 let rowCounter = 1;
 
                 for (const grp of sortedGroups) {
-                    // Clean group header row (NO "صنف — وحدة" clutter!)
+                    // Clean group header placed in the Medicine Name column (col 1), NO row merge!
                     const prefix = groupMode === 'active' ? '🧬 ' : '◼ ';
-                    const grpRow = [`${prefix}${grp.label}`];
-                    for (let i = 1; i < headers.length; i++) grpRow.push('');
-                    groupRowIndices.push(aoa.length);
+                    const grpRow = ['', `${prefix}${grp.label}`];
+                    while (grpRow.length < headers.length) grpRow.push('');
                     aoa.push(grpRow);
 
                     // Medicine rows with sequential numbering
@@ -2990,12 +2988,7 @@ const App = {
                     return { wch: Math.min(maxLen + 3, 55) };
                 });
 
-                // Merge group headers (0-based row index in SheetJS)
-                const merges = groupRowIndices.map(rowIdx => ({
-                    s: { r: rowIdx, c: 0 },
-                    e: { r: rowIdx, c: headers.length - 1 }
-                }));
-                if (merges.length > 0) ws['!merges'] = merges;
+                // No merged rows (group header stays cleanly inside the medicine name column)
 
                 const wb = XLSX.utils.book_new();
                 const sheetTitle = groupMode === 'active' ? 'حسب المادة الفعالة' : 'المخزون';
@@ -6273,7 +6266,6 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             // Header row (with sequential numbering 'م')
             const headers = ['م', 'اسم الدواء (EN)', 'اسم الدواء (AR)', ...locColumns, 'الإجمالي', 'الصلاحيات'];
             const aoa = [headers];
-            const categoryRowIndices = []; // Track category header rows for styling
             let rowCounter = 1;
 
             for (const catId of sortedCatIds) {
@@ -6281,10 +6273,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 const catName = Categories.getCategoryDisplayName(cat || catId, 'both', catMap);
                 const meds = catGroups.get(catId);
 
-                // Clean category header row (no "صنف — وحدة")
-                const catRow = [`◼ ${catName}`];
-                for (let i = 1; i < headers.length; i++) catRow.push('');
-                categoryRowIndices.push(aoa.length); // 0-based index
+                // Clean category header in the Medicine Name column (col 1), NO row merge!
+                const catRow = ['', `◼ ${catName}`];
+                while (catRow.length < headers.length) catRow.push('');
                 aoa.push(catRow);
 
                 // Medicine rows with sequential numbering
@@ -6330,18 +6321,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 return { wch: Math.min(maxLen + 3, 50) };
             });
 
-            // Merge category header rows across all columns (0-based row index in SheetJS)
-            const merges = [];
-            for (const rowIdx of categoryRowIndices) {
-                merges.push({
-                    s: { r: rowIdx, c: 0 },
-                    e: { r: rowIdx, c: headers.length - 1 }
-                });
-            }
-            // Don't set merges if not supported (some XLSX versions)
-            if (merges.length > 0) {
-                ws['!merges'] = merges;
-            }
+            // No merged rows — category title sits cleanly in the medicine name column
 
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'كشف الجرد');
