@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.12.2', // Pull medicines into category by search + fix category EN/AR names in all exports
+    VERSION: '18.13.0', // Smart Catalog Enricher + 10,849 verified EAN barcodes in 27K catalog
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2358,15 +2358,20 @@ const App = {
             return `
                 <div class="catalog-suggestion-item" onclick="window.App.selectDrugFromCatalog(${idx}, '${prefix}')">
                     <div style="flex:1; min-width:0;">
-                        <div style="display:flex; align-items:center; gap:6px;">
-                            <strong style="font-size:13px; color:var(--text-main);">${item.nameEN}</strong>
-                            <span style="font-size:11px; color:var(--text-muted);">(${item.nameAR})</span>
+                        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                            <strong style="font-size:13px; color:var(--text-main);">${Utils.escapeHTML(item.nameEN)}</strong>
+                            ${item.nameAR ? `<span style="font-size:11px; color:var(--text-muted);">(${Utils.escapeHTML(item.nameAR)})</span>` : ''}
                         </div>
-                        ${item.active ? `<small style="display:block; font-size:11px; color:var(--text-muted); margin-top:2px;">💊 ${item.active}</small>` : ''}
+                        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:2px;">
+                            ${item.active ? `<small style="font-size:11px; color:var(--text-muted);">💊 ${Utils.escapeHTML(item.active)}</small>` : ''}
+                            ${item.barcode ? `<small style="font-size:10.5px; color:var(--primary); font-family:monospace;">🔢 ${Utils.escapeHTML(item.barcode)}</small>` : ''}
+                        </div>
                     </div>
-                    <span class="badge" style="background:rgba(59,130,246,0.1); color:var(--primary); font-size:10px; padding:2px 6px; border-radius:4px; white-space:nowrap;">
-                        ${catName}
-                    </span>
+                    ${item.categoryId && item.categoryId !== 'uncategorized' ? `
+                        <span class="badge" style="background:rgba(59,130,246,0.1); color:var(--primary); font-size:10px; padding:2px 6px; border-radius:4px; white-space:nowrap;">
+                            ${catName}
+                        </span>
+                    ` : ''}
                 </div>
             `;
         }).join('') + sizeLabel;
@@ -2386,11 +2391,13 @@ const App = {
             const nameArEl = document.getElementById('qa-name-ar');
             const catEl = document.getElementById('qa-category');
             const activeEl = document.getElementById('qa-active');
+            const barcodeEl = document.getElementById('qa-barcode');
 
             if (nameEnEl) nameEnEl.value = item.nameEN;
             if (nameArEl) nameArEl.value = item.nameAR;
             if (activeEl && item.active) activeEl.value = item.active;
-            if (catEl) {
+            if (barcodeEl && item.barcode) barcodeEl.value = item.barcode;
+            if (catEl && item.categoryId && item.categoryId !== 'uncategorized') {
                 catEl.value = item.categoryId;
                 if (!catEl.value) {
                     Array.from(catEl.options).forEach(opt => {
@@ -2402,13 +2409,15 @@ const App = {
             const nameEnEl = document.getElementById('m-name-en');
             const nameArEl = document.getElementById('m-name-ar');
             const activeEl = document.getElementById('m-active');
+            const barcodeEl = document.getElementById('m-barcode');
             const catEl = document.getElementById('m-category');
             const typeEl = document.getElementById('m-type');
 
             if (nameEnEl) nameEnEl.value = item.nameEN;
             if (nameArEl) nameArEl.value = item.nameAR;
             if (activeEl) activeEl.value = item.active || '';
-            if (catEl) {
+            if (barcodeEl && item.barcode) barcodeEl.value = item.barcode;
+            if (catEl && item.categoryId && item.categoryId !== 'uncategorized') {
                 catEl.value = item.categoryId;
                 if (!catEl.value) {
                     Array.from(catEl.options).forEach(opt => {
@@ -2419,7 +2428,7 @@ const App = {
             if (typeEl && item.type) typeEl.value = item.type;
         }
 
-        UI.showToast(`✨ تم إدراج (${Utils.escapeHTML(item.nameAR)}) بنجاح`, 'success');
+        UI.showToast(`✨ تم إدراج (${Utils.escapeHTML(item.nameAR || item.nameEN)}) بنجاح`, 'success');
     },
 
     async saveQuickAddMedicine() {
@@ -3026,6 +3035,456 @@ const App = {
     },
     // ===================== End Custom Export Builder =====================
 
+    // ===================== Smart Catalog Enricher (27K Egyptian Drugs) =====================
+    async openCatalogEnricherModal() {
+        try {
+            // Show quick loading modal while 27K catalog loads & indexes
+            UI.showModal(`
+                <div class="modal-header">
+                    <h2><i class='bx bx-sparkles' style="color:#10b981;"></i> فحص وتكميل بيانات الأدوية</h2>
+                </div>
+                <div style="text-align:center; padding:32px 16px;">
+                    <i class='bx bx-loader-alt bx-spin' style="font-size:38px; color:var(--primary);"></i>
+                    <p style="margin-top:12px; font-weight:700; color:var(--text-main);">جاري تحميل قاعدة الـ 27,601 دواء ومطابقة أصنافك...</p>
+                    <small class="text-muted">يستغرق لحظات فقط ولا يغيّر أي بيانات بدون موافقتك</small>
+                </div>
+            `);
+
+            await EgyptianDrugs.ensureLoaded();
+            const allMeds = (await DB.getAll('medicineMaster')) || [];
+            if (allMeds.length === 0) {
+                UI.closeModal();
+                UI.showToast('لا توجد أدوية في قاعدة البيانات للفحص', 'info');
+                return;
+            }
+
+            // Yield a frame so spinner renders smoothly
+            await new Promise(r => setTimeout(r, 30));
+
+            const rows = allMeds.map(med => {
+                const matches = EgyptianDrugs.findBestMatches(med, 5);
+                const selectedIdx = 0;
+                const best = matches[0] || null;
+                return {
+                    med,
+                    matches,
+                    selectedIdx,
+                    checked: !!(best && best.confidence === 'high')
+                };
+            });
+
+            // Default field options
+            const fields = {
+                fillActive: true,
+                fillAR: true,
+                fillBarcode: true,
+                updateEN: false
+            };
+
+            this._enricherState = {
+                rows,
+                fields,
+                filter: 'actionable', // 'actionable' | 'high' | 'all'
+                search: ''
+            };
+
+            // Only keep rows auto-checked if they actually have a change under default fields
+            for (const row of rows) {
+                const diff = this._computeEnrichDiff(row, fields);
+                row.checked = !!(row.matches[row.selectedIdx]?.confidence === 'high' && diff.hasChanges);
+            }
+
+            this._renderEnricherModal();
+        } catch (err) {
+            console.error('Catalog enricher error:', err);
+            UI.showToast('تعذر تشغيل فحص البيانات: ' + err.message, 'danger');
+        }
+    },
+
+    _computeEnrichDiff(row, fields) {
+        const med = row.med;
+        const match = row.matches[row.selectedIdx] || null;
+        if (!match) return { hasChanges: false, changes: {} };
+
+        const item = match.item;
+        const changes = {};
+
+        // 1. Active ingredient (fill if missing)
+        const curActive = (med.activeIngredient || '').trim();
+        if (fields.fillActive && !curActive && item.active && item.active.trim()) {
+            changes.activeIngredient = { from: '', to: item.active.trim() };
+        }
+
+        // 2. Arabic name (fill if empty, identical to EN, or has no Arabic chars)
+        const curAR = (med.nameAR || '').trim();
+        const curEN = (med.nameEN || '').trim();
+        const arMissingOrEnglish = !curAR || curAR.toLowerCase() === curEN.toLowerCase() || !/[\u0600-\u06FF]/.test(curAR);
+        if (fields.fillAR && arMissingOrEnglish && item.nameAR && item.nameAR.trim()) {
+            changes.nameAR = { from: curAR, to: item.nameAR.trim() };
+        }
+
+        // 3. Verified EAN Barcode (fill if missing or internal short ID)
+        const curBc = String(med.barcode || '').trim();
+        const hasRealBc = curBc && curBc !== String(med.id) && /^\d{8,14}$/.test(curBc);
+        if (fields.fillBarcode && !hasRealBc && item.barcode && /^\d{8,14}$/.test(item.barcode)) {
+            changes.barcode = { from: curBc === String(med.id) ? '' : curBc, to: item.barcode };
+        }
+
+        // 4. English name (optional — off by default to protect custom names)
+        const targetEN = match.formattedEN || item.nameEN || '';
+        if (fields.updateEN && targetEN && targetEN.trim().toLowerCase() !== curEN.toLowerCase()) {
+            changes.nameEN = { from: curEN, to: targetEN.trim() };
+        }
+
+        return {
+            hasChanges: Object.keys(changes).length > 0,
+            changes
+        };
+    },
+
+    _renderEnricherModal() {
+        const st = this._enricherState;
+        if (!st) return;
+
+        let highCount = 0, medCount = 0, actionableCount = 0;
+        for (const r of st.rows) {
+            const best = r.matches[r.selectedIdx];
+            const diff = this._computeEnrichDiff(r, st.fields);
+            if (best?.confidence === 'high') highCount++;
+            else if (best?.confidence === 'medium') medCount++;
+            if (diff.hasChanges) actionableCount++;
+        }
+
+        UI.showModal(`
+            <div class="sheet-handle"></div>
+            <div class="modal-header" style="margin-bottom:10px;">
+                <h2 style="font-size:16px; display:flex; align-items:center; gap:6px;">
+                    <i class='bx bx-sparkles' style="color:#10b981;"></i> فحص وتكميل بيانات الأدوية
+                </h2>
+                <p class="text-muted" style="font-size:11.5px; margin-top:3px;">
+                    مقارنة ${st.rows.length} صنف بقاعدة ${EgyptianDrugs.catalogSize.toLocaleString()} دواء مصري — راجع واعتمد اللي تحبه
+                </p>
+            </div>
+
+            <!-- Summary Strip -->
+            <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:10px; text-align:center;">
+                <div style="padding:7px; border-radius:8px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25);">
+                    <div style="font-size:15px; font-weight:800; color:#059669;">${highCount}</div>
+                    <div style="font-size:10px; color:var(--text-muted);">🟢 تطابق قوي</div>
+                </div>
+                <div style="padding:7px; border-radius:8px; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25);">
+                    <div style="font-size:15px; font-weight:800; color:#d97706;">${medCount}</div>
+                    <div style="font-size:10px; color:var(--text-muted);">🟡 محتاج مراجعة</div>
+                </div>
+                <div style="padding:7px; border-radius:8px; background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.25);">
+                    <div style="font-size:15px; font-weight:800; color:var(--primary);" id="enrich-actionable-num">${actionableCount}</div>
+                    <div style="font-size:10px; color:var(--text-muted);">✨ جاهز للتكميل</div>
+                </div>
+            </div>
+
+            <!-- Field Toggles -->
+            <div style="padding:9px 10px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px; margin-bottom:10px;">
+                <div style="font-size:11.5px; font-weight:800; margin-bottom:6px; color:var(--text-main);">إيه اللي عايز تكمله؟</div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; font-size:11.5px;">
+                    <label style="cursor:pointer; display:flex; align-items:center; gap:4px;">
+                        <input type="checkbox" ${st.fields.fillActive ? 'checked' : ''} onchange="window.App._onEnricherToggleField('fillActive', this.checked)"> 💊 المادة الفعالة
+                    </label>
+                    <label style="cursor:pointer; display:flex; align-items:center; gap:4px;">
+                        <input type="checkbox" ${st.fields.fillAR ? 'checked' : ''} onchange="window.App._onEnricherToggleField('fillAR', this.checked)"> 🔤 العربي الناقص
+                    </label>
+                    <label style="cursor:pointer; display:flex; align-items:center; gap:4px;">
+                        <input type="checkbox" ${st.fields.fillBarcode ? 'checked' : ''} onchange="window.App._onEnricherToggleField('fillBarcode', this.checked)"> 🔢 الباركود
+                    </label>
+                    <label style="cursor:pointer; display:flex; align-items:center; gap:4px; color:var(--text-muted);">
+                        <input type="checkbox" ${st.fields.updateEN ? 'checked' : ''} onchange="window.App._onEnricherToggleField('updateEN', this.checked)"> 🇬🇧 توحيد الاسم الإنجليزي
+                    </label>
+                </div>
+            </div>
+
+            <!-- Filter Tabs + Search -->
+            <div style="display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap; align-items:center;">
+                <button type="button" id="enr-tab-actionable" onclick="window.App._setEnricherFilter('actionable')" class="${st.filter==='actionable'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:11px; padding:5px 9px; border-radius:8px; ${st.filter!=='actionable'?'border:1px solid var(--border-color);':''}">المقترحة للتكميل</button>
+                <button type="button" id="enr-tab-high" onclick="window.App._setEnricherFilter('high')" class="${st.filter==='high'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:11px; padding:5px 9px; border-radius:8px; ${st.filter!=='high'?'border:1px solid var(--border-color);':''}">🟢 قوي فقط</button>
+                <button type="button" id="enr-tab-all" onclick="window.App._setEnricherFilter('all')" class="${st.filter==='all'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:11px; padding:5px 9px; border-radius:8px; ${st.filter!=='all'?'border:1px solid var(--border-color);':''}">الكل (${st.rows.length})</button>
+                <input type="text" id="enr-search" placeholder="🔍 فلتر بالاسم..." value="${Utils.escapeHTML(st.search)}" oninput="window.App._setEnricherSearch(this.value)" style="flex:1; min-width:110px; padding:5px 8px; border:1px solid var(--border-color); border-radius:8px; font-size:11.5px; background:var(--surface); color:var(--text-main);">
+            </div>
+
+            <!-- Results List -->
+            <div id="enricher-results-list" style="max-height:44vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:2px;"></div>
+
+            <!-- Footer -->
+            <div class="form-actions mt-15" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:space-between;">
+                <div style="display:flex; gap:6px;">
+                    <button type="button" class="btn-ghost sm-btn" onclick="window.App._toggleEnricherAll(true)" style="font-size:11px; padding:6px 8px; border:1px solid var(--border-color);">تحديد القوي</button>
+                    <button type="button" class="btn-ghost sm-btn" onclick="window.App._toggleEnricherAll(false)" style="font-size:11px; padding:6px 8px; border:1px solid var(--border-color);">إلغاء الكل</button>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button type="button" class="btn-ghost sm-btn" onclick="window.UI.closeModal()">إلغاء</button>
+                    <button type="button" id="enricher-apply-btn" class="btn-primary sm-btn" onclick="window.App.applyCatalogEnrichment()">
+                        <i class='bx bx-check-double'></i> اعتماد التحديثات
+                    </button>
+                </div>
+            </div>
+        `);
+
+        this._renderEnricherList();
+    },
+
+    _onEnricherToggleField(field, val) {
+        const st = this._enricherState;
+        if (!st) return;
+        st.fields[field] = !!val;
+        // Auto-refresh checked state for high-confidence rows
+        for (const r of st.rows) {
+            const diff = this._computeEnrichDiff(r, st.fields);
+            if (!diff.hasChanges) {
+                r.checked = false;
+            } else if (r.matches[r.selectedIdx]?.confidence === 'high') {
+                r.checked = true;
+            }
+        }
+        const actEl = document.getElementById('enrich-actionable-num');
+        if (actEl) {
+            actEl.textContent = st.rows.filter(r => this._computeEnrichDiff(r, st.fields).hasChanges).length;
+        }
+        this._renderEnricherList();
+    },
+
+    _setEnricherFilter(filter) {
+        const st = this._enricherState;
+        if (!st) return;
+        st.filter = filter;
+        ['actionable', 'high', 'all'].forEach(f => {
+            const btn = document.getElementById(`enr-tab-${f}`);
+            if (!btn) return;
+            if (f === filter) {
+                btn.className = 'btn-primary sm-btn';
+                btn.style.border = 'none';
+            } else {
+                btn.className = 'btn-ghost sm-btn';
+                btn.style.border = '1px solid var(--border-color)';
+            }
+        });
+        this._renderEnricherList();
+    },
+
+    _setEnricherSearch(q) {
+        if (!this._enricherState) return;
+        this._enricherState.search = q || '';
+        this._renderEnricherList();
+    },
+
+    _onEnricherSelectMatch(medId, newIdx) {
+        const st = this._enricherState;
+        if (!st) return;
+        const row = st.rows.find(r => r.med.id === medId);
+        if (!row) return;
+        row.selectedIdx = parseInt(newIdx, 10) || 0;
+        const diff = this._computeEnrichDiff(row, st.fields);
+        row.checked = diff.hasChanges;
+        this._renderEnricherList();
+    },
+
+    _toggleEnricherRow(medId, isChecked) {
+        const st = this._enricherState;
+        if (!st) return;
+        const row = st.rows.find(r => r.med.id === medId);
+        if (row) row.checked = !!isChecked;
+        this._updateEnricherApplyBtn();
+    },
+
+    _toggleEnricherAll(selectHigh) {
+        const st = this._enricherState;
+        if (!st) return;
+        for (const r of st.rows) {
+            if (!selectHigh) {
+                r.checked = false;
+            } else {
+                const diff = this._computeEnrichDiff(r, st.fields);
+                r.checked = !!(r.matches[r.selectedIdx]?.confidence === 'high' && diff.hasChanges);
+            }
+        }
+        this._renderEnricherList();
+    },
+
+    _updateEnricherApplyBtn() {
+        const st = this._enricherState;
+        const btn = document.getElementById('enricher-apply-btn');
+        if (!st || !btn) return;
+        const count = st.rows.filter(r => r.checked && this._computeEnrichDiff(r, st.fields).hasChanges).length;
+        btn.innerHTML = `<i class='bx bx-check-double'></i> اعتماد (${count} دواء)`;
+        btn.disabled = count === 0;
+        btn.style.opacity = count === 0 ? '0.55' : '1';
+    },
+
+    _renderEnricherList() {
+        const st = this._enricherState;
+        const container = document.getElementById('enricher-results-list');
+        if (!st || !container) return;
+
+        const q = (st.search || '').trim().toLowerCase();
+        const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(q) : q;
+
+        const visible = st.rows.filter(r => {
+            const match = r.matches[r.selectedIdx] || null;
+            const diff = this._computeEnrichDiff(r, st.fields);
+
+            if (st.filter === 'actionable' && !diff.hasChanges) return false;
+            if (st.filter === 'high' && !(match && match.confidence === 'high' && diff.hasChanges)) return false;
+
+            if (q) {
+                const en = (r.med.nameEN || '').toLowerCase();
+                const ar = (r.med.nameAR || '').toLowerCase();
+                const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
+                if (!en.includes(q) && !ar.includes(q) && !arNorm.includes(qNorm)) return false;
+            }
+            return true;
+        });
+
+        // Sort: high confidence first, then medium, then unmatched
+        visible.sort((a, b) => {
+            const sa = a.matches[a.selectedIdx]?.score || 0;
+            const sb = b.matches[b.selectedIdx]?.score || 0;
+            return sb - sa;
+        });
+
+        if (visible.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state" style="padding:26px; text-align:center; background:var(--bg-secondary); border-radius:12px;">
+                    <i class='bx bx-check-circle' style="font-size:34px; color:#10b981;"></i>
+                    <p style="margin:8px 0 0 0; font-size:13px; color:var(--text-muted);">
+                        ${st.filter === 'actionable' ? 'ممتاز! كل الأدوية المطابقة بياناتها مكتملة وفق الإعدادات المحددة ✅' : 'لا توجد أصناف مطابقة لهذا الفلتر'}
+                    </p>
+                </div>
+            `;
+            this._updateEnricherApplyBtn();
+            return;
+        }
+
+        container.innerHTML = visible.map(r => {
+            const med = r.med;
+            const match = r.matches[r.selectedIdx] || null;
+            const diff = this._computeEnrichDiff(r, st.fields);
+            const isHigh = match?.confidence === 'high';
+            const badge = !match
+                ? `<span style="font-size:10px; padding:2px 6px; border-radius:6px; background:var(--bg-secondary); color:var(--text-muted); border:1px solid var(--border-color);">${med.type === 'supply' ? '🩹 مستلزم طبي' : '⚪ غير مطابق'}</span>`
+                : isHigh
+                    ? `<span style="font-size:10px; padding:2px 6px; border-radius:6px; background:rgba(16,185,129,0.12); color:#059669; font-weight:800;">🟢 قوي ${match.score}%</span>`
+                    : `<span style="font-size:10px; padding:2px 6px; border-radius:6px; background:rgba(245,158,11,0.14); color:#d97706; font-weight:800;">🟡 مراجعة ${match.score}%</span>`;
+
+            const diffLines = [];
+            if (diff.changes.activeIngredient) {
+                diffLines.push(`<div style="font-size:11px; color:#059669;">💊 <strong>المادة الفعالة:</strong> + ${Utils.escapeHTML(diff.changes.activeIngredient.to)}</div>`);
+            }
+            if (diff.changes.nameAR) {
+                diffLines.push(`<div style="font-size:11px; color:#2563eb;">🔤 <strong>الاسم العربي:</strong> ${diff.changes.nameAR.from ? `<s style="opacity:0.6;">${Utils.escapeHTML(diff.changes.nameAR.from)}</s> ⬅️ ` : '+ '}${Utils.escapeHTML(diff.changes.nameAR.to)}</div>`);
+            }
+            if (diff.changes.barcode) {
+                diffLines.push(`<div style="font-size:11px; color:#7c3aed; font-family:monospace;">🔢 <strong>الباركود:</strong> + ${Utils.escapeHTML(diff.changes.barcode.to)}</div>`);
+            }
+            if (diff.changes.nameEN) {
+                diffLines.push(`<div style="font-size:11px; color:#d97706;">🇬🇧 <strong>الإنجليزي:</strong> <s style="opacity:0.6;">${Utils.escapeHTML(diff.changes.nameEN.from)}</s> ⬅️ ${Utils.escapeHTML(diff.changes.nameEN.to)}</div>`);
+            }
+
+            const safeMedId = Utils.escapeHTML(med.id);
+
+            return `
+                <div style="padding:10px; border-radius:10px; background:var(--surface); border:1px solid ${r.checked && diff.hasChanges ? 'rgba(16,185,129,0.5)' : 'var(--border-color)'};">
+                    <div style="display:flex; align-items:flex-start; gap:8px;">
+                        ${diff.hasChanges ? `
+                            <input type="checkbox" ${r.checked ? 'checked' : ''} onchange="window.App._toggleEnricherRow('${safeMedId}', this.checked)" style="margin-top:3px; width:16px; height:16px; cursor:pointer; accent-color:#10b981;">
+                        ` : ''}
+                        <div style="flex:1; min-width:0;">
+                            <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; flex-wrap:wrap;">
+                                <strong style="font-size:12.5px; color:var(--text-main);">${Utils.escapeHTML(med.nameEN || med.nameAR)}</strong>
+                                ${badge}
+                            </div>
+                            ${med.nameAR && med.nameAR !== med.nameEN ? `<div style="font-size:11px; color:var(--text-muted);">${Utils.escapeHTML(med.nameAR)}</div>` : ''}
+
+                            ${r.matches.length > 0 ? `
+                                <div style="margin-top:6px;">
+                                    <select onchange="window.App._onEnricherSelectMatch('${safeMedId}', this.value)" style="width:100%; padding:5px 7px; border-radius:7px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-main); font-size:11px;">
+                                        ${r.matches.map((m, idx) => `
+                                            <option value="${idx}" ${idx === r.selectedIdx ? 'selected' : ''}>
+                                                [${m.score}%] ${Utils.escapeHTML(m.formattedEN)}${m.item.nameAR ? ' — ' + Utils.escapeHTML(m.item.nameAR) : ''}${m.item.barcode ? ' 🔢' : ''}
+                                            </option>
+                                        `).join('')}
+                                    </select>
+                                </div>
+                            ` : ''}
+
+                            ${diffLines.length > 0 ? `
+                                <div style="margin-top:6px; padding:6px 8px; border-radius:7px; background:var(--bg-secondary); display:flex; flex-direction:column; gap:3px;">
+                                    ${diffLines.join('')}
+                                </div>
+                            ` : (match ? `<div style="margin-top:5px; font-size:10.5px; color:var(--text-muted);">✅ بيانات هذا الصنف مكتملة بالفعل</div>` : '')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        this._updateEnricherApplyBtn();
+    },
+
+    async applyCatalogEnrichment() {
+        const st = this._enricherState;
+        if (!st) return;
+
+        const toUpdate = st.rows
+            .filter(r => r.checked)
+            .map(r => ({ row: r, diff: this._computeEnrichDiff(r, st.fields) }))
+            .filter(x => x.diff.hasChanges);
+
+        if (toUpdate.length === 0) {
+            UI.showToast('لم يتم تحديد أي أصناف للتحديث', 'info');
+            return;
+        }
+
+        const btn = document.getElementById('enricher-apply-btn');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<i class='bx bx-loader-alt bx-spin'></i> جاري الحفظ...`;
+        }
+
+        try {
+            let updatedCount = 0;
+            const now = new Date().toISOString();
+
+            for (const { row, diff } of toUpdate) {
+                const med = await DB.get('medicineMaster', row.med.id);
+                if (!med) continue;
+
+                if (diff.changes.activeIngredient) med.activeIngredient = diff.changes.activeIngredient.to;
+                if (diff.changes.nameAR) med.nameAR = diff.changes.nameAR.to;
+                if (diff.changes.barcode) med.barcode = diff.changes.barcode.to;
+                if (diff.changes.nameEN) med.nameEN = diff.changes.nameEN.to;
+
+                med.lastUpdated = now;
+                med.v = (med.v || 1) + 1;
+                await DB.put('medicineMaster', med);
+
+                if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+                    window.Sync.push(med.id).catch(e => console.warn('Sync push enrich error:', e));
+                }
+                updatedCount++;
+            }
+
+            this._dashCache = null;
+            UI.closeModal();
+            UI.showToast(`تم تكميل ومزامنة ${updatedCount} دواء بنجاح ✨💊`, 'success');
+            await this.refreshAllViews();
+        } catch (err) {
+            console.error('Apply enrichment error:', err);
+            UI.showToast('حدث خطأ أثناء حفظ التعديلات: ' + err.message, 'danger');
+            if (btn) {
+                btn.disabled = false;
+                this._updateEnricherApplyBtn();
+            }
+        }
+    },
+    // ===================== End Smart Catalog Enricher =====================
+
     async openManageCategories() {
         try {
             const cats = await Categories.getAllSorted();
@@ -3517,6 +3976,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     </button>
                     <button class="btn-ghost sm-btn" onclick="window.App.openAddCategoryModal()" style="display:flex; align-items:center; gap:5px; padding:8px 14px; border-radius:10px; font-size:12px; font-weight:800; border:1px solid var(--border-color);">
                         <i class='bx bx-folder-plus'></i> قسم جديد
+                    </button>
+                    <button class="btn-ghost sm-btn" onclick="window.App.openCatalogEnricherModal()" style="display:flex; align-items:center; gap:5px; padding:8px 12px; border-radius:10px; font-size:12px; font-weight:800; border:1px solid rgba(16,185,129,0.4); color:#059669; background:rgba(16,185,129,0.06);">
+                        <i class='bx bx-sparkles'></i> تكميل بيانات الأدوية
                     </button>
                 </div>
 
