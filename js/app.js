@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.15.0', // Cloud-synced Recycle Bin (Trash), auto-skip Unknown orphans in Excel, orphan audit count inspector & cleaner
+    VERSION: '18.16.0', // Audit Barcode Scanning workflow with continuous scan, iOS fallback, auto-link & 27K lookup
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1673,39 +1673,90 @@ const App = {
     },
 
     /**
-     * Native Camera Barcode Scanner (v18.8.1)
+     * Play short confirmation beep on barcode scan (Web Audio API, no asset needed)
      */
-    async startBarcodeScanner(targetInputId) {
+    _playScanBeep() {
+        try {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            const ctx = new Ctx();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = 960;
+            gain.gain.value = 0.12;
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start();
+            setTimeout(() => { osc.stop(); ctx.close().catch(() => {}); }, 85);
+        } catch (e) {}
+    },
+
+    /**
+     * Lazy-load html5-qrcode fallback ONLY on browsers lacking native BarcodeDetector (e.g. iOS Safari)
+     */
+    _loadHtml5QrcodeFallback() {
+        if (window.Html5Qrcode) return Promise.resolve(window.Html5Qrcode);
+        if (this._html5QrLoading) return this._html5QrLoading;
+        this._html5QrLoading = new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js';
+            s.onload = () => resolve(window.Html5Qrcode);
+            s.onerror = () => reject(new Error('Failed to load fallback scanner'));
+            document.head.appendChild(s);
+        });
+        return this._html5QrLoading;
+    },
+
+    /**
+     * Universal Camera Barcode Scanner (v18.16.0)
+     * Accepts either a targetInputId (string) OR a callback function (code) => void.
+     * Supports native BarcodeDetector (Android Chrome), html5-qrcode fallback (iOS Safari),
+     * AND manual / USB-Bluetooth scanner entry.
+     */
+    async startBarcodeScanner(targetInputIdOrCallback, options = {}) {
+        const isCallback = typeof targetInputIdOrCallback === 'function';
         const hasBarcodeDetector = typeof window !== 'undefined' && 'BarcodeDetector' in window;
-        
+        const titleText = options.title || 'ماسح الباركود المباشر';
+        const subtitleText = options.subtitle || 'وجّه الكاميرا نحو الباركود المطبوع على علبة الدواء';
+
+        // Remove any previous overlay
+        document.getElementById('barcode-scanner-overlay')?.remove();
+
         const overlay = document.createElement('div');
         overlay.id = 'barcode-scanner-overlay';
         overlay.style.cssText = `
             position: fixed; inset: 0; z-index: 99999;
-            background: rgba(0,0,0,0.92);
+            background: rgba(0,0,0,0.93);
             display: flex; flex-direction: column; align-items: center; justify-content: space-between;
-            padding: 24px 16px; color: white; direction: rtl;
+            padding: 20px 16px; color: white; direction: rtl; overflow-y: auto;
         `;
 
         overlay.innerHTML = `
-            <div style="width:100%; display:flex; justify-content:space-between; align-items:center; max-width:400px;">
+            <div style="width:100%; display:flex; justify-content:space-between; align-items:center; max-width:420px;">
                 <h3 style="margin:0; font-size:16px; font-weight:800; display:flex; align-items:center; gap:8px;">
-                    <i class='bx bx-barcode-reader' style="color:var(--primary); font-size:24px;"></i>
-                    ماسح الباركود المباشر
+                    <i class='bx bx-barcode-reader' style="color:#60a5fa; font-size:24px;"></i>
+                    ${Utils.escapeHTML(titleText)}
                 </h3>
                 <button type="button" id="close-scanner-btn" style="background:rgba(255,255,255,0.15); border:none; color:white; font-size:22px; width:36px; height:36px; border-radius:50%; cursor:pointer;">✕</button>
             </div>
 
-            <div style="position:relative; width:100%; max-width:340px; height:240px; border-radius:18px; overflow:hidden; background:#000; box-shadow:0 8px 32px rgba(0,0,0,0.5); border:2px solid rgba(59,130,246,0.6);">
-                <video id="scanner-video" playsinline style="width:100%; height:100%; object-fit:cover;"></video>
-                <div style="position:absolute; inset:25px 20px; border:2px dashed #3b82f6; border-radius:12px; pointer-events:none; display:flex; align-items:center; justify-content:center;">
+            <div id="scanner-viewport-wrap" style="position:relative; width:100%; max-width:350px; min-height:240px; border-radius:18px; overflow:hidden; background:#000; box-shadow:0 8px 32px rgba(0,0,0,0.5); border:2px solid rgba(59,130,246,0.7); margin:12px 0;">
+                <video id="scanner-video" playsinline muted style="width:100%; height:240px; object-fit:cover; display:block;"></video>
+                <div id="html5qr-fallback-reader" style="display:none; width:100%;"></div>
+                <div id="scanner-laser-frame" style="position:absolute; inset:25px 20px; border:2px dashed #3b82f6; border-radius:12px; pointer-events:none; display:flex; align-items:center; justify-content:center;">
                     <div style="width:100%; height:2px; background:rgba(239,68,68,0.9); box-shadow:0 0 10px #ef4444; animation:scanline 1.6s infinite alternate;"></div>
                 </div>
             </div>
 
-            <div style="text-align:center; max-width:320px;">
-                <p style="font-size:13px; color:#cbd5e1; margin:0 0 12px 0;">وجّه الكاميرا نحو الباركود المطبوع على علبة الدواء</p>
-                <button type="button" id="manual-cancel-btn" style="padding:10px 24px; background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.25); color:white; border-radius:12px; font-weight:700; cursor:pointer;">إلغاء</button>
+            <div style="text-align:center; width:100%; max-width:360px;">
+                <p id="scanner-status-text" style="font-size:12.5px; color:#cbd5e1; margin:0 0 10px 0;">${Utils.escapeHTML(subtitleText)}</p>
+                <!-- Manual / USB-Bluetooth Barcode Gun Entry -->
+                <div style="display:flex; gap:6px; margin-bottom:12px;">
+                    <input type="text" id="manual-barcode-entry" placeholder="أو اكتب الباركود / امسحه بجهاز USB..." style="flex:1; padding:9px 11px; border-radius:10px; border:1px solid rgba(255,255,255,0.25); background:rgba(255,255,255,0.1); color:white; font-family:monospace; font-size:13px; outline:none;">
+                    <button type="button" id="manual-barcode-ok" style="padding:9px 14px; border-radius:10px; border:none; background:var(--primary); color:white; font-weight:800; cursor:pointer; font-size:13px;">تأكيد</button>
+                </div>
+                <button type="button" id="manual-cancel-btn" style="padding:9px 26px; background:rgba(255,255,255,0.14); border:1px solid rgba(255,255,255,0.25); color:white; border-radius:12px; font-weight:700; cursor:pointer;">إغلاق</button>
             </div>
             <style>
                 @keyframes scanline { 0% { transform: translateY(-75px); } 100% { transform: translateY(75px); } }
@@ -1716,61 +1767,114 @@ const App = {
 
         let stream = null;
         let animationFrameId = null;
+        let html5QrInstance = null;
+        let handled = false;
 
-        const cleanup = () => {
+        const cleanup = async () => {
             if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            if (html5QrInstance) {
+                try { await html5QrInstance.stop(); } catch (e) {}
+                try { html5QrInstance.clear(); } catch (e) {}
+                html5QrInstance = null;
+            }
             if (stream) {
                 stream.getTracks().forEach(t => t.stop());
+                stream = null;
             }
             overlay.remove();
+        };
+
+        const onCodeFound = async (rawValue) => {
+            if (handled) return;
+            const code = String(rawValue || '').trim();
+            if (!code) return;
+            handled = true;
+
+            this._playScanBeep();
+            if (navigator.vibrate) navigator.vibrate([70, 35, 70]);
+            await cleanup();
+
+            if (isCallback) {
+                targetInputIdOrCallback(code);
+            } else {
+                const input = document.getElementById(targetInputIdOrCallback);
+                if (input) {
+                    input.value = code;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                UI.showToast(`تم مسح الباركود بنجاح: ${code} 🎯`, 'success');
+            }
         };
 
         overlay.querySelector('#close-scanner-btn').onclick = cleanup;
         overlay.querySelector('#manual-cancel-btn').onclick = cleanup;
 
-        try {
-            stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+        const manualInp = overlay.querySelector('#manual-barcode-entry');
+        const manualOk = overlay.querySelector('#manual-barcode-ok');
+        if (manualOk && manualInp) {
+            manualOk.onclick = () => onCodeFound(manualInp.value);
+            manualInp.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    onCodeFound(manualInp.value);
+                }
             });
-            const video = overlay.querySelector('#scanner-video');
-            video.srcObject = stream;
-            await video.play();
+        }
 
+        try {
             if (hasBarcodeDetector) {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+                });
+                const video = overlay.querySelector('#scanner-video');
+                video.srcObject = stream;
+                await video.play();
+
                 const detector = new window.BarcodeDetector({
                     formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code', 'upc_a', 'upc_e']
                 });
 
                 const scanLoop = async () => {
-                    if (!overlay.parentNode) return;
+                    if (handled || !overlay.parentNode) return;
                     try {
                         const barcodes = await detector.detect(video);
-                        if (barcodes && barcodes.length > 0) {
-                            const rawValue = barcodes[0].rawValue;
-                            if (rawValue) {
-                                if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
-                                const input = document.getElementById(targetInputId);
-                                if (input) {
-                                    input.value = rawValue;
-                                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                                    input.dispatchEvent(new Event('change', { bubbles: true }));
-                                }
-                                UI.showToast(`تم مسح الباركود بنجاح: ${rawValue} 🎯`, 'success');
-                                cleanup();
-                                return;
-                            }
+                        if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+                            onCodeFound(barcodes[0].rawValue);
+                            return;
                         }
                     } catch (detectErr) {}
                     animationFrameId = requestAnimationFrame(scanLoop);
                 };
                 scanLoop();
             } else {
-                UI.showToast('متصفحك لا يدعم الكشف التلقائي المباشر للباركود. يرجى إدخال الرقم يدوياً.', 'info');
+                // iOS Safari / Firefox fallback via html5-qrcode
+                const statusEl = overlay.querySelector('#scanner-status-text');
+                if (statusEl) statusEl.textContent = 'جاري تشغيل قارئ الباركود...';
+                const videoEl = overlay.querySelector('#scanner-video');
+                const laserEl = overlay.querySelector('#scanner-laser-frame');
+                const fallbackDiv = overlay.querySelector('#html5qr-fallback-reader');
+                if (videoEl) videoEl.style.display = 'none';
+                if (laserEl) laserEl.style.display = 'none';
+                if (fallbackDiv) fallbackDiv.style.display = 'block';
+
+                const Html5Qrcode = await this._loadHtml5QrcodeFallback();
+                if (!overlay.parentNode || handled) return;
+
+                html5QrInstance = new Html5Qrcode('html5qr-fallback-reader');
+                await html5QrInstance.start(
+                    { facingMode: 'environment' },
+                    { fps: 12, qrbox: { width: 260, height: 140 } },
+                    (decodedText) => onCodeFound(decodedText),
+                    () => {}
+                );
+                if (statusEl) statusEl.textContent = subtitleText;
             }
         } catch (err) {
             console.warn('Camera stream error:', err);
-            UI.showToast('تعذر فتح الكاميرا: يرجى التأكد من منح الإذن للمتصفح 📷', 'warning');
-            cleanup();
+            const statusEl = overlay.querySelector('#scanner-status-text');
+            if (statusEl) statusEl.textContent = '⚠️ تعذر فتح الكاميرا — يمكنك كتابة أو مسح الباركود بالخانة أدناه';
+            UI.showToast('تعذر فتح الكاميرا — تأكد من منح الإذن أو استخدم الإدخال اليدوي 📷', 'warning');
         }
     },
 
@@ -6679,6 +6783,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     </span>
                 </div>
                 <div class="ctrl-actions">
+                    <button type="button" class="btn-primary sm-btn" onclick="window.App.startAuditBarcodeScan()" style="background:#7c3aed; font-weight:800;">
+                        <i class='bx bx-barcode-reader'></i> جرد بالباركود
+                    </button>
                     ${session.status !== 'on_hold' ? `
                         <button class="btn-ghost sm-btn" onclick="window.App.holdAuditSession('${session.id}')">
                             <i class='bx bx-pause'></i> تعليق
@@ -6856,16 +6963,19 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </button>
             </div>
 
-            <!-- Search -->
+            <!-- Search + Barcode Audit Button -->
             <div class="audit-toolbar" style="margin-bottom:12px;">
-                <div style="display:flex; gap:8px; align-items:center; width:100%;">
-                    <div class="audit-search-wrapper" style="flex:1; min-width:200px;">
+                <div style="display:flex; gap:8px; align-items:center; width:100%; flex-wrap:wrap;">
+                    <div class="audit-search-wrapper" style="flex:1; min-width:180px;">
                         <i class='bx bx-search'></i>
                         <input type="text" id="audit-merged-search-input" class="audit-search-input" placeholder="بحث بالاسم العربي أو الإنجليزي..." value="${Utils.escapeHTML(this.auditMergedSearch || '')}" oninput="window.App.handleAuditMergedSearch(this.value)">
                         <button type="button" id="audit-merged-clear-btn" onclick="window.App.handleAuditMergedSearch('', true)" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:${this.auditMergedSearch ? 'flex' : 'none'}; align-items:center;">
                             <i class='bx bx-x' style="font-size:18px;"></i>
                         </button>
                     </div>
+                    <button type="button" class="btn-primary sm-btn" onclick="window.App.startAuditBarcodeScan()" style="background:#7c3aed; font-size:12px; display:flex; align-items:center; gap:5px; padding:8px 12px; border-radius:9px; white-space:nowrap; font-weight:800;">
+                        <i class='bx bx-barcode-reader' style="font-size:16px;"></i> جرد بالباركود
+                    </button>
                 </div>
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-top:8px;">
                     <div class="audit-filters-row">
@@ -7112,8 +7222,11 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             </div>
 
-            <!-- Quick Add Buttons Row -->
+            <!-- Quick Add & Barcode Scan Buttons Row -->
             <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+                <button type="button" class="btn-primary sm-btn" onclick="window.App.startAuditBarcodeScan()" style="background:#7c3aed; font-size:12px; display:flex; align-items:center; gap:5px; padding:7px 13px; border-radius:9px; font-weight:800;">
+                    <i class='bx bx-barcode-reader' style="font-size:16px;"></i> جرد بالباركود
+                </button>
                 <button class="btn-primary sm-btn" onclick="window.App.addMedicineDuringAudit()" style="font-size:11.5px; display:flex; align-items:center; gap:4px; padding:6px 12px; border-radius:8px;">
                     <i class='bx bx-plus-medical'></i> إضافة دواء جديد
                 </button>
@@ -7714,6 +7827,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                             <i class='bx bx-x' style="font-size:18px;"></i>
                         </button>
                     </div>
+                    <button type="button" class="btn-primary sm-btn" onclick="window.App.startAuditBarcodeScan()" style="background:#7c3aed; font-size:11.5px; display:flex; align-items:center; gap:4px; padding:6px 10px; border-radius:8px; white-space:nowrap; font-weight:800;">
+                        <i class='bx bx-barcode-reader' style="font-size:15px;"></i> بالباركود
+                    </button>
                     <button class="btn-primary sm-btn" onclick="window.App.addMedicineDuringAudit('${cat.id}')" style="font-size:11px; display:flex; align-items:center; gap:3px; padding:6px 10px; border-radius:8px; white-space:nowrap;">
                         <i class='bx bx-plus-medical'></i> دواء جديد
                     </button>
@@ -8079,9 +8195,12 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </button>
             </div>
 
-            <div class="form-actions" style="display:flex; gap:8px;">
-                <button type="button" class="btn-primary" onclick="window.App.saveCountFromModal('${medicineId}')" style="flex:1;">💾 حفظ واعتماد العد</button>
-                <button type="button" class="btn-ghost" onclick="window.UI.closeModal()" style="flex:0.6;">إلغاء</button>
+            <div class="form-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button type="button" class="btn-primary" onclick="window.App.saveCountFromModal('${medicineId}', false)" style="flex:1; min-width:120px;">💾 حفظ واعتماد العد</button>
+                <button type="button" class="btn-primary" onclick="window.App.saveCountFromModal('${medicineId}', true)" style="flex:1; min-width:130px; background:#7c3aed;" title="حفظ وفتح الكاميرا للعلبة التالية">
+                    <i class='bx bx-barcode-reader'></i> حفظ ومسح التالي
+                </button>
+                <button type="button" class="btn-ghost" onclick="window.UI.closeModal()" style="flex:0.45;">إلغاء</button>
             </div>
         `);
     },
@@ -8248,7 +8367,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         badgeContainer.innerHTML = badge.text;
     },
 
-    async saveCountFromModal(medicineId) {
+    async saveCountFromModal(medicineId, scanNext = false) {
         // Auto-include uncommitted input from the Add Batch Box if filled
         const qtyEl = document.getElementById('new-batch-qty');
         const expEl = document.getElementById('new-batch-expiry');
@@ -8258,7 +8377,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         if (!isNaN(parsedQty)) {
             if (parsedQty === 0) {
                 // Direct zero save without confirmation and without expiry date
-                return this.recordZeroCountModal(medicineId);
+                await this.recordZeroCountModal(medicineId);
+                if (scanNext) setTimeout(() => this.startAuditBarcodeScan(), 250);
+                return;
             } else if (parsedQty > 0 && expEl && expEl.value) {
                 if (!this._modalBatches) this._modalBatches = [];
                 this._modalBatches = this._modalBatches.filter(b => (parseFloat(b.quantity) || 0) > 0);
@@ -8291,7 +8412,250 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         UI.closeModal();
         UI.showToast('تم حفظ واعتماد دُفعات الجرد بنجاح ✅', 'success');
         this.renderAuditView();
+
+        if (scanNext) {
+            setTimeout(() => this.startAuditBarcodeScan(), 250);
+        }
     },
+
+    // ===================== Audit Barcode Scanning Workflow (v18.16.0) =====================
+    async startAuditBarcodeScan() {
+        if (!this.selectedAuditSessionId) {
+            UI.showToast('يرجى فتح جلسة جرد أولاً', 'warning');
+            return;
+        }
+        const loc = this.selectedAuditLocationId ? await Locations.get(this.selectedAuditLocationId) : null;
+        this.startBarcodeScanner(
+            (scannedCode) => this.handleScannedAuditBarcode(scannedCode),
+            {
+                title: '📷 جرد سريع بالباركود',
+                subtitle: loc
+                    ? `المكان الحالي: ${loc.nameAR} — وجّه الكاميرا لباركود علبة الدواء`
+                    : 'وجّه الكاميرا لباركود علبة الدواء لفتح شاشة العد فوراً'
+            }
+        );
+    },
+
+    async handleScannedAuditBarcode(rawCode) {
+        const code = String(rawCode || '').trim();
+        if (!code) return;
+
+        try {
+            const masterMeds = (await DB.getAll('medicineMaster')) || [];
+            // Match by commercial barcode first, then by exact id
+            let med = masterMeds.find(m => m.barcode && String(m.barcode).trim() === code);
+            if (!med) {
+                med = masterMeds.find(m => String(m.id).trim() === code);
+            }
+
+            if (med) {
+                UI.showToast(`✅ تم التعرف على: ${med.nameEN || med.nameAR}`, 'success');
+                await this._openAuditCountForScannedMed(med);
+                return;
+            }
+
+            // Not in pharmacy's medicineMaster yet — check the 27,601 Egyptian drugs catalog!
+            let catalogHit = null;
+            try {
+                const catalog = await EgyptianDrugs.ensureLoaded();
+                catalogHit = catalog.find(c => c.barcode && String(c.barcode).trim() === code) || null;
+            } catch (e) {}
+
+            await this.openUnmatchedBarcodeModal(code, catalogHit, masterMeds);
+        } catch (err) {
+            console.error('Audit barcode scan handler error:', err);
+            UI.showToast('حدث خطأ أثناء البحث عن الباركود', 'danger');
+        }
+    },
+
+    async _openAuditCountForScannedMed(med) {
+        // If user is already inside a specific audit location, open count modal immediately!
+        if (this.selectedAuditLocationId) {
+            await this.openCountModal(med.id);
+            return;
+        }
+
+        // Otherwise (e.g. from Merged Audit View), pick location smartly
+        const session = await Audit.getSession(this.selectedAuditSessionId);
+        const allLocs = (await Locations.getAll()) || [];
+        const sessionLocIds = new Set(session?.locationIds || []);
+        const activeLocs = allLocs.filter(l => sessionLocIds.has(l.id));
+
+        if (activeLocs.length === 1) {
+            this.selectedAuditLocationId = activeLocs[0].id;
+            await this.openCountModal(med.id);
+            return;
+        }
+
+        // Sort so primaryLocation appears first
+        const sortedLocs = [...activeLocs].sort((a, b) => {
+            if (a.id === med.primaryLocation) return -1;
+            if (b.id === med.primaryLocation) return 1;
+            return (a.nameAR || '').localeCompare(b.nameAR || '');
+        });
+
+        UI.showModal(`
+            <div class="sheet-handle"></div>
+            <div class="modal-header" style="margin-bottom:10px;">
+                <h2 style="font-size:15.5px;">📍 اختر المكان لجرد: ${Utils.escapeHTML(med.nameEN || med.nameAR)}</h2>
+                <p class="text-muted" style="font-size:11.5px; margin-top:3px;">اضغط على المكان لفتح نافذة إدخال الكمية فوراً</p>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+                ${sortedLocs.map(l => {
+                    const isPrimary = l.id === med.primaryLocation;
+                    return `
+                        <button type="button" class="action-card-btn" onclick="window.App.selectedAuditLocationId='${l.id}'; window.App.openCountModal('${Utils.escapeHTML(med.id)}');" style="width:100%; text-align:right; ${isPrimary ? 'border-color:var(--primary); background:rgba(59,130,246,0.06);' : ''}">
+                            <i class='bx ${l.icon || 'bx-map-pin'}' style="font-size:22px; color:${l.color || 'var(--primary)'};"></i>
+                            <div style="flex:1;">
+                                <strong>${Utils.escapeHTML(l.nameAR)}</strong>
+                                ${isPrimary ? `<small style="display:block; color:var(--primary); font-weight:700;">⭐ المكان الأساسي لهذا الدواء</small>` : ''}
+                            </div>
+                            <i class='bx bx-chevron-left' style="font-size:20px; color:var(--text-muted);"></i>
+                        </button>
+                    `;
+                }).join('')}
+            </div>
+            <div class="form-actions mt-15">
+                <button type="button" class="btn-ghost" onclick="window.UI.closeModal()">إلغاء</button>
+            </div>
+        `);
+    },
+
+    async openUnmatchedBarcodeModal(code, catalogHit, masterMeds) {
+        // Pre-compute smart initial search if catalogHit gave us a brand name!
+        const suggestedQuery = catalogHit ? (catalogHit.nameEN || '').split(/\s+/)[0] : '';
+        this._linkBcState = {
+            code,
+            catalogHit,
+            masterMeds: masterMeds || (await DB.getAll('medicineMaster')) || []
+        };
+
+        UI.showModal(`
+            <div class="sheet-handle"></div>
+            <div class="modal-header" style="margin-bottom:10px;">
+                <h2 style="font-size:15.5px; display:flex; align-items:center; gap:6px;">
+                    <i class='bx bx-barcode' style="color:#7c3aed; font-size:22px;"></i> باركود غير مربوط بدواء في مستودعك
+                </h2>
+                <div style="margin-top:6px; padding:6px 10px; border-radius:8px; background:var(--bg-secondary); font-family:monospace; font-size:13px; font-weight:800; color:var(--primary); text-align:center;">
+                    🔢 ${Utils.escapeHTML(code)}
+                </div>
+            </div>
+
+            ${catalogHit ? `
+                <div style="padding:10px 12px; border-radius:10px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.35); margin-bottom:12px;">
+                    <div style="font-size:11px; font-weight:800; color:#059669; margin-bottom:4px;">✨ تم التعرف عليه من قاعدة الأدوية المصرية (27K):</div>
+                    <strong style="font-size:13px; color:var(--text-main); display:block;">${Utils.escapeHTML(catalogHit.nameEN)}</strong>
+                    ${catalogHit.nameAR ? `<div style="font-size:12px; color:var(--text-muted);">${Utils.escapeHTML(catalogHit.nameAR)}</div>` : ''}
+                    ${catalogHit.active ? `<div style="font-size:11px; color:#059669; margin-top:2px;">💊 ${Utils.escapeHTML(catalogHit.active)}</div>` : ''}
+                </div>
+            ` : ''}
+
+            <!-- Action 1: Add as New Medicine -->
+            <button type="button" class="btn-primary w-100" onclick="window.App.addMedFromScannedBarcode()" style="margin-bottom:14px; display:flex; align-items:center; justify-content:center; gap:6px; padding:10px; font-size:12.5px;">
+                <i class='bx bx-plus-medical'></i> ${catalogHit ? 'إضافته كدواء جديد للمستودع (بيانات جاهزة ✨)' : 'إضافة دواء جديد بهذا الباركود'}
+            </button>
+
+            <!-- Action 2: Link to Existing Medicine & Count Immediately -->
+            <div style="border-top:1px dashed var(--border-color); padding-top:12px;">
+                <div style="font-size:12.5px; font-weight:800; margin-bottom:6px; color:var(--text-main);">
+                    🔗 أو اربطه بدواء موجود عندك بالفعل (وهيتحفظ الباركود للأبد):
+                </div>
+                <div class="audit-search-wrapper" style="width:100%; margin-bottom:8px;">
+                    <i class='bx bx-search'></i>
+                    <input type="text" id="link-bc-search" class="audit-search-input" placeholder="🔍 ابحث عن الدواء في مستودعك..." value="${Utils.escapeHTML(suggestedQuery)}" oninput="window.App._renderLinkBarcodeList(this.value)">
+                </div>
+                <div id="link-bc-results" style="max-height:30vh; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+            </div>
+
+            <div class="form-actions mt-15" style="display:flex; gap:8px;">
+                <button type="button" class="btn-ghost sm-btn" onclick="window.UI.closeModal(); window.App.startAuditBarcodeScan();" style="flex:1; border:1px solid var(--border-color);">
+                    <i class='bx bx-camera'></i> مسح باركود آخر
+                </button>
+                <button type="button" class="btn-ghost sm-btn" onclick="window.UI.closeModal()" style="flex:0.6;">إغلاق</button>
+            </div>
+        `);
+
+        this._renderLinkBarcodeList(suggestedQuery);
+    },
+
+    _renderLinkBarcodeList(query = '') {
+        const st = this._linkBcState;
+        const container = document.getElementById('link-bc-results');
+        if (!st || !container) return;
+
+        const q = String(query || '').trim().toLowerCase();
+        const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(q) : q;
+
+        let list = st.masterMeds;
+        if (q) {
+            list = list.filter(m => {
+                const en = (m.nameEN || '').toLowerCase();
+                const ar = (m.nameAR || '').toLowerCase();
+                const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
+                const act = (m.activeIngredient || '').toLowerCase();
+                return en.includes(q) || ar.includes(q) || arNorm.includes(qNorm) || act.includes(q);
+            });
+        }
+        list = list.slice(0, 30);
+
+        if (list.length === 0) {
+            container.innerHTML = `<div style="text-align:center; padding:14px; font-size:12px; color:var(--text-muted); background:var(--bg-secondary); border-radius:8px;">لا توجد أدوية مطابقة في مستودعك</div>`;
+            return;
+        }
+
+        container.innerHTML = list.map(m => `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 10px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:8px;">
+                <div style="flex:1; min-width:0;">
+                    <div style="font-size:12px; font-weight:800; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHTML(m.nameEN || m.nameAR)}</div>
+                    ${m.nameAR && m.nameAR !== m.nameEN ? `<div style="font-size:10.5px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHTML(m.nameAR)}</div>` : ''}
+                </div>
+                <button type="button" class="btn-primary sm-btn" onclick="window.App.linkBarcodeAndCount('${Utils.escapeHTML(m.id)}')" style="font-size:11px; padding:5px 9px; border-radius:7px; white-space:nowrap; background:#7c3aed;">
+                    🔗 ربط وعدّ
+                </button>
+            </div>
+        `).join('');
+    },
+
+    async linkBarcodeAndCount(medId) {
+        const st = this._linkBcState;
+        if (!st || !st.code) return;
+        try {
+            const med = await DB.get('medicineMaster', medId);
+            if (!med) return;
+            med.barcode = st.code;
+            med.lastUpdated = new Date().toISOString();
+            med.v = (med.v || 1) + 1;
+            await DB.put('medicineMaster', med);
+            if (typeof Sync !== 'undefined' && Sync.push) {
+                Sync.push(med.id).catch(() => {});
+            }
+            UI.showToast(`تم ربط الباركود بالدواء «${med.nameEN || med.nameAR}» ✅`, 'success');
+            await this._openAuditCountForScannedMed(med);
+        } catch (err) {
+            console.error('Link barcode error:', err);
+            UI.showToast('فشل ربط الباركود', 'danger');
+        }
+    },
+
+    async addMedFromScannedBarcode() {
+        const st = this._linkBcState;
+        if (!st) return;
+        await this.addMedicineDuringAudit(this.selectedAuditCategoryId || null);
+        // Pre-fill modal fields with scanned barcode + catalog data if found!
+        setTimeout(() => {
+            const bcEl = document.getElementById('m-barcode');
+            if (bcEl) bcEl.value = st.code || '';
+            if (st.catalogHit) {
+                const enEl = document.getElementById('m-name-en');
+                const arEl = document.getElementById('m-name-ar');
+                const actEl = document.getElementById('m-active');
+                if (enEl && st.catalogHit.nameEN) enEl.value = st.catalogHit.nameEN;
+                if (arEl && st.catalogHit.nameAR) arEl.value = st.catalogHit.nameAR;
+                if (actEl && st.catalogHit.active) actEl.value = st.catalogHit.active;
+            }
+        }, 60);
+    },
+    // ===================== End Audit Barcode Scanning Workflow =====================
 
     // --- Dedicated Expiry Monitor with Audit Reference & Session Selector ---
     async openExpiryMonitorModal() {
