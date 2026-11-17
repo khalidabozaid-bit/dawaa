@@ -84,34 +84,47 @@ export const Utils = {
             .replace(/\u0640/g, '');
     },
 
-    // ===================== Unified Smart Search Engine (v18.18.0) =====================
+    // ===================== Unified Smart Search Engine (v18.17.2) =====================
     collapseInitialisms(text) {
         let s = String(text || '').toLowerCase();
-        s = s
-            .replace(/\bs\.?\s*r\.?\b/g, 'sr')
-            .replace(/\bc\.?\s*r\.?\b/g, 'cr')
-            .replace(/\bx\.?\s*r\.?\b/g, 'xr')
-            .replace(/\bf\.?\s*c\.?\s*t(?:abs?)?\b/g, 'tab')
-            .replace(/\be\.?\s*c\.?\s*t(?:abs?)?\b/g, 'tab')
-            .replace(/\bi\.?\s*v\.?\b/g, 'iv')
-            .replace(/\bi\.?\s*m\.?\b/g, 'im')
-            .replace(/\bi\.?\s*u\.?\b/g, 'iu');
-        // Dotted acronyms: "b.b.c." -> "bbc", "d.g." -> "dg"
-        s = s.replace(/(^|[\s(])((?:[a-z]\.\s*){2,5}[a-z]?\.?)(?=$|[\s),])/g, (full, pre, seq) => {
-            const letters = seq.replace(/[\s.]/g, '');
-            return letters.length >= 2 ? pre + letters : full;
-        });
+        if (s.indexOf('.') !== -1) {
+            s = s
+                .replace(/\bs\.?\s*r\.?\b/g, 'sr')
+                .replace(/\bc\.?\s*r\.?\b/g, 'cr')
+                .replace(/\bx\.?\s*r\.?\b/g, 'xr')
+                .replace(/\bf\.?\s*c\.?\s*t(?:abs?)?\b/g, 'tab')
+                .replace(/\be\.?\s*c\.?\s*t(?:abs?)?\b/g, 'tab')
+                .replace(/\bi\.?\s*v\.?\b/g, 'iv')
+                .replace(/\bi\.?\s*m\.?\b/g, 'im')
+                .replace(/\bi\.?\s*u\.?\b/g, 'iu')
+                // Dotted acronyms: "b.b.c." -> "bbc", "d.g." -> "dg"
+                .replace(/(^|[\s(])((?:[a-z]\.\s*){2,5}[a-z]?\.?)(?=$|[\s),])/g, (full, pre, seq) => {
+                    const letters = seq.replace(/[\s.]/g, '');
+                    return letters.length >= 2 ? pre + letters : full;
+                });
+        }
         // Spaced/comma leading digits: "1 2 3" or "1,2,3" -> "123"
-        s = s.replace(/^(\s*)(\d(?:[\s,.-]+\d){1,3})(?=\s|$|[(\[])/g, (_, pre, seq) => {
-            return pre + seq.replace(/[\s,.-]/g, '');
-        });
+        if (/^\s*\d[\s,.-]+\d/.test(s)) {
+            s = s.replace(/^(\s*)(\d(?:[\s,.-]+\d){1,3})(?=\s|$|[(\[])/g, (_, pre, seq) => {
+                return pre + seq.replace(/[\s,.-]/g, '');
+            });
+        }
         return s;
     },
 
+    _phonCache: new Map(),
+    _consCache: new Map(),
+    _arSkelCache: new Map(),
+
     phoneticKeyEN(word) {
         if (!word) return '';
+        const cached = this._phonCache.get(word);
+        if (cached !== undefined) return cached;
         const clean = String(word).toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (clean.length <= 2) return clean;
+        if (clean.length <= 2) {
+            if (this._phonCache.size < 4000) this._phonCache.set(word, clean);
+            return clean;
+        }
         let s = clean
             .replace(/ph/g, 'f')
             .replace(/qu/g, 'k')
@@ -128,20 +141,28 @@ export const Utils = {
         if (clean.endsWith('e') && s.length >= 5 && s.endsWith('i')) {
             s = s.slice(0, -1);
         }
+        if (this._phonCache.size < 4000) this._phonCache.set(word, s);
         return s;
     },
 
     consonantSkeletonEN(word) {
+        if (!word) return '';
+        const cached = this._consCache.get(word);
+        if (cached !== undefined) return cached;
         const p = this.phoneticKeyEN(word);
-        if (!p) return '';
-        return p[0] + p.slice(1).replace(/[aeiou]/g, '');
+        const res = p ? (p[0] + p.slice(1).replace(/[aeiou]/g, '')) : '';
+        if (this._consCache.size < 4000) this._consCache.set(word, res);
+        return res;
     },
 
     arabicSkeleton(word) {
         if (!word) return '';
+        const cached = this._arSkelCache.get(word);
+        if (cached !== undefined) return cached;
         const w = this.normalizeArabic(word).replace(/[^\u0600-\u06FF0-9]/g, '');
-        if (w.length <= 2) return w;
-        return w[0] + w.slice(1).replace(/[اوي]/g, '');
+        const res = w.length <= 2 ? w : (w[0] + w.slice(1).replace(/[اوي]/g, ''));
+        if (this._arSkelCache.size < 4000) this._arSkelCache.set(word, res);
+        return res;
     },
 
     damerauDistanceAtMost(a, b, maxDist = 2) {
@@ -176,41 +197,66 @@ export const Utils = {
         const raw = String(query || '').trim();
         if (!raw) return null;
         const low = raw.toLowerCase();
-        const arNorm = this.normalizeArabic(raw);
+        const hasAR = /[\u0600-\u06FF]/.test(raw);
+        const hasEN = /[a-z]/i.test(raw);
+        const arNorm = hasAR ? this.normalizeArabic(raw) : low;
         const collapsed = this.collapseInitialisms(low).trim();
-        const compactEN = collapsed.replace(/[^a-z0-9]/g, '');
-        const compactAR = arNorm.replace(/[^\u0600-\u06FF0-9]/g, '');
+        const rawCompEN = collapsed.replace(/[^a-z0-9]/g, '');
+        const rawCompAR = hasAR ? arNorm.replace(/[^\u0600-\u06FF0-9]/g, '') : '';
+        // Only treat compactEN as EN if it has Latin letters OR query is purely digits (e.g. "123")
+        const compactEN = (hasEN || /^\d[\d\s,.-]*$/.test(raw)) ? rawCompEN : '';
+        const compactAR = hasAR ? rawCompAR : '';
         const isPureLongDigits = /^\d{6,}$/.test(raw);
         const words = arNorm.split(/[\s/\-_,]+/).filter(Boolean).map(w => {
-            const wCol = this.collapseInitialisms(w);
-            const wEn = wCol.replace(/[^a-z0-9]/g, '');
-            const wAr = w.replace(/[^\u0600-\u06FF0-9]/g, '');
+            const wHasEN = /[a-z]/i.test(w);
+            const wHasAR = /[\u0600-\u06FF]/.test(w);
+            const isNum = /^\d+(?:\.\d+)?$/.test(w);
+            const wCol = wHasEN ? this.collapseInitialisms(w) : w;
+            const wEn = (wHasEN || isNum) ? wCol.replace(/[^a-z0-9]/g, '') : '';
+            const wAr = wHasAR ? w.replace(/[^\u0600-\u06FF0-9]/g, '') : '';
             return {
                 raw: w,
+                isNum,
                 en: wEn,
                 ar: wAr,
-                phonEN: wEn.length >= 3 ? this.phoneticKeyEN(wEn) : '',
-                consEN: wEn.length >= 4 ? this.consonantSkeletonEN(wEn) : '',
-                skelAR: wAr.length >= 3 ? this.arabicSkeleton(wAr) : ''
+                phonEN: (wHasEN && wEn.length >= 3) ? this.phoneticKeyEN(wEn) : '',
+                consEN: (wHasEN && wEn.length >= 4) ? this.consonantSkeletonEN(wEn) : '',
+                skelAR: (wHasAR && wAr.length >= 3) ? this.arabicSkeleton(wAr) : ''
             };
         });
+        const allLetterWords = words.length >= 2 && words.every(w => !w.isNum);
         return {
             raw,
             low,
+            hasAR,
+            hasEN,
             arNorm,
             collapsed,
             compactEN,
             compactAR,
             isPureLongDigits,
-            phonEN: compactEN.length >= 3 ? this.phoneticKeyEN(compactEN) : '',
-            consEN: compactEN.length >= 4 ? this.consonantSkeletonEN(compactEN) : '',
-            skelAR: compactAR.length >= 3 ? this.arabicSkeleton(compactAR) : '',
+            allLetterWords,
+            phonEN: (hasEN && compactEN.length >= 3) ? this.phoneticKeyEN(compactEN) : '',
+            consEN: (hasEN && compactEN.length >= 4) ? this.consonantSkeletonEN(compactEN) : '',
+            skelAR: (hasAR && compactAR.length >= 3) ? this.arabicSkeleton(compactAR) : '',
             words
         };
     },
 
     _scoreWordAgainstTokens(wObj, enTokens, arTokens) {
-        // Check a single query word against candidate EN & AR tokens (literal -> phonetic -> fuzzy)
+        // Pure number word (e.g. "500", "15", "1") matches exact number token or prefix of number+unit (e.g. "15gm", "500mg")
+        if (wObj.isNum) {
+            const w = wObj.en;
+            for (let i = 0; i < enTokens.length; i++) {
+                const tok = enTokens[i];
+                if (tok === w) return 90;
+                if (tok.startsWith(w) && tok.length > w.length && /[a-z]/.test(tok[w.length])) return 86;
+            }
+            for (let i = 0; i < arTokens.length; i++) {
+                if (arTokens[i] === w) return 90;
+            }
+            return 0;
+        }
         if (wObj.en) {
             const w = wObj.en;
             for (let i = 0; i < enTokens.length; i++) {
@@ -219,14 +265,14 @@ export const Utils = {
                 if (tok.startsWith(w)) return 84;
                 if (w.length >= 3 && tok.includes(w)) return 76;
             }
-            if (w.length >= 3 && !/^\d+$/.test(w)) {
+            if (w.length >= 3 && wObj.phonEN) {
                 const wPhon = wObj.phonEN;
                 const wCons = wObj.consEN;
                 for (let i = 0; i < enTokens.length; i++) {
                     const tok = enTokens[i];
                     if (tok.length < 3 || /^\d+$/.test(tok)) continue;
                     const tPhon = this.phoneticKeyEN(tok);
-                    if (wPhon && tPhon === wPhon) {
+                    if (tPhon === wPhon) {
                         const d = this.damerauDistanceAtMost(w, tok, w.length >= 7 ? 3 : 2);
                         if (d <= (w.length >= 7 ? 3 : 2)) return 60;
                     }
@@ -246,7 +292,7 @@ export const Utils = {
                 if (tok.startsWith(w)) return 84;
                 if (w.length >= 2 && tok.includes(w)) return 76;
             }
-            if (w.length >= 3) {
+            if (w.length >= 3 && wObj.skelAR) {
                 const wSkel = wObj.skelAR;
                 for (let i = 0; i < arTokens.length; i++) {
                     const tok = arTokens[i];
@@ -272,68 +318,79 @@ export const Utils = {
         if (!pq) return 100;
 
         let best = 0;
-        const enTokens = [];
-        const arTokens = [];
+        const parsedFields = [];
 
-        const pushTokens = (text, isPrimary) => {
+        // Fast Pass 1: Literal / Prefix / Compact check (avoids tokenizing when literal hit already wins)
+        const checkField = (text, isPrimary) => {
             if (!text) return;
             const rawStr = String(text);
             const low = rawStr.toLowerCase();
-            const arNorm = this.normalizeArabic(rawStr);
-            const col = this.collapseInitialisms(low);
-            const compEN = col.replace(/[^a-z0-9]/g, '');
-            const compAR = arNorm.replace(/[^\u0600-\u06FF0-9]/g, '');
+            const hasAR = /[\u0600-\u06FF]/.test(rawStr);
+            const arNorm = hasAR ? this.normalizeArabic(rawStr) : '';
+            const col = (low.indexOf('.') !== -1 || /^\s*\d[\s,.-]+\d/.test(low)) ? this.collapseInitialisms(low) : low;
+            const compEN = pq.compactEN ? col.replace(/[^a-z0-9]/g, '') : '';
+            const compAR = (pq.compactAR && hasAR) ? arNorm.replace(/[^\u0600-\u06FF0-9]/g, '') : '';
 
-            // Tier 1: Exact / Prefix / Substring / Compact matches
             if (!isPrimary && (low === pq.low || rawStr.trim() === pq.raw)) {
-                best = Math.max(best, 100); // exact barcode / ID
+                best = Math.max(best, 100);
             }
             if (isPrimary) {
-                if (low === pq.low || arNorm === pq.arNorm || (pq.compactEN.length >= 2 && compEN === pq.compactEN)) {
+                if (low === pq.low || (hasAR && arNorm === pq.arNorm) || (pq.compactEN.length >= 2 && compEN === pq.compactEN)) {
                     best = Math.max(best, 98);
-                } else if (low.startsWith(pq.low) || col.startsWith(pq.collapsed) || arNorm.startsWith(pq.arNorm) ||
+                } else if (low.startsWith(pq.low) || col.startsWith(pq.collapsed) || (hasAR && arNorm.startsWith(pq.arNorm)) ||
                            (pq.compactEN.length >= 2 && compEN.startsWith(pq.compactEN)) ||
                            (pq.compactAR.length >= 2 && compAR.startsWith(pq.compactAR))) {
                     best = Math.max(best, 92);
-                } else if (low.includes(pq.low) || col.includes(pq.collapsed) || arNorm.includes(pq.arNorm) ||
+                } else if (low.includes(pq.low) || col.includes(pq.collapsed) || (hasAR && arNorm.includes(pq.arNorm)) ||
                            (pq.compactEN.length >= 3 && compEN.includes(pq.compactEN)) ||
                            (pq.compactAR.length >= 3 && compAR.includes(pq.compactAR))) {
                     best = Math.max(best, 82);
                 }
             } else {
-                if (low.includes(pq.low) || arNorm.includes(pq.arNorm) ||
+                if (low.includes(pq.low) || (hasAR && arNorm.includes(pq.arNorm)) ||
                     (pq.compactEN.length >= 3 && compEN.includes(pq.compactEN))) {
                     best = Math.max(best, 72);
                 }
             }
 
-            // Collect tokens for multi-word & phonetic/fuzzy pass (only if we don't already have a top literal hit)
-            const eToks = col.replace(/[^a-z0-9-]+/g, ' ').trim().split(/\s+/).filter(Boolean);
-            for (let i = 0; i < eToks.length; i++) {
-                const clean = eToks[i].replace(/-/g, '');
-                if (clean) enTokens.push(clean);
-                if (i + 1 < eToks.length) {
-                    const next = eToks[i + 1].replace(/-/g, '');
-                    if (clean.length >= 2 && next.length >= 2 && !/^\d+$/.test(next)) {
-                        enTokens.push(clean + next);
+            parsedFields.push({ col, arNorm, hasAR });
+        };
+
+        for (let i = 0; i < primaryFields.length; i++) checkField(primaryFields[i], true);
+        if (best >= 92) return best;
+        for (let i = 0; i < secondaryFields.length; i++) checkField(secondaryFields[i], false);
+        if (best >= 82 || pq.isPureLongDigits) return best;
+
+        // Pass 2: Tokenize only for items that need multi-word or phonetic/fuzzy evaluation
+        const enTokens = [];
+        const arTokens = [];
+        for (let f = 0; f < parsedFields.length; f++) {
+            const { col, arNorm, hasAR } = parsedFields[f];
+            if (pq.hasEN || pq.words.some(w => w.isNum)) {
+                const eToks = col.replace(/[^a-z0-9-]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+                for (let i = 0; i < eToks.length; i++) {
+                    const clean = eToks[i].replace(/-/g, '');
+                    if (clean) enTokens.push(clean);
+                    if (i + 1 < eToks.length) {
+                        const next = eToks[i + 1].replace(/-/g, '');
+                        if (clean.length >= 2 && next.length >= 2 && !/^\d+$/.test(next)) {
+                            enTokens.push(clean + next);
+                        }
                     }
                 }
             }
-            const aToks = arNorm.replace(/[^\u0600-\u06FF0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
-            for (let i = 0; i < aToks.length; i++) {
-                arTokens.push(aToks[i]);
-                if (i + 1 < aToks.length && aToks[i].length >= 2 && aToks[i + 1].length >= 2) {
-                    arTokens.push(aToks[i] + aToks[i + 1]);
+            if (hasAR && (pq.hasAR || pq.words.some(w => w.isNum))) {
+                const aToks = arNorm.replace(/[^\u0600-\u06FF0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+                for (let i = 0; i < aToks.length; i++) {
+                    arTokens.push(aToks[i]);
+                    if (i + 1 < aToks.length && aToks[i].length >= 2 && aToks[i + 1].length >= 2) {
+                        arTokens.push(aToks[i] + aToks[i + 1]);
+                    }
                 }
             }
-        };
+        }
 
-        for (let i = 0; i < primaryFields.length; i++) pushTokens(primaryFields[i], true);
-        for (let i = 0; i < secondaryFields.length; i++) pushTokens(secondaryFields[i], false);
-
-        if (best >= 82 || pq.isPureLongDigits) return best;
-
-        // Multi-word AND matching (e.g. "panadol 500", "fusi zon", "كريم 15", "تراي ميد")
+        // Multi-word AND matching (e.g. "panadol 500", "aug 1", "fusi zon", "كريم 15", "تراي ميد")
         if (pq.words.length >= 2) {
             let minWordScore = 100;
             let allMatched = true;
@@ -350,13 +407,14 @@ export const Utils = {
             }
         }
 
-        // Single-word or joined-query phonetic/fuzzy match (only for len >= 3)
+        // Single-word OR joined all-letter multi-word phonetic/fuzzy match (only for len >= 3)
         if (best < 62) {
             if (pq.words.length === 1) {
                 best = Math.max(best, this._scoreWordAgainstTokens(pq.words[0], enTokens, arTokens));
-            } else if (pq.compactEN.length >= 4 || pq.compactAR.length >= 4) {
+            } else if (pq.allLetterWords && (pq.compactEN.length >= 4 || pq.compactAR.length >= 4)) {
                 const joinedObj = {
                     raw: pq.raw,
+                    isNum: false,
                     en: pq.compactEN,
                     ar: pq.compactAR,
                     phonEN: pq.phonEN,

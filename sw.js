@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'dawaa-cache-v18.17.1';
+const CACHE_NAME = 'dawaa-cache-v18.17.2';
 const IMAGE_CACHE_NAME = 'dawaa-images-v1';
 const MAX_IMAGES = 1000;
 
@@ -145,9 +145,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // General GET requests
+  // General GET requests (use no-cache for JS/CSS so ETag revalidates immediately and never serves stale modules)
+  const isCodeAsset = url.pathname.endsWith('.js') || url.pathname.endsWith('.css');
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, isCodeAsset ? { cache: 'no-cache' } : undefined)
       .then((networkResponse) => {
         if (networkResponse && networkResponse.status === 200) {
           const responseToCache = networkResponse.clone();

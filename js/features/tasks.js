@@ -2,7 +2,7 @@ import { Sync } from '../core/sync.js';
 import { UI } from '../core/ui.js';
 import { DB } from '../core/db.js';
 import { Audit } from './audit.js';
-import { Utils } from '../core/utils.js';
+import { Utils } from '../core/utils.js?v=18.17.2';
 
 export const TaskManager = {
     activeTasks: [],

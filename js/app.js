@@ -1,17 +1,17 @@
 import { DB } from './core/db.js';
 import { UI } from './core/ui.js';
 import { Inventory } from './features/inventory.js';
-import { Categories } from './features/categories.js';
+import { Categories } from './features/categories.js?v=18.17.2';
 import { Locations } from './features/locations.js';
 import { Audit } from './features/audit.js';
 import { Users } from './features/users.js';
-import { EgyptianDrugs } from './core/egyptian_drugs.js';
+import { EgyptianDrugs } from './core/egyptian_drugs.js?v=18.17.2';
 window.Users = Users;
 window.EgyptianDrugs = EgyptianDrugs;
 import { Exporter } from './features/export.js';
-import { Utils } from './core/utils.js';
+import { Utils } from './core/utils.js?v=18.17.2';
 import { Sync } from './core/sync.js';
-import { TaskManager } from './features/tasks.js';
+import { TaskManager } from './features/tasks.js?v=18.17.2';
 import { auth, db, storage } from './core/firebase-config.js';
 
 // Immediate Global Bindings to prevent undefined calls during boot
@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.17.1', // Fix mobile layout overflow in session-control-bar, audit toolbars, and search clear icons
+    VERSION: '18.17.2', // Unified Smart Search across all views, ES module cache-busting, Enricher verified/ignored memory & reject/change controls
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -3264,15 +3264,17 @@ const App = {
             await new Promise(r => setTimeout(r, 30));
 
             const rows = allMeds.map((med, idx) => {
-                const matches = EgyptianDrugs.findBestMatches(med, 5);
-                const selectedIdx = 0;
-                const best = matches[0] || null;
+                const status = med.catalogVerified ? 'verified' : (med.catalogIgnored ? 'ignored' : 'pending');
+                const matches = status === 'pending' ? EgyptianDrugs.findBestMatches(med, 5) : [];
+                const selectedIdx = matches.length > 0 ? 0 : -1;
+                const best = selectedIdx >= 0 ? matches[selectedIdx] : null;
                 return {
                     _idx: idx,
+                    status, // 'pending' | 'verified' | 'ignored'
                     med,
                     matches,
                     selectedIdx,
-                    checked: !!(best && best.confidence === 'high')
+                    checked: !!(status === 'pending' && best && best.confidence === 'high')
                 };
             });
 
@@ -3287,17 +3289,22 @@ const App = {
             this._enricherState = {
                 rows,
                 fields,
-                filter: 'actionable', // 'actionable' | 'high' | 'medium' | 'unmatched' | 'all'
+                filter: 'actionable', // 'actionable' | 'high' | 'medium' | 'unmatched' | 'done'
                 search: '',
                 openManualIdx: -1,
                 manualQuery: '',
                 manualResults: []
             };
 
-            // Only keep rows auto-checked if they actually have a change under default fields
+            // Only keep rows auto-checked if pending and actually have a change under default fields
             for (const row of rows) {
+                if (row.status !== 'pending') {
+                    row.checked = false;
+                    continue;
+                }
                 const diff = this._computeEnrichDiff(row, fields);
-                row.checked = !!(row.matches[row.selectedIdx]?.confidence === 'high' && diff.hasChanges);
+                const best = row.selectedIdx >= 0 ? row.matches[row.selectedIdx] : null;
+                row.checked = !!(best?.confidence === 'high' && diff.hasChanges);
             }
 
             this._renderEnricherModal();
@@ -3308,8 +3315,9 @@ const App = {
     },
 
     _computeEnrichDiff(row, fields) {
+        if (!row || row.status !== 'pending') return { hasChanges: false, changes: {} };
         const med = row.med;
-        const match = row.matches[row.selectedIdx] || null;
+        const match = (row.selectedIdx >= 0 && row.matches[row.selectedIdx]) ? row.matches[row.selectedIdx] : null;
         if (!match) return { hasChanges: false, changes: {} };
 
         const item = match.item;
@@ -3350,35 +3358,54 @@ const App = {
 
     _getEnricherStats() {
         const st = this._enricherState;
-        let highCount = 0, medCount = 0, unmatchedCount = 0, actionableCount = 0;
-        if (!st) return { highCount, medCount, unmatchedCount, actionableCount };
+        let highCount = 0, medCount = 0, unmatchedCount = 0, actionableCount = 0, doneCount = 0, completePendingCount = 0;
+        if (!st) return { highCount, medCount, unmatchedCount, actionableCount, doneCount, completePendingCount };
         for (const r of st.rows) {
-            const best = r.matches[r.selectedIdx];
+            if (r.status !== 'pending') {
+                doneCount++;
+                continue;
+            }
+            const best = r.selectedIdx >= 0 ? r.matches[r.selectedIdx] : null;
             const diff = this._computeEnrichDiff(r, st.fields);
             if (best?.confidence === 'high') highCount++;
             else if (best?.confidence === 'medium') medCount++;
             else if (r.med.type !== 'supply') unmatchedCount++;
             if (diff.hasChanges) actionableCount++;
+            else if (best) completePendingCount++;
         }
-        return { highCount, medCount, unmatchedCount, actionableCount };
+        return { highCount, medCount, unmatchedCount, actionableCount, doneCount, completePendingCount };
     },
 
     _refreshEnricherCounters() {
-        const { highCount, medCount, unmatchedCount, actionableCount } = this._getEnricherStats();
+        const { highCount, medCount, unmatchedCount, actionableCount, doneCount, completePendingCount } = this._getEnricherStats();
         const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
         setTxt('enrich-high-num', highCount);
         setTxt('enrich-med-num', medCount);
         setTxt('enrich-unmatched-num', unmatchedCount);
         setTxt('enrich-actionable-num', actionableCount);
+        setTxt('enr-tab-high-cnt', highCount);
         setTxt('enr-tab-med-cnt', medCount);
         setTxt('enr-tab-unmatched-cnt', unmatchedCount);
+        setTxt('enr-tab-done-cnt', doneCount);
+
+        const banner = document.getElementById('enr-complete-banner');
+        if (banner) {
+            if (completePendingCount > 0) {
+                banner.style.display = 'flex';
+                const cntEl = document.getElementById('enr-complete-banner-cnt');
+                if (cntEl) cntEl.textContent = completePendingCount;
+            } else {
+                banner.style.display = 'none';
+            }
+        }
     },
 
     _renderEnricherModal() {
         const st = this._enricherState;
         if (!st) return;
 
-        const { highCount, medCount, unmatchedCount, actionableCount } = this._getEnricherStats();
+        const { highCount, medCount, unmatchedCount, actionableCount, doneCount, completePendingCount } = this._getEnricherStats();
+        const pendingTotal = st.rows.length - doneCount;
 
         UI.showModal(`
             <div class="sheet-handle"></div>
@@ -3387,12 +3414,12 @@ const App = {
                     <i class='bx bx-sparkles' style="color:#10b981;"></i> فحص وتكميل بيانات الأدوية
                 </h2>
                 <p class="text-muted" style="font-size:11.5px; margin-top:3px;">
-                    مقارنة ${st.rows.length} صنف بقاعدة ${EgyptianDrugs.catalogSize.toLocaleString()} دواء مصري — راجع واعتمد اللي تحبه
+                    فحص ${pendingTotal} صنف جديد بقاعدة ${EgyptianDrugs.catalogSize.toLocaleString()} دواء${doneCount > 0 ? ` (${doneCount} معتمد ومخفي سابقاً)` : ''}
                 </p>
             </div>
 
             <!-- Summary Strip (clickable filters) -->
-            <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin-bottom:10px; text-align:center;">
+            <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin-bottom:8px; text-align:center;">
                 <div onclick="window.App._setEnricherFilter('high')" style="cursor:pointer; padding:6px 4px; border-radius:8px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25);">
                     <div style="font-size:14px; font-weight:800; color:#059669;" id="enrich-high-num">${highCount}</div>
                     <div style="font-size:9.5px; color:var(--text-muted);">🟢 قوي</div>
@@ -3411,9 +3438,15 @@ const App = {
                 </div>
             </div>
 
+            <!-- 1-click hide already-complete medicines -->
+            <div id="enr-complete-banner" style="display:${completePendingCount > 0 ? 'flex' : 'none'}; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; padding:7px 10px; border-radius:9px; background:rgba(16,185,129,0.09); border:1px solid rgba(16,185,129,0.28); margin-bottom:8px; font-size:11px;">
+                <span style="color:#065f46; font-weight:700;">✅ يوجد <strong id="enr-complete-banner-cnt">${completePendingCount}</strong> دواء بياناتهم مكتملة بالفعل</span>
+                <button type="button" onclick="window.App._verifyAllCompleteEnricherRows()" style="font-size:10.5px; padding:4px 9px; border-radius:7px; border:none; background:#10b981; color:#fff; font-weight:700; cursor:pointer;">اعتمادهم وإخفاؤهم من الفحص</button>
+            </div>
+
             <!-- Field Toggles -->
-            <div style="padding:9px 10px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px; margin-bottom:10px;">
-                <div style="font-size:11.5px; font-weight:800; margin-bottom:6px; color:var(--text-main);">إيه اللي عايز تكمله؟</div>
+            <div style="padding:8px 10px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px; margin-bottom:8px;">
+                <div style="font-size:11.5px; font-weight:800; margin-bottom:5px; color:var(--text-main);">إيه اللي عايز تكمله؟</div>
                 <div style="display:flex; gap:10px; flex-wrap:wrap; font-size:11.5px;">
                     <label style="cursor:pointer; display:flex; align-items:center; gap:4px;">
                         <input type="checkbox" ${st.fields.fillActive ? 'checked' : ''} onchange="window.App._onEnricherToggleField('fillActive', this.checked)"> 💊 المادة الفعالة
@@ -3433,15 +3466,15 @@ const App = {
             <!-- Filter Tabs + Search -->
             <div style="display:flex; gap:5px; margin-bottom:8px; flex-wrap:wrap; align-items:center;">
                 <button type="button" id="enr-tab-actionable" onclick="window.App._setEnricherFilter('actionable')" class="${st.filter==='actionable'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:10.5px; padding:5px 8px; border-radius:8px; ${st.filter!=='actionable'?'border:1px solid var(--border-color);':''}">للتكميل</button>
-                <button type="button" id="enr-tab-high" onclick="window.App._setEnricherFilter('high')" class="${st.filter==='high'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:10.5px; padding:5px 8px; border-radius:8px; ${st.filter!=='high'?'border:1px solid var(--border-color);':''}">🟢 قوي</button>
+                <button type="button" id="enr-tab-high" onclick="window.App._setEnricherFilter('high')" class="${st.filter==='high'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:10.5px; padding:5px 8px; border-radius:8px; ${st.filter!=='high'?'border:1px solid var(--border-color);':''}">🟢 قوي (<span id="enr-tab-high-cnt">${highCount}</span>)</button>
                 <button type="button" id="enr-tab-medium" onclick="window.App._setEnricherFilter('medium')" class="${st.filter==='medium'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:10.5px; padding:5px 8px; border-radius:8px; ${st.filter!=='medium'?'border:1px solid var(--border-color);':''}">🟡 مراجعة (<span id="enr-tab-med-cnt">${medCount}</span>)</button>
                 <button type="button" id="enr-tab-unmatched" onclick="window.App._setEnricherFilter('unmatched')" class="${st.filter==='unmatched'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:10.5px; padding:5px 8px; border-radius:8px; ${st.filter!=='unmatched'?'border:1px solid var(--border-color);':''}">⚪ غير مطابق (<span id="enr-tab-unmatched-cnt">${unmatchedCount}</span>)</button>
-                <button type="button" id="enr-tab-all" onclick="window.App._setEnricherFilter('all')" class="${st.filter==='all'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:10.5px; padding:5px 8px; border-radius:8px; ${st.filter!=='all'?'border:1px solid var(--border-color);':''}">الكل (${st.rows.length})</button>
+                <button type="button" id="enr-tab-done" onclick="window.App._setEnricherFilter('done')" class="${st.filter==='done'?'btn-primary':'btn-ghost'} sm-btn" style="font-size:10.5px; padding:5px 8px; border-radius:8px; ${st.filter!=='done'?'border:1px solid var(--border-color);':''}">✅ معتمد (<span id="enr-tab-done-cnt">${doneCount}</span>)</button>
                 <input type="text" id="enr-search" placeholder="🔍 فلتر بالاسم..." value="${Utils.escapeHTML(st.search)}" oninput="window.App._setEnricherSearch(this.value)" style="flex:1; min-width:110px; padding:5px 8px; border:1px solid var(--border-color); border-radius:8px; font-size:11.5px; background:var(--surface); color:var(--text-main);">
             </div>
 
             <!-- Results List -->
-            <div id="enricher-results-list" style="max-height:44vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:2px;"></div>
+            <div id="enricher-results-list" style="max-height:42vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:2px;"></div>
 
             <!-- Footer -->
             <div class="form-actions mt-15" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:space-between;">
@@ -3450,7 +3483,7 @@ const App = {
                     <button type="button" class="btn-ghost sm-btn" onclick="window.App._toggleEnricherAll(false)" style="font-size:11px; padding:6px 8px; border:1px solid var(--border-color);">إلغاء الكل</button>
                 </div>
                 <div style="display:flex; gap:8px;">
-                    <button type="button" class="btn-ghost sm-btn" onclick="window.UI.closeModal()">إلغاء</button>
+                    <button type="button" class="btn-ghost sm-btn" onclick="window.UI.closeModal()">إغلاق</button>
                     <button type="button" id="enricher-apply-btn" class="btn-primary sm-btn" onclick="window.App.applyCatalogEnrichment()">
                         <i class='bx bx-check-double'></i> اعتماد التحديثات
                     </button>
@@ -3465,14 +3498,12 @@ const App = {
         const st = this._enricherState;
         if (!st) return;
         st.fields[field] = !!val;
-        // Auto-refresh checked state for high-confidence rows
         for (const r of st.rows) {
+            if (r.status !== 'pending') { r.checked = false; continue; }
             const diff = this._computeEnrichDiff(r, st.fields);
-            if (!diff.hasChanges) {
-                r.checked = false;
-            } else if (r.matches[r.selectedIdx]?.confidence === 'high') {
-                r.checked = true;
-            }
+            const best = r.selectedIdx >= 0 ? r.matches[r.selectedIdx] : null;
+            if (!diff.hasChanges) r.checked = false;
+            else if (best?.confidence === 'high') r.checked = true;
         }
         this._refreshEnricherCounters();
         this._renderEnricherList();
@@ -3482,7 +3513,7 @@ const App = {
         const st = this._enricherState;
         if (!st) return;
         st.filter = filter;
-        ['actionable', 'high', 'medium', 'unmatched', 'all'].forEach(f => {
+        ['actionable', 'high', 'medium', 'unmatched', 'done'].forEach(f => {
             const btn = document.getElementById(`enr-tab-${f}`);
             if (!btn) return;
             if (f === filter) {
@@ -3507,11 +3538,153 @@ const App = {
         if (!st) return;
         const row = st.rows.find(r => r.med.id === medId);
         if (!row) return;
-        row.selectedIdx = parseInt(newIdx, 10) || 0;
+        const parsed = parseInt(newIdx, 10);
+        row.selectedIdx = Number.isNaN(parsed) ? -1 : parsed;
         const diff = this._computeEnrichDiff(row, st.fields);
-        row.checked = diff.hasChanges;
+        row.checked = row.selectedIdx >= 0 && diff.hasChanges;
         this._refreshEnricherCounters();
         this._renderEnricherList();
+    },
+
+    _rejectEnricherMatch(rowIdx) {
+        const st = this._enricherState;
+        if (!st) return;
+        const row = st.rows[rowIdx];
+        if (!row) return;
+        row.selectedIdx = -1;
+        row.checked = false;
+        this._refreshEnricherCounters();
+        this._renderEnricherList();
+        UI.showToast('تم رفض الاقتراح — يمكنك البحث يدوياً أو استبعاده', 'info');
+    },
+
+    async _verifySingleEnricherRow(rowIdx) {
+        const st = this._enricherState;
+        const row = st?.rows?.[rowIdx];
+        if (!row) return;
+        try {
+            const med = await DB.get('medicineMaster', row.med.id);
+            if (!med) return;
+            const now = new Date().toISOString();
+            const match = row.selectedIdx >= 0 ? row.matches[row.selectedIdx] : null;
+            med.catalogVerified = true;
+            med.catalogIgnored = false;
+            med.catalogVerifiedAt = now;
+            if (match?.item?.nameEN) med.catalogMatchedEN = match.item.nameEN;
+            med.lastUpdated = now;
+            med.v = (med.v || 1) + 1;
+            await DB.put('medicineMaster', med);
+            if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+                window.Sync.push(med.id).catch(() => {});
+            }
+            row.med = med;
+            row.status = 'verified';
+            row.checked = false;
+            this._refreshEnricherCounters();
+            this._renderEnricherList();
+            UI.showToast(`تم اعتماد "${med.nameEN || med.nameAR}" وإخفاؤه من الفحص ✅`, 'success');
+        } catch (err) {
+            UI.showToast('تعذر حفظ حالة الاعتماد: ' + err.message, 'danger');
+        }
+    },
+
+    async _verifyAllCompleteEnricherRows() {
+        const st = this._enricherState;
+        if (!st) return;
+        const targets = st.rows.filter(r => {
+            if (r.status !== 'pending') return false;
+            const best = r.selectedIdx >= 0 ? r.matches[r.selectedIdx] : null;
+            if (!best) return false;
+            return !this._computeEnrichDiff(r, st.fields).hasChanges;
+        });
+        if (targets.length === 0) return;
+
+        try {
+            const now = new Date().toISOString();
+            for (const row of targets) {
+                const med = await DB.get('medicineMaster', row.med.id);
+                if (!med) continue;
+                const match = row.selectedIdx >= 0 ? row.matches[row.selectedIdx] : null;
+                med.catalogVerified = true;
+                med.catalogIgnored = false;
+                med.catalogVerifiedAt = now;
+                if (match?.item?.nameEN) med.catalogMatchedEN = match.item.nameEN;
+                med.lastUpdated = now;
+                med.v = (med.v || 1) + 1;
+                await DB.put('medicineMaster', med);
+                if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+                    window.Sync.push(med.id).catch(() => {});
+                }
+                row.med = med;
+                row.status = 'verified';
+                row.checked = false;
+            }
+            this._refreshEnricherCounters();
+            this._renderEnricherList();
+            UI.showToast(`تم اعتماد وإخفاء ${targets.length} دواء مكتمل بنجاح ✅`, 'success');
+        } catch (err) {
+            UI.showToast('تعذر اعتماد المكتمل: ' + err.message, 'danger');
+        }
+    },
+
+    async _ignoreEnricherRow(rowIdx) {
+        const st = this._enricherState;
+        const row = st?.rows?.[rowIdx];
+        if (!row) return;
+        try {
+            const med = await DB.get('medicineMaster', row.med.id);
+            if (!med) return;
+            const now = new Date().toISOString();
+            med.catalogIgnored = true;
+            med.catalogVerified = false;
+            med.catalogIgnoredAt = now;
+            med.lastUpdated = now;
+            med.v = (med.v || 1) + 1;
+            await DB.put('medicineMaster', med);
+            if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+                window.Sync.push(med.id).catch(() => {});
+            }
+            row.med = med;
+            row.status = 'ignored';
+            row.selectedIdx = -1;
+            row.checked = false;
+            if (st.openManualIdx === rowIdx) st.openManualIdx = -1;
+            this._refreshEnricherCounters();
+            this._renderEnricherList();
+            UI.showToast(`تم استبعاد "${med.nameEN || med.nameAR}" من الفحص المستقبلي 🚫`, 'info');
+        } catch (err) {
+            UI.showToast('تعذر حفظ الاستبعاد: ' + err.message, 'danger');
+        }
+    },
+
+    async _reopenEnricherRow(rowIdx) {
+        const st = this._enricherState;
+        const row = st?.rows?.[rowIdx];
+        if (!row) return;
+        try {
+            const med = await DB.get('medicineMaster', row.med.id);
+            if (!med) return;
+            const now = new Date().toISOString();
+            med.catalogVerified = false;
+            med.catalogIgnored = false;
+            med.lastUpdated = now;
+            med.v = (med.v || 1) + 1;
+            await DB.put('medicineMaster', med);
+            if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+                window.Sync.push(med.id).catch(() => {});
+            }
+            row.med = med;
+            row.status = 'pending';
+            row.matches = EgyptianDrugs.findBestMatches(med, 5);
+            row.selectedIdx = row.matches.length > 0 ? 0 : -1;
+            const diff = this._computeEnrichDiff(row, st.fields);
+            row.checked = !!(row.selectedIdx >= 0 && row.matches[row.selectedIdx]?.confidence === 'high' && diff.hasChanges);
+            this._refreshEnricherCounters();
+            this._renderEnricherList();
+            UI.showToast(`تمت إعادة "${med.nameEN || med.nameAR}" للفحص 🔄`, 'info');
+        } catch (err) {
+            UI.showToast('تعذر إعادة الفحص: ' + err.message, 'danger');
+        }
     },
 
     _toggleEnricherManualSearch(rowIdx) {
@@ -3527,7 +3700,6 @@ const App = {
         const row = st.rows[rowIdx];
         if (!row) return;
         st.openManualIdx = rowIdx;
-        // Pre-fill first word of med name to speed up manual search
         const seed = (row.med.nameEN || row.med.nameAR || '').trim().split(/\s+/)[0] || '';
         st.manualQuery = seed;
         st.manualResults = seed.length >= 2 ? EgyptianDrugs.search(seed, 8) : [];
@@ -3619,11 +3791,12 @@ const App = {
         const st = this._enricherState;
         if (!st) return;
         for (const r of st.rows) {
-            if (!selectHigh) {
+            if (!selectHigh || r.status !== 'pending') {
                 r.checked = false;
             } else {
                 const diff = this._computeEnrichDiff(r, st.fields);
-                r.checked = !!(r.matches[r.selectedIdx]?.confidence === 'high' && diff.hasChanges);
+                const best = r.selectedIdx >= 0 ? r.matches[r.selectedIdx] : null;
+                r.checked = !!(best?.confidence === 'high' && diff.hasChanges);
             }
         }
         this._renderEnricherList();
@@ -3633,7 +3806,7 @@ const App = {
         const st = this._enricherState;
         const btn = document.getElementById('enricher-apply-btn');
         if (!st || !btn) return;
-        const count = st.rows.filter(r => r.checked && this._computeEnrichDiff(r, st.fields).hasChanges).length;
+        const count = st.rows.filter(r => r.status === 'pending' && r.checked && this._computeEnrichDiff(r, st.fields).hasChanges).length;
         btn.innerHTML = `<i class='bx bx-check-double'></i> اعتماد (${count} دواء)`;
         btn.disabled = count === 0;
         btn.style.opacity = count === 0 ? '0.55' : '1';
@@ -3647,15 +3820,20 @@ const App = {
         const pq = Utils.prepareSearchQuery(st.search);
 
         const visible = st.rows.filter(r => {
-            const match = r.matches[r.selectedIdx] || null;
-            const diff = this._computeEnrichDiff(r, st.fields);
-
-            if (st.filter === 'actionable' && !diff.hasChanges) return false;
-            if (st.filter === 'high' && !(match && match.confidence === 'high')) return false;
-            if (st.filter === 'medium' && !(match && match.confidence === 'medium')) return false;
-            if (st.filter === 'unmatched' && !(!match && r.med.type !== 'supply')) return false;
+            if (st.filter === 'done') {
+                if (r.status === 'pending') return false;
+            } else {
+                if (r.status !== 'pending') return false;
+                const match = r.selectedIdx >= 0 ? r.matches[r.selectedIdx] : null;
+                const diff = this._computeEnrichDiff(r, st.fields);
+                if (st.filter === 'actionable' && !diff.hasChanges) return false;
+                if (st.filter === 'high' && !(match && match.confidence === 'high')) return false;
+                if (st.filter === 'medium' && !(match && match.confidence === 'medium')) return false;
+                if (st.filter === 'unmatched' && !(!match && r.med.type !== 'supply')) return false;
+            }
 
             if (pq) {
+                const match = r.selectedIdx >= 0 ? r.matches[r.selectedIdx] : null;
                 const extra = match?.item ? [match.item.nameEN, match.item.nameAR, match.item.active] : [];
                 if (Utils.smartScoreMed(pq, r.med, extra) === 0) return false;
             }
@@ -3664,18 +3842,23 @@ const App = {
 
         // Sort: high confidence first, then medium, then unmatched
         visible.sort((a, b) => {
-            const sa = a.matches[a.selectedIdx]?.score || 0;
-            const sb = b.matches[b.selectedIdx]?.score || 0;
+            const sa = (a.selectedIdx >= 0 ? a.matches[a.selectedIdx]?.score : 0) || 0;
+            const sb = (b.selectedIdx >= 0 ? b.matches[b.selectedIdx]?.score : 0) || 0;
             return sb - sa;
         });
 
         if (visible.length === 0) {
+            const emptyMsg = st.filter === 'actionable'
+                ? 'ممتاز! كل الأدوية الجديدة بياناتها مكتملة وفق الإعدادات المحددة ✅'
+                : st.filter === 'unmatched'
+                    ? 'ممتاز! لا توجد أدوية غير مطابقة 🎉'
+                    : st.filter === 'done'
+                        ? 'لا توجد أصناف معتمدة أو مستبعدة بعد'
+                        : 'لا توجد أصناف مطابقة لهذا الفلتر';
             container.innerHTML = `
                 <div class="empty-state" style="padding:26px; text-align:center; background:var(--bg-secondary); border-radius:12px;">
                     <i class='bx bx-check-circle' style="font-size:34px; color:#10b981;"></i>
-                    <p style="margin:8px 0 0 0; font-size:13px; color:var(--text-muted);">
-                        ${st.filter === 'actionable' ? 'ممتاز! كل الأدوية المطابقة بياناتها مكتملة وفق الإعدادات المحددة ✅' : (st.filter === 'unmatched' ? 'ممتاز! لا توجد أدوية غير مطابقة 🎉' : 'لا توجد أصناف مطابقة لهذا الفلتر')}
-                    </p>
+                    <p style="margin:8px 0 0 0; font-size:13px; color:var(--text-muted);">${emptyMsg}</p>
                 </div>
             `;
             this._updateEnricherApplyBtn();
@@ -3684,7 +3867,27 @@ const App = {
 
         container.innerHTML = visible.map(r => {
             const med = r.med;
-            const match = r.matches[r.selectedIdx] || null;
+            // Render compact card for already-verified / ignored items in the 'done' tab
+            if (r.status !== 'pending') {
+                const statusBadge = r.status === 'verified'
+                    ? `<span style="font-size:10px; padding:2px 6px; border-radius:6px; background:rgba(16,185,129,0.12); color:#059669; font-weight:800;">✅ معتمد</span>`
+                    : `<span style="font-size:10px; padding:2px 6px; border-radius:6px; background:rgba(100,116,139,0.14); color:var(--text-muted); font-weight:700;">🚫 مستبعد</span>`;
+                return `
+                    <div style="padding:9px 10px; border-radius:10px; background:var(--surface); border:1px solid var(--border-color); display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                        <div style="min-width:0; flex:1;">
+                            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                                <strong style="font-size:12px; color:var(--text-main);">${Utils.escapeHTML(med.nameEN || med.nameAR)}</strong>
+                                ${statusBadge}
+                            </div>
+                            ${med.nameAR && med.nameAR !== med.nameEN ? `<div style="font-size:10.5px; color:var(--text-muted);">${Utils.escapeHTML(med.nameAR)}</div>` : ''}
+                            ${med.activeIngredient ? `<div style="font-size:10px; color:#059669;">💊 ${Utils.escapeHTML(med.activeIngredient)}</div>` : ''}
+                        </div>
+                        <button type="button" onclick="window.App._reopenEnricherRow(${r._idx})" style="font-size:10.5px; padding:4px 8px; border-radius:7px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-main); cursor:pointer; white-space:nowrap;">🔄 إعادة للفحص</button>
+                    </div>
+                `;
+            }
+
+            const match = r.selectedIdx >= 0 ? r.matches[r.selectedIdx] : null;
             const diff = this._computeEnrichDiff(r, st.fields);
             const isHigh = match?.confidence === 'high';
             const badge = !match
@@ -3711,9 +3914,16 @@ const App = {
 
             const safeMedId = Utils.escapeHTML(med.id);
             const isManualOpen = st.openManualIdx === r._idx;
-            const manualBtn = med.type === 'supply' ? '' : (!match
-                ? `<button type="button" onclick="window.App._toggleEnricherManualSearch(${r._idx})" style="font-size:10.5px; padding:3px 8px; border-radius:6px; border:1px solid rgba(59,130,246,0.35); background:rgba(59,130,246,0.08); color:var(--primary); cursor:pointer; font-weight:700;">🔍 ${isManualOpen ? 'إغلاق البحث' : 'بحث يدوي وربط'}</button>`
-                : `<button type="button" onclick="window.App._toggleEnricherManualSearch(${r._idx})" style="font-size:10px; padding:2px 6px; border-radius:6px; border:1px solid var(--border-color); background:transparent; color:var(--text-muted); cursor:pointer;">🔍 ${isManualOpen ? 'إغلاق' : 'بحث آخر'}</button>`
+
+            const actionBtns = med.type === 'supply' ? '' : (match
+                ? `
+                    <button type="button" onclick="window.App._toggleEnricherManualSearch(${r._idx})" style="font-size:10px; padding:3px 7px; border-radius:6px; border:1px solid rgba(59,130,246,0.3); background:rgba(59,130,246,0.06); color:var(--primary); cursor:pointer; font-weight:700;">🔍 ${isManualOpen ? 'إغلاق' : 'تغيير / بحث'}</button>
+                    <button type="button" onclick="window.App._rejectEnricherMatch(${r._idx})" style="font-size:10px; padding:3px 7px; border-radius:6px; border:1px solid rgba(239,68,68,0.3); background:rgba(239,68,68,0.06); color:#dc2626; cursor:pointer; font-weight:700;">❌ غير مطابق</button>
+                `
+                : `
+                    <button type="button" onclick="window.App._toggleEnricherManualSearch(${r._idx})" style="font-size:10.5px; padding:3px 8px; border-radius:6px; border:1px solid rgba(59,130,246,0.35); background:rgba(59,130,246,0.08); color:var(--primary); cursor:pointer; font-weight:700;">🔍 ${isManualOpen ? 'إغلاق البحث' : 'بحث يدوي وربط'}</button>
+                    <button type="button" onclick="window.App._ignoreEnricherRow(${r._idx})" style="font-size:10px; padding:3px 7px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-muted); cursor:pointer;">🚫 استبعاد</button>
+                `
             );
 
             return `
@@ -3726,7 +3936,7 @@ const App = {
                             <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; flex-wrap:wrap;">
                                 <strong style="font-size:12.5px; color:var(--text-main);">${Utils.escapeHTML(med.nameEN || med.nameAR)}</strong>
                                 <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
-                                    ${manualBtn}
+                                    ${actionBtns}
                                     ${badge}
                                 </div>
                             </div>
@@ -3749,6 +3959,7 @@ const App = {
                                                 [${m.manual ? 'يدوي' : m.score + '%'}] ${Utils.escapeHTML(m.formattedEN)}${m.item.nameAR ? ' — ' + Utils.escapeHTML(m.item.nameAR) : ''}${m.item.barcode ? ' 🔢' : ''}
                                             </option>
                                         `).join('')}
+                                        <option value="-1" ${r.selectedIdx === -1 ? 'selected' : ''}>❌ لا يوجد تطابق مناسب (غير مطابق)</option>
                                     </select>
                                 </div>
                             ` : ''}
@@ -3757,7 +3968,12 @@ const App = {
                                 <div style="margin-top:6px; padding:6px 8px; border-radius:7px; background:var(--bg-secondary); display:flex; flex-direction:column; gap:3px;">
                                     ${diffLines.join('')}
                                 </div>
-                            ` : (match ? `<div style="margin-top:5px; font-size:10.5px; color:var(--text-muted);">✅ بيانات هذا الصنف مكتملة بالفعل</div>` : '')}
+                            ` : (match ? `
+                                <div style="margin-top:6px; display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+                                    <span style="font-size:10.5px; color:var(--text-muted);">✅ بيانات هذا الصنف مكتملة بالفعل</span>
+                                    <button type="button" onclick="window.App._verifySingleEnricherRow(${r._idx})" style="font-size:10px; padding:3px 8px; border-radius:6px; border:1px solid rgba(16,185,129,0.35); background:rgba(16,185,129,0.1); color:#059669; font-weight:700; cursor:pointer;">✅ اعتماد وإخفاء</button>
+                                </div>
+                            ` : '')}
                         </div>
                     </div>
                 </div>
@@ -3772,7 +3988,7 @@ const App = {
         if (!st) return;
 
         const toUpdate = st.rows
-            .filter(r => r.checked)
+            .filter(r => r.status === 'pending' && r.checked)
             .map(r => ({ row: r, diff: this._computeEnrichDiff(r, st.fields) }))
             .filter(x => x.diff.hasChanges);
 
@@ -3800,6 +4016,12 @@ const App = {
                 if (diff.changes.barcode) med.barcode = diff.changes.barcode.to;
                 if (diff.changes.nameEN) med.nameEN = diff.changes.nameEN.to;
 
+                const match = row.selectedIdx >= 0 ? row.matches[row.selectedIdx] : null;
+                med.catalogVerified = true;
+                med.catalogIgnored = false;
+                med.catalogVerifiedAt = now;
+                if (match?.item?.nameEN) med.catalogMatchedEN = match.item.nameEN;
+
                 med.lastUpdated = now;
                 med.v = (med.v || 1) + 1;
                 await DB.put('medicineMaster', med);
@@ -3812,7 +4034,7 @@ const App = {
 
             this._dashCache = null;
             UI.closeModal();
-            UI.showToast(`تم تكميل ومزامنة ${updatedCount} دواء بنجاح ✨💊`, 'success');
+            UI.showToast(`تم تكميل واعتماد ومزامنة ${updatedCount} دواء بنجاح ✨💊`, 'success');
             await this.refreshAllViews();
         } catch (err) {
             console.error('Apply enrichment error:', err);
@@ -5676,8 +5898,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         if (!state || !container) return;
 
         state.query = query;
-        const qRaw = String(query || '').trim().toLowerCase();
-        const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(qRaw) : qRaw;
+        const qRaw = String(query || '').trim();
 
         // Filter candidates: medicines NOT originally in targetCatId (or just moved in this modal session)
         let matches = state.allMeds.filter(m => {
@@ -5685,28 +5906,25 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             const justMoved = state.movedIds.has(m.id);
             if (!justMoved && curCat === state.targetCatId) return false;
             if (!justMoved && state.onlyUncat && curCat !== 'uncategorized') return false;
-
-            if (!qRaw) return true;
-            const en = (m.nameEN || '').toLowerCase();
-            const ar = (m.nameAR || '').toLowerCase();
-            const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
-            const act = (m.activeIngredient || '').toLowerCase();
-            const actNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(act) : act;
-            const bc = String(m.barcode || '').toLowerCase();
-
-            return en.includes(qRaw) || ar.includes(qRaw) || arNorm.includes(qNorm) ||
-                   act.includes(qRaw) || actNorm.includes(qNorm) || bc.includes(qRaw);
+            return true;
         });
 
-        // Sort: uncategorized first when no search, then alphabetical
-        matches.sort((a, b) => {
-            if (!qRaw) {
+        if (qRaw) {
+            matches = Utils.smartFilter(
+                matches,
+                qRaw,
+                (pq, m) => Utils.smartScoreMed(pq, m),
+                { tieBreaker: (a, b) => (a.nameEN || a.nameAR || '').localeCompare(b.nameEN || b.nameAR || '') }
+            );
+        } else {
+            // Sort: uncategorized first when no search, then alphabetical
+            matches.sort((a, b) => {
                 const aUncat = (a.categoryId || 'uncategorized') === 'uncategorized' ? 0 : 1;
                 const bUncat = (b.categoryId || 'uncategorized') === 'uncategorized' ? 0 : 1;
                 if (aUncat !== bUncat) return aUncat - bUncat;
-            }
-            return (a.nameEN || a.nameAR || '').localeCompare(b.nameEN || b.nameAR || '');
-        });
+                return (a.nameEN || a.nameAR || '').localeCompare(b.nameEN || b.nameAR || '');
+            });
+        }
 
         const totalMatches = matches.length;
         const shown = matches.slice(0, 60);
@@ -7036,18 +7254,15 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         // Cache pre-search list for instant in-place search without closing mobile keyboard
         this._auditMergedCache = { baseList: [...mergedList], activeLocs };
 
-        // Search
-        const searchQuery = (this.auditMergedSearch || '').trim().toLowerCase();
+        // Search (Unified Smart Search)
+        const searchQuery = (this.auditMergedSearch || '').trim();
         if (searchQuery) {
-            const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(searchQuery) : searchQuery;
-            mergedList = mergedList.filter(m => {
-                const en = (m.med.nameEN || '').toLowerCase();
-                const ar = (m.med.nameAR || '').toLowerCase();
-                const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
-                const active = (m.med.activeIngredient || '').toLowerCase();
-                const bc = String(m.med.barcode || '').toLowerCase();
-                return en.includes(searchQuery) || ar.includes(searchQuery) || arNorm.includes(qNorm) || active.includes(searchQuery) || bc.includes(searchQuery);
-            });
+            mergedList = Utils.smartFilter(
+                mergedList,
+                searchQuery,
+                (pq, m) => Utils.smartScoreMed(pq, m.med),
+                { keepOrder: true }
+            );
         }
 
         // Sort: uncounted first, then partial, then fully counted
@@ -7137,18 +7352,15 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const box = document.getElementById('audit-merged-results-box');
         if (box && this._auditMergedCache) {
             const { baseList, activeLocs } = this._auditMergedCache;
-            const q = this.auditMergedSearch.trim().toLowerCase();
-            const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(q) : q;
+            const q = this.auditMergedSearch.trim();
             let list = baseList;
             if (q) {
-                list = list.filter(m => {
-                    const en = (m.med.nameEN || '').toLowerCase();
-                    const ar = (m.med.nameAR || '').toLowerCase();
-                    const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
-                    const active = (m.med.activeIngredient || '').toLowerCase();
-                    const bc = String(m.med.barcode || '').toLowerCase();
-                    return en.includes(q) || ar.includes(q) || arNorm.includes(qNorm) || active.includes(q) || bc.includes(q);
-                });
+                list = Utils.smartFilter(
+                    list,
+                    q,
+                    (pq, m) => Utils.smartScoreMed(pq, m.med),
+                    { keepOrder: true }
+                );
             }
             list = [...list].sort((a, b) => {
                 if (a.isCounted !== b.isCounted) return a.isCounted ? 1 : -1;
@@ -7763,19 +7975,13 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     },
 
     filterAuditMedicines(meds, query) {
-        if (!query) return meds;
-        const q = query.trim().toLowerCase();
-        const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(q) : q;
-
-        return meds.filter(m => {
-            const en = (m.nameEN || '').toLowerCase();
-            const ar = (m.nameAR || '').toLowerCase();
-            const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
-            const active = (m.activeIngredient || '').toLowerCase();
-            const id = (m.id || '').toLowerCase();
-
-            return en.includes(q) || ar.includes(q) || arNorm.includes(qNorm) || active.includes(q) || id.includes(q);
-        });
+        if (!query || !query.trim()) return meds;
+        return Utils.smartFilter(
+            meds,
+            query,
+            (pq, m) => Utils.smartScoreMed(pq, m),
+            { keepOrder: true }
+        );
     },
 
     renderAuditMedicineCard(med) {
@@ -8700,18 +8906,15 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const container = document.getElementById('link-bc-results');
         if (!st || !container) return;
 
-        const q = String(query || '').trim().toLowerCase();
-        const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(q) : q;
+        const q = String(query || '').trim();
 
         let list = st.masterMeds;
         if (q) {
-            list = list.filter(m => {
-                const en = (m.nameEN || '').toLowerCase();
-                const ar = (m.nameAR || '').toLowerCase();
-                const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
-                const act = (m.activeIngredient || '').toLowerCase();
-                return en.includes(q) || ar.includes(q) || arNorm.includes(qNorm) || act.includes(q);
-            });
+            list = Utils.smartFilter(
+                list,
+                q,
+                (pq, m) => Utils.smartScoreMed(pq, m)
+            );
         }
         list = list.slice(0, 30);
 
@@ -8991,16 +9194,16 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
     filterExpiryMonitorList(query = '') {
         if (!this._cachedExpiryItems) return;
-        const q = (query || '').toLowerCase().trim();
         const status = this._currentExpiryStatusFilter || 'all';
-
-        const filtered = this._cachedExpiryItems.filter(item => {
-            const matchesQuery = !q || (item.nameEN && item.nameEN.toLowerCase().includes(q)) || 
-                                      (item.nameAR && item.nameAR.toLowerCase().includes(q)) || 
-                                      (item.location && item.location.toLowerCase().includes(q));
-            const matchesStatus = status === 'all' || item.badge.status === status;
-            return matchesQuery && matchesStatus;
-        });
+        let filtered = this._cachedExpiryItems.filter(item => status === 'all' || item.badge.status === status);
+        if (query && query.trim()) {
+            filtered = Utils.smartFilter(
+                filtered,
+                query,
+                (pq, item) => Utils.smartScore(pq, [item.nameEN, item.nameAR], [item.location, item.activeIngredient, item.barcode]),
+                { keepOrder: true }
+            );
+        }
 
         const container = document.getElementById('expiry-monitor-items');
         if (container) {
