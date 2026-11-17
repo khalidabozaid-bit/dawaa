@@ -96,7 +96,12 @@ export const Sync = {
                 }
             } catch (ie) { console.warn('Sync pull inventory notice:', ie.message); }
 
-            console.log('Sync: Full cloud state synchronization complete âœ…');
+            console.log('Sync: Full cloud state synchronization complete ✅');
+            // v18.11.6: Invalidate dashboard cache so fresh data renders immediately
+            if (window.App) {
+                window.App._dashCache = null;
+                window.App._dashCacheTime = 0;
+            }
             if (window.App?.refreshAllViews) window.App.refreshAllViews();
             
             // Process any offline background image uploads
@@ -550,6 +555,8 @@ export const Sync = {
                     }
                 }
                 if (updated && window.App?.refreshAllViews) {
+                    window.App._dashCache = null;
+                    window.App._dashCacheTime = 0;
                     window.App.refreshAllViews();
                 }
             }, err => console.warn('Sync Live medicines V2 notice:', err.message));
@@ -605,6 +612,8 @@ export const Sync = {
                     }
                 }
                 if (updated && window.App?.refreshAllViews) {
+                    window.App._dashCache = null;
+                    window.App._dashCacheTime = 0;
                     window.App.refreshAllViews();
                 }
             }, err => console.warn('Sync Live locations notice:', err.message));

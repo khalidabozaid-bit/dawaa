@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.11.5', // Warehouse redesign — audit-style cards, drill-down, 3-dot menus
+    VERSION: '18.11.6', // Fix stale balance + smart refresh + dashboard cache invalidation
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -357,7 +357,11 @@ const App = {
             if (refreshing) return;
             if (this._userApprovedUpdate) {
                 refreshing = true;
+                console.log('SW: controllerchange — user approved, reloading...');
                 window.location.reload();
+            } else {
+                console.log('SW: controllerchange — not user-approved, showing banner.');
+                this._showUpdateBanner();
             }
         });
     },
@@ -427,16 +431,24 @@ const App = {
             
             document.getElementById('display-user-name').textContent = profile.displayName || profile.email;
             this.hideLogin();
-            this.renderDashboard();
             this.updateAdminUI();
             
             // v10.5.1: Final UI Polish
             if (this.activeAudit) this.renderActiveAuditCard();
             
-            // 5. Initial Pull (Automatic)
-            // v16.3.0: Data Restructure Safety Init
+            // v18.11.6: Pull cloud data FIRST, then render dashboard with fresh data
+            // This prevents showing stale local balance (e.g. 44) before updating to real (63)
             if (Sync.initV2) Sync.initV2();
-            Sync.pull();
+            try {
+                await Sync.pull(); // await — get latest cloud data before rendering
+            } catch (pullErr) {
+                console.warn('Initial pull failed, rendering with local data:', pullErr);
+            }
+            // Now render dashboard with the freshest data available
+            this._dashCache = null;
+            this._dashCacheTime = 0;
+            await this.renderDashboard();
+            
             if (Sync.startLiveSync) Sync.startLiveSync();
             
         } catch (err) {
@@ -476,6 +488,10 @@ const App = {
         
         try {
             UI.showToast('جاري تطهير النظام... 🧹', 'info');
+            
+            // 0. Clear in-memory caches
+            this._dashCache = null;
+            this._dashCacheTime = 0;
             
             // 1. Unregister all SWs
             const registrations = await navigator.serviceWorker.getRegistrations();
@@ -579,9 +595,9 @@ const App = {
 
     async renderDashboard() {
         try {
-            // v18.10.0: Skip re-render if stats were computed recently (10s TTL)
+            // v18.11.6: Reduced TTL from 10s to 3s to prevent stale data display
             const now = Date.now();
-            if (this._dashCacheTime && now - this._dashCacheTime < 10000 && this._dashCache) {
+            if (this._dashCacheTime && now - this._dashCacheTime < 3000 && this._dashCache) {
                 UI.updateDashboardStats(this._dashCache);
                 return;
             }
@@ -2693,16 +2709,19 @@ App.checkUpdate = async function() {
     // Stage 2: Execute Update (Second Click)
     if (this.updateState === 'ready' && this.pendingRegistration) {
         const reg = this.pendingRegistration;
-        const worker = reg.waiting || reg.installing || reg.active;
+        const worker = reg.waiting || reg.installing;
         if (worker) {
             UI.showToast('جاري تثبيت التحديث وإعادة التشغيل... ⏳', 'info');
             this._userApprovedUpdate = true;
             worker.postMessage({ type: 'SKIP_WAITING' });
-            // controllerchange listener will handle the reload (user approved)
-            // Fallback reload if controllerchange doesn't fire in 3s
+            // Fallback: reload after 2s if controllerchange doesn't fire
             setTimeout(() => {
-                if (!this._reloadDone) window.location.reload();
-            }, 3000);
+                window.location.reload();
+            }, 2000);
+        } else {
+            // No waiting worker found — force reload to pick up new SW
+            UI.showToast('جاري إعادة التشغيل... ⏳', 'info');
+            setTimeout(() => window.location.reload(), 500);
         }
         return;
     }
@@ -6156,6 +6175,56 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         }
     }
 });
+
+/**
+ * Smart Refresh (v18.11.6)
+ * Clears stale SW caches + app memory caches, re-pulls fresh cloud data,
+ * and refreshes all views — WITHOUT deleting IndexedDB or signing out.
+ */
+App.smartRefresh = async function() {
+    try {
+        UI.showToast('جاري تنظيف البيانات العالقة... 🧹', 'info');
+
+        // 1. Clear all Service Worker caches (stale JS/CSS/HTML)
+        if ('caches' in window) {
+            const cacheKeys = await caches.keys();
+            for (const key of cacheKeys) {
+                await caches.delete(key);
+            }
+            console.log('SmartRefresh: Cleared', cacheKeys.length, 'SW caches');
+        }
+
+        // 2. Clear in-memory dashboard cache
+        this._dashCache = null;
+        this._dashCacheTime = 0;
+
+        // 3. Clear category/location caches
+        if (typeof Categories !== 'undefined') {
+            Categories.cache = null;
+            Categories._cache = null;
+        }
+
+        // 4. Re-pull all cloud data into IndexedDB
+        if (typeof Sync !== 'undefined' && Sync.pull) {
+            await Sync.pull();
+        }
+
+        // 5. Force re-register SW with new cache
+        if ('serviceWorker' in navigator) {
+            const reg = await navigator.serviceWorker.register('./sw.js?v=' + Date.now(), { updateViaCache: 'none' });
+            await reg.update();
+            this.swRegistration = reg;
+        }
+
+        // 6. Refresh all visible views
+        await this.refreshAllViews();
+
+        UI.showToast('تم تنظيف وتحديث البيانات بنجاح ✅', 'success');
+    } catch (err) {
+        console.error('SmartRefresh Error:', err);
+        UI.showToast('فشل التنظيف: ' + err.message, 'danger');
+    }
+};
 
 /**
  * Recovery Reset Mechanism (v17.2.0)
