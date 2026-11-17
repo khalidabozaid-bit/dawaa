@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.12.0', // Extended drug catalog 27K+ Egyptian medicines with lazy loading
+    VERSION: '18.12.1', // Custom export with audit session source selection
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2489,6 +2489,7 @@ const App = {
         try {
             const allCats = (await Categories.getAllSorted()) || [];
             const allLocs = (await Locations.getAll()) || [];
+            const allSessions = (await Audit.getAllSessions()) || [];
 
             // Build category checkboxes
             const catChecks = allCats.map(c => {
@@ -2506,6 +2507,14 @@ const App = {
                 </label>`;
             }).join('');
 
+            // Build audit session options
+            const sessionOptions = allSessions.map(s => {
+                const statusIcon = s.status === 'completed' ? '✅' : '🔄';
+                const countNum = Object.keys(s.counts || {}).length;
+                const dateStr = s.startedAt ? new Date(s.startedAt).toLocaleDateString('ar-EG') : '';
+                return `<option value="${s.id}">${statusIcon} ${s.name || 'جلسة'} — ${countNum} صنف معدود — ${dateStr}</option>`;
+            }).join('');
+
             // Load saved preferences
             let saved = {};
             try { saved = JSON.parse(localStorage.getItem('dawaa_export_prefs') || '{}'); } catch(e) {}
@@ -2519,10 +2528,25 @@ const App = {
             UI.showModal(`
                 <div class="modal-header">
                     <h2><i class='bx bx-slider-alt'></i> تصدير إكسيل مخصص</h2>
-                    <p class="text-muted" style="font-size:12px; margin-top:4px;">اختر الإعدادات وصدّر</p>
+                    <p class="text-muted" style="font-size:12px; margin-top:4px;">اختر مصدر البيانات والإعدادات وصدّر</p>
                 </div>
 
                 <div style="max-height: 65vh; overflow-y: auto; padding: 4px;">
+
+                <!-- 0. Data Source -->
+                <div class="cex-section" style="margin-bottom:16px; padding:12px; background:rgba(59,130,246,0.04); border:1px solid rgba(59,130,246,0.2); border-radius:10px;">
+                    <h4 style="margin-bottom:8px; font-size:14px;">📂 مصدر البيانات</h4>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+                        <label style="cursor:pointer;"><input type="radio" name="cex-source" value="inventory" checked onchange="document.getElementById('cex-session-picker').style.display='none'"> المخزون الحالي</label>
+                        <label style="cursor:pointer;"><input type="radio" name="cex-source" value="audit" onchange="document.getElementById('cex-session-picker').style.display='block'" ${allSessions.length === 0 ? 'disabled' : ''}> جلسة جرد ${allSessions.length === 0 ? '(لا توجد جلسات)' : ''}</label>
+                    </div>
+                    <div id="cex-session-picker" style="display:none; margin-top:8px;">
+                        <select id="cex-session-select" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:8px; font-size:13px; background:var(--bg-card); color:var(--text-main);">
+                            ${sessionOptions}
+                        </select>
+                        <small style="color:var(--text-muted); display:block; margin-top:4px;">🔄 = لسه شغال &nbsp; ✅ = مكتمل</small>
+                    </div>
+                </div>
 
                 <!-- 1. Name -->
                 <div class="cex-section" style="margin-bottom:16px;">
@@ -2612,6 +2636,8 @@ const App = {
 
     _runCustomExport() {
         // Collect options from modal
+        const source = document.querySelector('input[name="cex-source"]:checked')?.value || 'inventory';
+        const sessionId = source === 'audit' ? (document.getElementById('cex-session-select')?.value || null) : null;
         const nameMode = document.querySelector('input[name="cex-name"]:checked')?.value || 'both';
         const groupByCat = (document.querySelector('input[name="cex-group"]:checked')?.value || 'yes') === 'yes';
         const locationMode = document.querySelector('input[name="cex-loc"]:checked')?.value || 'columns';
@@ -2630,7 +2656,7 @@ const App = {
         } catch(e) {}
 
         UI.closeModal();
-        this.exportCustomInventory({ nameMode, groupByCat, locationMode, expiryMode, sortMode, selectedCats, selectedLocs });
+        this.exportCustomInventory({ source, sessionId, nameMode, groupByCat, locationMode, expiryMode, sortMode, selectedCats, selectedLocs });
     },
 
     async exportCustomInventory(opts) {
@@ -2641,7 +2667,7 @@ const App = {
             }
 
             const masterMeds = (await DB.getAll('medicineMaster')) || [];
-            const inventoryEntries = (await DB.getAll('inventory')) || [];
+            const masterMap = new Map(masterMeds.map(m => [m.id, m]));
             const allCats = (await Categories.getAllSorted()) || [];
             const allLocs = (await Locations.getAll()) || [];
             const catMap = new Map(allCats.map(c => [c.id, c]));
@@ -2649,63 +2675,115 @@ const App = {
 
             // Filter by selected categories
             const catFilter = new Set(opts.selectedCats || allCats.map(c => c.id));
-            // Always include uncategorized if it exists or if all selected
             if (catFilter.size === allCats.length) catFilter.add('uncategorized');
 
             // Filter by selected locations
             const locFilter = new Set(opts.selectedLocs || allLocs.map(l => l.id));
 
             // --- Step 1: Build per-medicine data ---
-            // medId → { nameEN, nameAR, categoryId, perLoc: { locId: { qty, expiries: { date: qty } } }, total, earliestExp }
             const medData = new Map();
+            let exportFileName = '';
 
-            for (const med of masterMeds) {
-                if (!catFilter.has(med.categoryId || 'uncategorized')) continue;
-                medData.set(med.id, {
-                    id: med.id,
-                    nameEN: med.nameEN || '',
-                    nameAR: med.nameAR || med.nameEN || '',
-                    categoryId: med.categoryId || 'uncategorized',
-                    perLoc: {},
-                    total: 0,
-                    earliestExp: null
-                });
-            }
+            if (opts.source === 'audit' && opts.sessionId) {
+                // ========== AUDIT SESSION SOURCE ==========
+                const session = await Audit.getSession(opts.sessionId);
+                if (!session || !session.counts || Object.keys(session.counts).length === 0) {
+                    UI.showToast('لا توجد بيانات في هذه الجلسة', 'warning');
+                    return;
+                }
+                exportFileName = `جرد_${(session.name || 'جلسة').replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '_')}`;
 
-            for (const entry of inventoryEntries) {
-                const d = medData.get(entry.medicineId);
-                if (!d) continue;
+                for (const [key, record] of Object.entries(session.counts)) {
+                    const [locId, medId] = key.split('___');
+                    if (!locFilter.has(locId)) continue;
 
-                // Resolve location id
-                let locId = null;
-                // entry.location might be a name or an id
-                if (locMap.has(entry.location)) {
-                    locId = entry.location;
-                } else {
-                    // Try matching by name
-                    for (const [lid, lobj] of locMap) {
-                        if (lobj.nameAR === entry.location || lobj.nameEN === entry.location) {
-                            locId = lid; break;
+                    const med = masterMap.get(medId) || { nameEN: 'Unknown', nameAR: 'غير معروف', categoryId: 'uncategorized' };
+                    if (!catFilter.has(med.categoryId || 'uncategorized')) continue;
+
+                    if (!medData.has(medId)) {
+                        medData.set(medId, {
+                            id: medId,
+                            nameEN: med.nameEN || '',
+                            nameAR: med.nameAR || med.nameEN || '',
+                            categoryId: med.categoryId || 'uncategorized',
+                            perLoc: {},
+                            total: 0,
+                            earliestExp: null
+                        });
+                    }
+
+                    const d = medData.get(medId);
+                    const batches = (record.batches && record.batches.length > 0)
+                        ? record.batches
+                        : [{ quantity: record.quantity, expiryDate: record.expiryDate }];
+
+                    for (const b of batches) {
+                        const qty = parseFloat(b.quantity) || 0;
+                        const exp = b.expiryDate || null;
+
+                        if (!d.perLoc[locId]) {
+                            d.perLoc[locId] = { qty: 0, expiries: {} };
+                        }
+                        d.perLoc[locId].qty += qty;
+                        if (exp) {
+                            d.perLoc[locId].expiries[exp] = (d.perLoc[locId].expiries[exp] || 0) + qty;
+                        }
+                        d.total += qty;
+                        if (exp && (!d.earliestExp || exp < d.earliestExp)) {
+                            d.earliestExp = exp;
                         }
                     }
-                    if (!locId) locId = entry.location || '__default__';
+                }
+            } else {
+                // ========== INVENTORY SOURCE (default) ==========
+                const inventoryEntries = (await DB.getAll('inventory')) || [];
+                exportFileName = 'مخزون_مخصص';
+
+                for (const med of masterMeds) {
+                    if (!catFilter.has(med.categoryId || 'uncategorized')) continue;
+                    medData.set(med.id, {
+                        id: med.id,
+                        nameEN: med.nameEN || '',
+                        nameAR: med.nameAR || med.nameEN || '',
+                        categoryId: med.categoryId || 'uncategorized',
+                        perLoc: {},
+                        total: 0,
+                        earliestExp: null
+                    });
                 }
 
-                if (!locFilter.has(locId) && locId !== '__default__') continue;
+                for (const entry of inventoryEntries) {
+                    const d = medData.get(entry.medicineId);
+                    if (!d) continue;
 
-                const qty = parseFloat(entry.quantity) || 0;
-                const exp = entry.expiryDate || null;
+                    let locId = null;
+                    if (locMap.has(entry.location)) {
+                        locId = entry.location;
+                    } else {
+                        for (const [lid, lobj] of locMap) {
+                            if (lobj.nameAR === entry.location || lobj.nameEN === entry.location) {
+                                locId = lid; break;
+                            }
+                        }
+                        if (!locId) locId = entry.location || '__default__';
+                    }
 
-                if (!d.perLoc[locId]) {
-                    d.perLoc[locId] = { qty: 0, expiries: {} };
-                }
-                d.perLoc[locId].qty += qty;
-                if (exp) {
-                    d.perLoc[locId].expiries[exp] = (d.perLoc[locId].expiries[exp] || 0) + qty;
-                }
-                d.total += qty;
-                if (exp && (!d.earliestExp || exp < d.earliestExp)) {
-                    d.earliestExp = exp;
+                    if (!locFilter.has(locId) && locId !== '__default__') continue;
+
+                    const qty = parseFloat(entry.quantity) || 0;
+                    const exp = entry.expiryDate || null;
+
+                    if (!d.perLoc[locId]) {
+                        d.perLoc[locId] = { qty: 0, expiries: {} };
+                    }
+                    d.perLoc[locId].qty += qty;
+                    if (exp) {
+                        d.perLoc[locId].expiries[exp] = (d.perLoc[locId].expiries[exp] || 0) + qty;
+                    }
+                    d.total += qty;
+                    if (exp && (!d.earliestExp || exp < d.earliestExp)) {
+                        d.earliestExp = exp;
+                    }
                 }
             }
 
@@ -2877,7 +2955,7 @@ const App = {
 
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws, 'المخزون');
-                XLSX.writeFile(wb, `مخزون_مخصص_${new Date().toISOString().split('T')[0]}.xlsx`);
+                XLSX.writeFile(wb, `${exportFileName}_${new Date().toISOString().split('T')[0]}.xlsx`);
                 UI.showToast(`تم تصدير ${medsArray.length} صنف ✅`, 'success');
 
             } else {
@@ -2928,7 +3006,7 @@ const App = {
 
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws, 'المخزون');
-                XLSX.writeFile(wb, `مخزون_مخصص_${new Date().toISOString().split('T')[0]}.xlsx`);
+                XLSX.writeFile(wb, `${exportFileName}_${new Date().toISOString().split('T')[0]}.xlsx`);
                 UI.showToast(`تم تصدير ${finalRows.length} صنف ✅`, 'success');
             }
 
