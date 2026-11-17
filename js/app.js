@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.11.6', // Fix stale balance + smart refresh + dashboard cache invalidation
+    VERSION: '18.11.7', // Audit batch edit/merge, zero-qty no expiry, system cat editable
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2479,7 +2479,7 @@ const App = {
                 <div class="items-list mini">
                     ${cats.map(c => {
                         const count = allMeds.filter(m => m.categoryId === c.id).length;
-                        const isSystem = c.isSystem || c.id === 'uncategorized';
+                        const isSystem = c.id === 'uncategorized';
                         return `
                             <div class="cat-manage-item">
                                 <div class="cat-info" onclick="${c.id === 'uncategorized' ? `window.App.openCategoryDetailModal('${c.id}')` : `window.App.openEditCategoryModal('${c.id}')`}" style="cursor:pointer">
@@ -3010,7 +3010,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         ${cats.map(c => {
                             const count = allMeds.filter(m => (m.categoryId || 'uncategorized') === c.id).length;
                             const isUncat = c.id === 'uncategorized';
-                            const isSystem = isUncat || c.isSystem;
+                            const isSystem = isUncat;
                             return `
                                 <div class="square-card" onclick="window.App.openWhCatDetail('${c.id}')" style="cursor:pointer; position:relative; ${isUncat ? (count > 0 ? 'border:1px dashed var(--warning); background:rgba(245,158,11,0.05);' : 'opacity:0.85;') : ''}">
                                     <button type="button" class="wh-cat-menu-btn" onclick="event.stopPropagation(); window.App.toggleWhCatMenu('${c.id}')" title="خيارات" style="position:absolute; top:4px; left:4px; width:24px; height:24px; border-radius:6px; border:1px solid var(--border-color); background:var(--surface); display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2; padding:0; box-shadow:0 1px 2px rgba(0,0,0,0.06);">
@@ -3893,6 +3893,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     },
 
     async openEditCategoryModal(id) {
+        // v18.11.7: Only 'uncategorized' is fully locked. System categories can be edited.
         if (id === 'uncategorized') {
             UI.showToast('قسم "أدوية غير مصنفة" هو قسم نظام افتراضي ولا يمكن تعديله', 'info');
             return;
@@ -5833,9 +5834,14 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         </span>
                         ${b.isSuggested ? `<span style="font-size:9px; background:rgba(59,130,246,0.1); color:var(--primary); padding:1px 4px; border-radius:3px;">سابق 📋</span>` : ''}
                     </div>
-                    <button type="button" class="icon-btn text-danger" onclick="window.App.removeModalBatch(${idx})" title="حذف هذه الدفعة" style="padding:4px;">
-                        <i class='bx bx-trash' style="font-size:16px; color:var(--danger);"></i>
-                    </button>
+                    <div style="display:flex; gap:2px;">
+                        <button type="button" class="icon-btn" onclick="window.App.editModalBatch(${idx})" title="تعديل هذه الدفعة" style="padding:4px;">
+                            <i class='bx bx-edit-alt' style="font-size:16px; color:var(--primary);"></i>
+                        </button>
+                        <button type="button" class="icon-btn text-danger" onclick="window.App.removeModalBatch(${idx})" title="حذف هذه الدفعة" style="padding:4px;">
+                            <i class='bx bx-trash' style="font-size:16px; color:var(--danger);"></i>
+                        </button>
+                    </div>
                 </div>
             `;
         }).join('');
@@ -5854,20 +5860,30 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const qty = parseFloat(qtyEl.value);
         const exp = expEl.value ? expEl.value.trim() : '';
 
-        if (!qty || qty <= 0) {
-            UI.showToast('يرجى إدخال كمية صحيحة أكبر من صفر', 'warning');
+        // v18.11.7: Allow zero quantity without expiry (for "not available" scenarios)
+        if (qty === undefined || qty === null || isNaN(qty) || qty < 0) {
+            UI.showToast('يرجى إدخال كمية صحيحة', 'warning');
             qtyEl.focus();
             return;
         }
 
-        if (!exp) {
+        // Only require expiry if quantity > 0
+        if (qty > 0 && !exp) {
             UI.showToast('يرجى اختيار تاريخ الصلاحية من التقويم', 'warning');
             expEl.focus();
             return;
         }
 
         if (!this._modalBatches) this._modalBatches = [];
-        this._modalBatches.push({ quantity: qty, expiryDate: exp });
+
+        // v18.11.7: Merge with existing batch if same expiry date
+        const existingIdx = this._modalBatches.findIndex(b => b.expiryDate === exp && exp !== '');
+        if (existingIdx >= 0) {
+            this._modalBatches[existingIdx].quantity += qty;
+            UI.showToast(`تم دمج الكمية مع دفعة بنفس الصلاحية (${exp}) — الإجمالي: ${this._modalBatches[existingIdx].quantity}`, 'info');
+        } else {
+            this._modalBatches.push({ quantity: qty, expiryDate: exp || 'غير محدد' });
+        }
 
         // Reset Box Inputs
         qtyEl.value = '';
@@ -5890,6 +5906,32 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
         const totalEl = document.getElementById('modal-batch-total-qty');
         if (totalEl) totalEl.textContent = `${this.calcModalBatchesTotal()} وحدة`;
+    },
+
+    // v18.11.7: Edit an existing batch — load it into the Add Box for editing
+    editModalBatch(index) {
+        if (!this._modalBatches || !this._modalBatches[index]) return;
+        const batch = this._modalBatches[index];
+
+        // Fill the Add Box with the batch's values
+        const qtyEl = document.getElementById('new-batch-qty');
+        const expEl = document.getElementById('new-batch-expiry');
+        if (qtyEl) qtyEl.value = batch.quantity;
+        if (expEl && batch.expiryDate && batch.expiryDate !== 'غير محدد') expEl.value = batch.expiryDate;
+
+        // Remove the batch from the list (user will re-add with edited values)
+        this._modalBatches.splice(index, 1);
+
+        const listContainer = document.getElementById('modal-batches-list-container');
+        if (listContainer) listContainer.innerHTML = this.renderModalBatchesHtml();
+
+        const totalEl = document.getElementById('modal-batch-total-qty');
+        if (totalEl) totalEl.textContent = `${this.calcModalBatchesTotal()} وحدة`;
+
+        // Focus the quantity input
+        if (qtyEl) qtyEl.focus();
+        this.updateNewBatchBadgePreview();
+        UI.showToast('عدّل الكمية أو الصلاحية ثم اضغط "إضافة" 📝', 'info');
     },
 
     quickSetNewBatchExpiry(yearsToAdd) {
