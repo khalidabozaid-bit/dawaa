@@ -141,14 +141,16 @@ export const TaskManager = {
 
         let medicines = await DB.getAll('medicineMaster');
         
-        if (searchQuery) {
-            medicines = medicines.filter(m => 
-                m.nameEN.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                (m.nameAR && m.nameAR.includes(searchQuery))
+        if (searchQuery && searchQuery.trim()) {
+            medicines = Utils.smartFilter(
+                medicines,
+                searchQuery,
+                (pq, m) => Utils.smartScoreMed(pq, m),
+                { tieBreaker: (a, b) => (a.nameEN || '').localeCompare(b.nameEN || '') }
             );
+        } else {
+            medicines.sort((a, b) => (a.nameEN || '').localeCompare(b.nameEN || ''));
         }
-
-        medicines.sort((a,b) => a.nameEN.localeCompare(b.nameEN));
 
         container.innerHTML = medicines.map(m => `
             <div class="task-count-card" id="tr-card-${m.id}">

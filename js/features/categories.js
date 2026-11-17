@@ -491,27 +491,15 @@ export const Categories = {
 
     async searchMaster(query) {
         if (!query) return [];
-        const qRaw = String(query).trim().toLowerCase();
+        const qRaw = String(query).trim();
         if (!qRaw) return [];
-        const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(qRaw) : qRaw;
         const all = (await DB.getAll('medicineMaster')) || [];
-        return all
-            .filter(m => {
-                const en = (m.nameEN || '').toLowerCase();
-                const arRaw = (m.nameAR || '').toLowerCase();
-                const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(arRaw) : arRaw;
-                const actRaw = (m.activeIngredient || '').toLowerCase();
-                const actNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(actRaw) : actRaw;
-                const id = String(m.id || '').toLowerCase();
-
-                return en.includes(qRaw) ||
-                       arRaw.includes(qRaw) ||
-                       arNorm.includes(qNorm) ||
-                       actRaw.includes(qRaw) ||
-                       actNorm.includes(qNorm) ||
-                       id.includes(qRaw);
-            })
-            .sort((a, b) => (a.nameEN || '').localeCompare(b.nameEN || ''));
+        return Utils.smartFilter(
+            all,
+            qRaw,
+            (pq, m) => Utils.smartScoreMed(pq, m, [m.categoryId]),
+            { tieBreaker: (a, b) => (a.nameEN || '').localeCompare(b.nameEN || '') }
+        );
     },
 
     // --- Medicine Master CRUD ---

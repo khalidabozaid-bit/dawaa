@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.17.0', // Smart Phonetic Drug Matcher v4, Tube-Size/Strength Separation, Enricher Tabs & Inline Manual Linker
+    VERSION: '18.17.1', // Fix mobile layout overflow in session-control-bar, audit toolbars, and search clear icons
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2358,20 +2358,11 @@ const App = {
             }
 
             if (q.length > 0) {
-                const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(q) : q;
-                data = data.filter(m => {
-                    const en = (m.nameEN || '').toLowerCase();
-                    const arRaw = (m.nameAR || '').toLowerCase();
-                    const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(arRaw) : arRaw;
-                    const cat = (m.categoryId || '').toLowerCase();
-                    const id = String(m.id || '').toLowerCase();
-
-                    return en.includes(q) ||
-                           arRaw.includes(q) ||
-                           arNorm.includes(qNorm) ||
-                           cat.includes(q) ||
-                           id.includes(q);
-                });
+                data = Utils.smartFilter(
+                    data,
+                    query,
+                    (pq, m) => Utils.smartScoreMed(pq, m, [m.categoryId])
+                );
             }
 
             this.renderInventoryList(data, 'inventory-items-list', true);
@@ -3653,8 +3644,7 @@ const App = {
         const container = document.getElementById('enricher-results-list');
         if (!st || !container) return;
 
-        const q = (st.search || '').trim().toLowerCase();
-        const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(q) : q;
+        const pq = Utils.prepareSearchQuery(st.search);
 
         const visible = st.rows.filter(r => {
             const match = r.matches[r.selectedIdx] || null;
@@ -3665,11 +3655,9 @@ const App = {
             if (st.filter === 'medium' && !(match && match.confidence === 'medium')) return false;
             if (st.filter === 'unmatched' && !(!match && r.med.type !== 'supply')) return false;
 
-            if (q) {
-                const en = (r.med.nameEN || '').toLowerCase();
-                const ar = (r.med.nameAR || '').toLowerCase();
-                const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
-                if (!en.includes(q) && !ar.includes(q) && !arNorm.includes(qNorm)) return false;
+            if (pq) {
+                const extra = match?.item ? [match.item.nameEN, match.item.nameAR, match.item.active] : [];
+                if (Utils.smartScoreMed(pq, r.med, extra) === 0) return false;
             }
             return true;
         });
@@ -4071,22 +4059,16 @@ const App = {
         const container = document.getElementById('active-analysis-list');
         if (!st || !container) return;
 
-        const q = (st.search || '').trim().toLowerCase();
-        const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(q) : q;
+        const pq = Utils.prepareSearchQuery(st.search);
 
         const visible = st.groups.filter(g => {
             if (st.filter === 'multi' && (g.isMissing || g.meds.length < 2)) return false;
             if (st.filter === 'critical' && (g.isMissing || g.totalQty > 5)) return false;
             if (st.filter === 'missing' && !g.isMissing) return false;
 
-            if (q) {
-                const labelMatch = g.label.toLowerCase().includes(q);
-                const medMatch = g.meds.some(m => {
-                    const en = (m.nameEN || '').toLowerCase();
-                    const ar = (m.nameAR || '').toLowerCase();
-                    const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
-                    return en.includes(q) || ar.includes(q) || arNorm.includes(qNorm);
-                });
+            if (pq) {
+                const labelMatch = Utils.smartScore(pq, [g.label], []) > 0;
+                const medMatch = g.meds.some(m => Utils.smartScoreMed(pq, m) > 0);
                 if (!labelMatch && !medMatch) return false;
             }
             return true;
@@ -5087,25 +5069,19 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     },
 
     _filterAndSortWhMeds(list, query = '', sortMode = 'en') {
-        let res = [...(list || [])];
-        if (query && query.trim()) {
-            const q = query.trim().toLowerCase();
-            const qNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(q) : q;
-            res = res.filter(m => {
-                const en = (m.nameEN || '').toLowerCase();
-                const ar = (m.nameAR || '').toLowerCase();
-                const arNorm = (typeof Utils !== 'undefined' && Utils.normalizeArabic) ? Utils.normalizeArabic(ar) : ar;
-                const act = (m.activeIngredient || '').toLowerCase();
-                const bc = String(m.barcode || '').toLowerCase();
-                const id = String(m.id || '').toLowerCase();
-                return en.includes(q) || ar.includes(q) || arNorm.includes(qNorm) || act.includes(q) || bc.includes(q) || id.includes(q);
-            });
-        }
-        res.sort((a, b) => {
+        const tieBreaker = (a, b) => {
             if (sortMode === 'ar') return (a.nameAR || '').localeCompare(b.nameAR || '', 'ar');
             return (a.nameEN || '').localeCompare(b.nameEN || '', 'en');
-        });
-        return res;
+        };
+        if (query && query.trim()) {
+            return Utils.smartFilter(
+                list || [],
+                query,
+                (pq, m) => Utils.smartScoreMed(pq, m),
+                { tieBreaker }
+            );
+        }
+        return [...(list || [])].sort(tieBreaker);
     },
 
     _renderWhMedsGridHtml(meds, catId = null, searchQuery = '') {
@@ -6918,21 +6894,18 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             <!-- Session Control Bar -->
             <div class="session-control-bar">
                 <div class="ctrl-info">
-                    <h3>${session.name}</h3>
-                    <span style="font-size: 11px; color: var(--text-muted);">
-                        الحالة: ${session.status === 'on_hold' ? '⏸️ معلقة' : '🟢 جارية'} | النمط: ${session.type === 'group' ? '👥 جماعي' : '👤 فردي'}
+                    <h3>${Utils.escapeHTML(session.name)}</h3>
+                    <span style="font-size: 11.5px; color: var(--text-muted);">
+                        الحالة: ${session.status === 'on_hold' ? '⏸️ معلقة' : '🟢 جارية'} &nbsp;|&nbsp; النمط: ${session.type === 'group' ? '👥 جماعي' : '👤 فردي'}
                     </span>
                 </div>
                 <div class="ctrl-actions">
-                    <button type="button" class="btn-primary sm-btn" onclick="window.App.startAuditBarcodeScan()" style="background:#7c3aed; font-weight:800;">
-                        <i class='bx bx-barcode-reader'></i> جرد بالباركود
-                    </button>
                     ${session.status !== 'on_hold' ? `
-                        <button class="btn-ghost sm-btn" onclick="window.App.holdAuditSession('${session.id}')">
+                        <button class="btn-ghost sm-btn" onclick="window.App.holdAuditSession('${session.id}')" style="border:1px solid var(--border-color);">
                             <i class='bx bx-pause'></i> تعليق
                         </button>
                     ` : `
-                        <button class="btn-ghost sm-btn" onclick="window.App.resumeAuditSession('${session.id}')">
+                        <button class="btn-ghost sm-btn" onclick="window.App.resumeAuditSession('${session.id}')" style="border:1px solid var(--border-color);">
                             <i class='bx bx-play'></i> استئناف
                         </button>
                     `}
@@ -6940,6 +6913,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         <i class='bx bx-check'></i> إنهاء واعتماد
                     </button>
                 </div>
+                <button type="button" class="btn-primary" onclick="window.App.startAuditBarcodeScan()" style="background:#7c3aed; height:40px; font-size:13px; border-radius:10px; display:flex; align-items:center; justify-content:center; gap:6px; width:100%;">
+                    <i class='bx bx-barcode-reader' style="font-size:18px;"></i> جرد سريع بالباركود
+                </button>
             </div>
 
             <div class="section-title mb-12">
@@ -7106,18 +7082,16 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
             <!-- Search + Barcode Audit Button -->
             <div class="audit-toolbar" style="margin-bottom:12px;">
-                <div style="display:flex; gap:8px; align-items:center; width:100%; flex-wrap:wrap;">
-                    <div class="audit-search-wrapper" style="flex:1; min-width:180px;">
-                        <i class='bx bx-search'></i>
-                        <input type="text" id="audit-merged-search-input" class="audit-search-input" placeholder="بحث بالاسم العربي أو الإنجليزي..." value="${Utils.escapeHTML(this.auditMergedSearch || '')}" oninput="window.App.handleAuditMergedSearch(this.value)">
-                        <button type="button" id="audit-merged-clear-btn" onclick="window.App.handleAuditMergedSearch('', true)" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:${this.auditMergedSearch ? 'flex' : 'none'}; align-items:center;">
-                            <i class='bx bx-x' style="font-size:18px;"></i>
-                        </button>
-                    </div>
-                    <button type="button" class="btn-primary sm-btn" onclick="window.App.startAuditBarcodeScan()" style="background:#7c3aed; font-size:12px; display:flex; align-items:center; gap:5px; padding:8px 12px; border-radius:9px; white-space:nowrap; font-weight:800;">
-                        <i class='bx bx-barcode-reader' style="font-size:16px;"></i> جرد بالباركود
+                <div class="audit-search-wrapper" style="width:100%;">
+                    <i class='bx bx-search'></i>
+                    <input type="text" id="audit-merged-search-input" class="audit-search-input" placeholder="بحث بالاسم العربي أو الإنجليزي..." value="${Utils.escapeHTML(this.auditMergedSearch || '')}" oninput="window.App.handleAuditMergedSearch(this.value)">
+                    <button type="button" id="audit-merged-clear-btn" onclick="window.App.handleAuditMergedSearch('', true)" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:${this.auditMergedSearch ? 'flex' : 'none'}; align-items:center;">
+                        <i class='bx bx-x' style="font-size:18px;"></i>
                     </button>
                 </div>
+                <button type="button" class="btn-primary" onclick="window.App.startAuditBarcodeScan()" style="background:#7c3aed; height:38px; font-size:12.5px; border-radius:10px; display:flex; align-items:center; justify-content:center; gap:6px; width:100%;">
+                    <i class='bx bx-barcode-reader' style="font-size:17px;"></i> جرد سريع بالباركود
+                </button>
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-top:8px;">
                     <div class="audit-filters-row">
                         <button type="button" class="audit-filter-chip ${currentFilter === 'all' ? 'active' : ''}" onclick="window.App.auditMergedFilter='all'; window.App.renderAuditView();">
@@ -7364,15 +7338,15 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             </div>
 
             <!-- Quick Add & Barcode Scan Buttons Row -->
-            <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
-                <button type="button" class="btn-primary sm-btn" onclick="window.App.startAuditBarcodeScan()" style="background:#7c3aed; font-size:12px; display:flex; align-items:center; gap:5px; padding:7px 13px; border-radius:9px; font-weight:800;">
-                    <i class='bx bx-barcode-reader' style="font-size:16px;"></i> جرد بالباركود
+            <div style="display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;">
+                <button type="button" class="btn-primary sm-btn" onclick="window.App.startAuditBarcodeScan()" style="background:#7c3aed; height:36px; font-size:11.5px; padding:0 11px; border-radius:9px; flex:1; min-width:110px;">
+                    <i class='bx bx-barcode-reader' style="font-size:15px;"></i> بالباركود
                 </button>
-                <button class="btn-primary sm-btn" onclick="window.App.addMedicineDuringAudit()" style="font-size:11.5px; display:flex; align-items:center; gap:4px; padding:6px 12px; border-radius:8px;">
-                    <i class='bx bx-plus-medical'></i> إضافة دواء جديد
+                <button class="btn-primary sm-btn" onclick="window.App.addMedicineDuringAudit()" style="height:36px; font-size:11.5px; padding:0 11px; border-radius:9px; flex:1; min-width:105px;">
+                    <i class='bx bx-plus-medical'></i> دواء جديد
                 </button>
-                <button class="btn-ghost sm-btn" onclick="window.App.addCategoryDuringAudit()" style="font-size:11.5px; display:flex; align-items:center; gap:4px; padding:6px 12px; border-radius:8px; border:1px solid var(--border-color);">
-                    <i class='bx bx-folder-plus'></i> قسم جديد
+                <button class="btn-ghost sm-btn" onclick="window.App.addCategoryDuringAudit()" style="height:36px; font-size:11.5px; padding:0 10px; border-radius:9px; border:1px solid var(--border-color);">
+                    <i class='bx bx-folder-plus'></i> قسم
                 </button>
             </div>
 
@@ -7958,20 +7932,20 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             ` : ''}
 
-            <!-- Toolbar: Quick Search & Filter Chips & Sort -->
+            <!-- Toolbar: Quick Search & Action Buttons & Filter Chips & Sort -->
             <div class="audit-toolbar" style="margin-bottom:12px;">
-                <div style="display:flex; gap:8px; align-items:center; width:100%; flex-wrap:wrap;">
-                    <div class="audit-search-wrapper" style="flex:1; min-width:200px;">
-                        <i class='bx bx-search'></i>
-                        <input type="text" id="audit-med-search" class="audit-search-input" placeholder="بحث سريع باسم الدواء الإنجليزي أو العربي..." value="${Utils.escapeHTML(this.auditMedSearch || '')}" oninput="window.App.handleAuditMedSearch(this.value)">
-                        <button type="button" id="audit-med-clear-btn" onclick="window.App.handleAuditMedSearch('', true)" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:${this.auditMedSearch ? 'flex' : 'none'}; align-items:center;">
-                            <i class='bx bx-x' style="font-size:18px;"></i>
-                        </button>
-                    </div>
-                    <button type="button" class="btn-primary sm-btn" onclick="window.App.startAuditBarcodeScan()" style="background:#7c3aed; font-size:11.5px; display:flex; align-items:center; gap:4px; padding:6px 10px; border-radius:8px; white-space:nowrap; font-weight:800;">
-                        <i class='bx bx-barcode-reader' style="font-size:15px;"></i> بالباركود
+                <div class="audit-search-wrapper" style="width:100%;">
+                    <i class='bx bx-search'></i>
+                    <input type="text" id="audit-med-search" class="audit-search-input" placeholder="بحث سريع باسم الدواء الإنجليزي أو العربي..." value="${Utils.escapeHTML(this.auditMedSearch || '')}" oninput="window.App.handleAuditMedSearch(this.value)">
+                    <button type="button" id="audit-med-clear-btn" onclick="window.App.handleAuditMedSearch('', true)" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:${this.auditMedSearch ? 'flex' : 'none'}; align-items:center;">
+                        <i class='bx bx-x' style="font-size:18px;"></i>
                     </button>
-                    <button class="btn-primary sm-btn" onclick="window.App.addMedicineDuringAudit('${cat.id}')" style="font-size:11px; display:flex; align-items:center; gap:3px; padding:6px 10px; border-radius:8px; white-space:nowrap;">
+                </div>
+                <div style="display:flex; gap:6px; width:100%;">
+                    <button type="button" class="btn-primary sm-btn" onclick="window.App.startAuditBarcodeScan()" style="background:#7c3aed; height:36px; font-size:12px; padding:0 12px; border-radius:9px; flex:1;">
+                        <i class='bx bx-barcode-reader' style="font-size:16px;"></i> جرد بالباركود
+                    </button>
+                    <button class="btn-primary sm-btn" onclick="window.App.addMedicineDuringAudit('${cat.id}')" style="height:36px; font-size:12px; padding:0 12px; border-radius:9px; flex:1;">
                         <i class='bx bx-plus-medical'></i> دواء جديد
                     </button>
                 </div>
@@ -8336,12 +8310,14 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </button>
             </div>
 
-            <div class="form-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
-                <button type="button" class="btn-primary" onclick="window.App.saveCountFromModal('${medicineId}', false)" style="flex:1; min-width:120px;">💾 حفظ واعتماد العد</button>
-                <button type="button" class="btn-primary" onclick="window.App.saveCountFromModal('${medicineId}', true)" style="flex:1; min-width:130px; background:#7c3aed;" title="حفظ وفتح الكاميرا للعلبة التالية">
-                    <i class='bx bx-barcode-reader'></i> حفظ ومسح التالي
-                </button>
-                <button type="button" class="btn-ghost" onclick="window.UI.closeModal()" style="flex:0.45;">إلغاء</button>
+            <div class="form-actions" style="display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; gap:8px; width:100%;">
+                    <button type="button" class="btn-primary" onclick="window.App.saveCountFromModal('${medicineId}', false)" style="flex:1; height:42px; font-size:13px; border-radius:10px;">💾 حفظ واعتماد</button>
+                    <button type="button" class="btn-primary" onclick="window.App.saveCountFromModal('${medicineId}', true)" style="flex:1; height:42px; font-size:13px; border-radius:10px; background:#7c3aed;" title="حفظ وفتح الكاميرا للعلبة التالية">
+                        <i class='bx bx-barcode-reader'></i> حفظ ومسح التالي
+                    </button>
+                </div>
+                <button type="button" class="btn-ghost" onclick="window.UI.closeModal()" style="width:100%; height:36px; padding:6px; font-size:13px; border:1px solid var(--border-color); border-radius:10px;">إلغاء</button>
             </div>
         `);
     },

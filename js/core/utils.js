@@ -72,7 +72,7 @@ export const Utils = {
         return String(text)
             .toLowerCase()
             .trim()
-            .replace(/[أإآٱ]/g, 'ا')
+            .replace(/[أإآٱء]/g, 'ا')
             .replace(/ة/g, 'ه')
             .replace(/[ىئ]/g, 'ي')
             .replace(/ؤ/g, 'و')
@@ -83,6 +83,331 @@ export const Utils = {
             .replace(/[\u064B-\u065F\u0670]/g, '')
             .replace(/\u0640/g, '');
     },
+
+    // ===================== Unified Smart Search Engine (v18.18.0) =====================
+    collapseInitialisms(text) {
+        let s = String(text || '').toLowerCase();
+        s = s
+            .replace(/\bs\.?\s*r\.?\b/g, 'sr')
+            .replace(/\bc\.?\s*r\.?\b/g, 'cr')
+            .replace(/\bx\.?\s*r\.?\b/g, 'xr')
+            .replace(/\bf\.?\s*c\.?\s*t(?:abs?)?\b/g, 'tab')
+            .replace(/\be\.?\s*c\.?\s*t(?:abs?)?\b/g, 'tab')
+            .replace(/\bi\.?\s*v\.?\b/g, 'iv')
+            .replace(/\bi\.?\s*m\.?\b/g, 'im')
+            .replace(/\bi\.?\s*u\.?\b/g, 'iu');
+        // Dotted acronyms: "b.b.c." -> "bbc", "d.g." -> "dg"
+        s = s.replace(/(^|[\s(])((?:[a-z]\.\s*){2,5}[a-z]?\.?)(?=$|[\s),])/g, (full, pre, seq) => {
+            const letters = seq.replace(/[\s.]/g, '');
+            return letters.length >= 2 ? pre + letters : full;
+        });
+        // Spaced/comma leading digits: "1 2 3" or "1,2,3" -> "123"
+        s = s.replace(/^(\s*)(\d(?:[\s,.-]+\d){1,3})(?=\s|$|[(\[])/g, (_, pre, seq) => {
+            return pre + seq.replace(/[\s,.-]/g, '');
+        });
+        return s;
+    },
+
+    phoneticKeyEN(word) {
+        if (!word) return '';
+        const clean = String(word).toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (clean.length <= 2) return clean;
+        let s = clean
+            .replace(/ph/g, 'f')
+            .replace(/qu/g, 'k')
+            .replace(/rh/g, 'r')
+            .replace(/ch/g, 'k')
+            .replace(/ck/g, 'k')
+            .replace(/gh/g, 'g')
+            .replace(/th/g, 't')
+            .replace(/c(?=[eiy])/g, 's')
+            .replace(/c/g, 'k')
+            .replace(/p/g, 'b')
+            .replace(/[ey]/g, 'i')
+            .replace(/([a-z])\1+/g, '$1');
+        if (clean.endsWith('e') && s.length >= 5 && s.endsWith('i')) {
+            s = s.slice(0, -1);
+        }
+        return s;
+    },
+
+    consonantSkeletonEN(word) {
+        const p = this.phoneticKeyEN(word);
+        if (!p) return '';
+        return p[0] + p.slice(1).replace(/[aeiou]/g, '');
+    },
+
+    arabicSkeleton(word) {
+        if (!word) return '';
+        const w = this.normalizeArabic(word).replace(/[^\u0600-\u06FF0-9]/g, '');
+        if (w.length <= 2) return w;
+        return w[0] + w.slice(1).replace(/[اوي]/g, '');
+    },
+
+    damerauDistanceAtMost(a, b, maxDist = 2) {
+        if (a === b) return 0;
+        const la = a.length, lb = b.length;
+        if (Math.abs(la - lb) > maxDist) return maxDist + 1;
+        let prev2 = null;
+        let prev = new Array(lb + 1);
+        let curr = new Array(lb + 1);
+        for (let j = 0; j <= lb; j++) prev[j] = j;
+        for (let i = 1; i <= la; i++) {
+            curr[0] = i;
+            let rowMin = curr[0];
+            for (let j = 1; j <= lb; j++) {
+                const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+                let best = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+                if (i > 1 && j > 1 && prev2 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+                    best = Math.min(best, prev2[j - 2] + 1);
+                }
+                curr[j] = best;
+                if (best < rowMin) rowMin = best;
+            }
+            if (rowMin > maxDist) return maxDist + 1;
+            prev2 = prev;
+            prev = curr;
+            curr = new Array(lb + 1);
+        }
+        return prev[lb];
+    },
+
+    prepareSearchQuery(query) {
+        const raw = String(query || '').trim();
+        if (!raw) return null;
+        const low = raw.toLowerCase();
+        const arNorm = this.normalizeArabic(raw);
+        const collapsed = this.collapseInitialisms(low).trim();
+        const compactEN = collapsed.replace(/[^a-z0-9]/g, '');
+        const compactAR = arNorm.replace(/[^\u0600-\u06FF0-9]/g, '');
+        const isPureLongDigits = /^\d{6,}$/.test(raw);
+        const words = arNorm.split(/[\s/\-_,]+/).filter(Boolean).map(w => {
+            const wCol = this.collapseInitialisms(w);
+            const wEn = wCol.replace(/[^a-z0-9]/g, '');
+            const wAr = w.replace(/[^\u0600-\u06FF0-9]/g, '');
+            return {
+                raw: w,
+                en: wEn,
+                ar: wAr,
+                phonEN: wEn.length >= 3 ? this.phoneticKeyEN(wEn) : '',
+                consEN: wEn.length >= 4 ? this.consonantSkeletonEN(wEn) : '',
+                skelAR: wAr.length >= 3 ? this.arabicSkeleton(wAr) : ''
+            };
+        });
+        return {
+            raw,
+            low,
+            arNorm,
+            collapsed,
+            compactEN,
+            compactAR,
+            isPureLongDigits,
+            phonEN: compactEN.length >= 3 ? this.phoneticKeyEN(compactEN) : '',
+            consEN: compactEN.length >= 4 ? this.consonantSkeletonEN(compactEN) : '',
+            skelAR: compactAR.length >= 3 ? this.arabicSkeleton(compactAR) : '',
+            words
+        };
+    },
+
+    _scoreWordAgainstTokens(wObj, enTokens, arTokens) {
+        // Check a single query word against candidate EN & AR tokens (literal -> phonetic -> fuzzy)
+        if (wObj.en) {
+            const w = wObj.en;
+            for (let i = 0; i < enTokens.length; i++) {
+                const tok = enTokens[i];
+                if (tok === w) return 90;
+                if (tok.startsWith(w)) return 84;
+                if (w.length >= 3 && tok.includes(w)) return 76;
+            }
+            if (w.length >= 3 && !/^\d+$/.test(w)) {
+                const wPhon = wObj.phonEN;
+                const wCons = wObj.consEN;
+                for (let i = 0; i < enTokens.length; i++) {
+                    const tok = enTokens[i];
+                    if (tok.length < 3 || /^\d+$/.test(tok)) continue;
+                    const tPhon = this.phoneticKeyEN(tok);
+                    if (wPhon && tPhon === wPhon) {
+                        const d = this.damerauDistanceAtMost(w, tok, w.length >= 7 ? 3 : 2);
+                        if (d <= (w.length >= 7 ? 3 : 2)) return 60;
+                    }
+                    if (wPhon.length >= 4 && tPhon.startsWith(wPhon)) return 56;
+                    if (w.length >= 4 && tok.length >= 4 && this.damerauDistanceAtMost(w, tok, 1) === 1) return 54;
+                    if (w.length >= 5 && tok.length > w.length && this.damerauDistanceAtMost(w, tok.slice(0, w.length), 1) === 1) return 52;
+                    if (wPhon.length >= 5 && tPhon.length >= 5 && this.damerauDistanceAtMost(wPhon, tPhon, 1) === 1 && this.damerauDistanceAtMost(w, tok, 2) <= 2) return 50;
+                    if (wCons.length >= 4 && w.length >= 5 && tok.length >= 5 && this.consonantSkeletonEN(tok) === wCons && this.damerauDistanceAtMost(w, tok, 2) <= 2) return 48;
+                }
+            }
+        }
+        if (wObj.ar) {
+            const w = wObj.ar;
+            for (let i = 0; i < arTokens.length; i++) {
+                const tok = arTokens[i];
+                if (tok === w) return 90;
+                if (tok.startsWith(w)) return 84;
+                if (w.length >= 2 && tok.includes(w)) return 76;
+            }
+            if (w.length >= 3) {
+                const wSkel = wObj.skelAR;
+                for (let i = 0; i < arTokens.length; i++) {
+                    const tok = arTokens[i];
+                    if (tok.length < 3) continue;
+                    const tSkel = this.arabicSkeleton(tok);
+                    if (wSkel.length >= 3 && tSkel === wSkel) return 58;
+                    if (wSkel.length >= 3 && tSkel.startsWith(wSkel)) return 54;
+                    if (w.length >= 4 && tok.length >= 4 && this.damerauDistanceAtMost(w, tok, 1) === 1) return 50;
+                }
+            }
+        }
+        return 0;
+    },
+
+    /**
+     * Unified smart relevance scorer for any record across the app.
+     * Returns 0 (no match) or 48..100 (higher = better match; >=70 is literal/exact tier, 48..62 is phonetic/typo tier).
+     */
+    smartScore(queryOrPrepared, primaryFields = [], secondaryFields = []) {
+        const pq = (queryOrPrepared && typeof queryOrPrepared === 'object' && 'low' in queryOrPrepared)
+            ? queryOrPrepared
+            : this.prepareSearchQuery(queryOrPrepared);
+        if (!pq) return 100;
+
+        let best = 0;
+        const enTokens = [];
+        const arTokens = [];
+
+        const pushTokens = (text, isPrimary) => {
+            if (!text) return;
+            const rawStr = String(text);
+            const low = rawStr.toLowerCase();
+            const arNorm = this.normalizeArabic(rawStr);
+            const col = this.collapseInitialisms(low);
+            const compEN = col.replace(/[^a-z0-9]/g, '');
+            const compAR = arNorm.replace(/[^\u0600-\u06FF0-9]/g, '');
+
+            // Tier 1: Exact / Prefix / Substring / Compact matches
+            if (!isPrimary && (low === pq.low || rawStr.trim() === pq.raw)) {
+                best = Math.max(best, 100); // exact barcode / ID
+            }
+            if (isPrimary) {
+                if (low === pq.low || arNorm === pq.arNorm || (pq.compactEN.length >= 2 && compEN === pq.compactEN)) {
+                    best = Math.max(best, 98);
+                } else if (low.startsWith(pq.low) || col.startsWith(pq.collapsed) || arNorm.startsWith(pq.arNorm) ||
+                           (pq.compactEN.length >= 2 && compEN.startsWith(pq.compactEN)) ||
+                           (pq.compactAR.length >= 2 && compAR.startsWith(pq.compactAR))) {
+                    best = Math.max(best, 92);
+                } else if (low.includes(pq.low) || col.includes(pq.collapsed) || arNorm.includes(pq.arNorm) ||
+                           (pq.compactEN.length >= 3 && compEN.includes(pq.compactEN)) ||
+                           (pq.compactAR.length >= 3 && compAR.includes(pq.compactAR))) {
+                    best = Math.max(best, 82);
+                }
+            } else {
+                if (low.includes(pq.low) || arNorm.includes(pq.arNorm) ||
+                    (pq.compactEN.length >= 3 && compEN.includes(pq.compactEN))) {
+                    best = Math.max(best, 72);
+                }
+            }
+
+            // Collect tokens for multi-word & phonetic/fuzzy pass (only if we don't already have a top literal hit)
+            const eToks = col.replace(/[^a-z0-9-]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+            for (let i = 0; i < eToks.length; i++) {
+                const clean = eToks[i].replace(/-/g, '');
+                if (clean) enTokens.push(clean);
+                if (i + 1 < eToks.length) {
+                    const next = eToks[i + 1].replace(/-/g, '');
+                    if (clean.length >= 2 && next.length >= 2 && !/^\d+$/.test(next)) {
+                        enTokens.push(clean + next);
+                    }
+                }
+            }
+            const aToks = arNorm.replace(/[^\u0600-\u06FF0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+            for (let i = 0; i < aToks.length; i++) {
+                arTokens.push(aToks[i]);
+                if (i + 1 < aToks.length && aToks[i].length >= 2 && aToks[i + 1].length >= 2) {
+                    arTokens.push(aToks[i] + aToks[i + 1]);
+                }
+            }
+        };
+
+        for (let i = 0; i < primaryFields.length; i++) pushTokens(primaryFields[i], true);
+        for (let i = 0; i < secondaryFields.length; i++) pushTokens(secondaryFields[i], false);
+
+        if (best >= 82 || pq.isPureLongDigits) return best;
+
+        // Multi-word AND matching (e.g. "panadol 500", "fusi zon", "كريم 15", "تراي ميد")
+        if (pq.words.length >= 2) {
+            let minWordScore = 100;
+            let allMatched = true;
+            for (let i = 0; i < pq.words.length; i++) {
+                const ws = this._scoreWordAgainstTokens(pq.words[i], enTokens, arTokens);
+                if (ws === 0) {
+                    allMatched = false;
+                    break;
+                }
+                if (ws < minWordScore) minWordScore = ws;
+            }
+            if (allMatched) {
+                best = Math.max(best, minWordScore >= 75 ? 80 : 62);
+            }
+        }
+
+        // Single-word or joined-query phonetic/fuzzy match (only for len >= 3)
+        if (best < 62) {
+            if (pq.words.length === 1) {
+                best = Math.max(best, this._scoreWordAgainstTokens(pq.words[0], enTokens, arTokens));
+            } else if (pq.compactEN.length >= 4 || pq.compactAR.length >= 4) {
+                const joinedObj = {
+                    raw: pq.raw,
+                    en: pq.compactEN,
+                    ar: pq.compactAR,
+                    phonEN: pq.phonEN,
+                    consEN: pq.consEN,
+                    skelAR: pq.skelAR
+                };
+                best = Math.max(best, this._scoreWordAgainstTokens(joinedObj, enTokens, arTokens));
+            }
+        }
+
+        return best;
+    },
+
+    smartScoreMed(queryOrPrepared, med, extraFields = []) {
+        if (!med) return 0;
+        return this.smartScore(
+            queryOrPrepared,
+            [med.nameEN, med.nameAR],
+            [med.activeIngredient, med.barcode, med.id, ...extraFields]
+        );
+    },
+
+    /**
+     * Filter & optionally rank an array using the unified Smart Search Engine.
+     * Literal matches (score >= 70) always rank above phonetic/fuzzy matches (48..62).
+     */
+    smartFilter(items, query, getScoreFn, { tieBreaker = null, keepOrder = false } = {}) {
+        if (!Array.isArray(items) || items.length === 0) return [];
+        const pq = this.prepareSearchQuery(query);
+        if (!pq) return [...items];
+
+        const scored = [];
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            const score = getScoreFn(pq, item);
+            if (score > 0) scored.push({ item, score, idx: i });
+        }
+        if (keepOrder) return scored.map(x => x.item);
+
+        scored.sort((a, b) => {
+            // Keep literal tier (>=70) ahead of fuzzy tier (<70), and exact/startsWith ahead of substring
+            const tierA = a.score >= 90 ? 3 : (a.score >= 70 ? 2 : 1);
+            const tierB = b.score >= 90 ? 3 : (b.score >= 70 ? 2 : 1);
+            if (tierA !== tierB) return tierB - tierA;
+            if (tierA === 1 && a.score !== b.score) return b.score - a.score;
+            if (tieBreaker) return tieBreaker(a.item, b.item);
+            return a.idx - b.idx;
+        });
+        return scored.map(x => x.item);
+    },
+    // ===================== End Unified Smart Search Engine =====================
 
     getDefaultExpiry(yearsAhead = 2) {
         const y = new Date().getFullYear() + yearsAhead;
