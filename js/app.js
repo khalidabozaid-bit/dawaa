@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.11.4', // Add/edit medicine & category during audit
+    VERSION: '18.11.5', // Warehouse redesign — audit-style cards, drill-down, 3-dot menus
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2857,6 +2857,10 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     selectedAuditLocationId: null,
     selectedAuditCategoryId: null,
     warehouseSegment: 'medicines', // 'medicines' | 'categories' | 'locations'
+    whCatViewMode: 'categories', // 'categories' | 'all-meds' | 'cat-detail'
+    whSelectedCatId: null,
+    whCatSearch: '',
+    whCatSortMode: 'en',
 
     // --- Warehouse Segment Navigation ---
     switchWarehouseSegment(segment) {
@@ -2889,78 +2893,521 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     },
 
     async renderWarehouseCategories() {
-        const container = document.getElementById('wh-categories-grid');
+        const container = document.getElementById('wh-cats-container');
         if (!container) return;
 
         try {
             const cats = await Categories.getAllSorted();
             const allMeds = (await DB.getAll('medicineMaster')) || [];
+            const totalMedCount = allMeds.length;
 
-            const validCatIds = new Set(cats.filter(c => c.id !== 'uncategorized').map(c => c.id));
-            const uncatMeds = allMeds.filter(m => !m.categoryId || m.categoryId === 'uncategorized' || !validCatIds.has(m.categoryId));
-            const uncatCount = uncatMeds.length;
+            // If viewing a specific category's medicines
+            if (this.whCatViewMode === 'cat-detail' && this.whSelectedCatId) {
+                await this._renderWhCatDetail(container, cats, allMeds);
+                return;
+            }
 
-            const regularCats = cats.filter(c => c.id !== 'uncategorized');
+            const viewMode = this.whCatViewMode || 'categories';
+            const searchQuery = this.whCatSearch || '';
+            const sortMode = this.whCatSortMode || 'en';
 
-            let html = regularCats.map(c => {
-                const count = allMeds.filter(m => m.categoryId === c.id).length;
-                return `
-                    <div class="square-card" onclick="window.App.openCategoryDetailModal('${c.id}')" title="استعراض وإدارة أدوية ${c.nameAR}">
-                        <i class='bx ${c.icon || 'bx-category'} square-icon' style="color: ${c.color || 'var(--primary)'}"></i>
-                        <h3>${c.nameAR}</h3>
-                        <span class="square-meta">${count} صنف دواء</span>
-                    </div>
-                `;
-            }).join('');
+            // Filter & sort medicines for "all-meds" mode
+            let displayedMeds = [...allMeds];
+            if (searchQuery.trim()) {
+                const q = searchQuery.trim().toLowerCase();
+                displayedMeds = displayedMeds.filter(m =>
+                    (m.nameEN || '').toLowerCase().includes(q) ||
+                    (m.nameAR || '').toLowerCase().includes(q) ||
+                    (m.activeIngredient || '').toLowerCase().includes(q) ||
+                    (m.barcode || '').includes(q)
+                );
+            }
+            // Sort
+            displayedMeds.sort((a, b) => {
+                if (sortMode === 'ar') return (a.nameAR || '').localeCompare(b.nameAR || '', 'ar');
+                return (a.nameEN || '').localeCompare(b.nameEN || '', 'en');
+            });
 
-            // Always display the 'أدوية غير مصنفة' card
-            html += `
-                <div class="square-card uncategorized-card" onclick="window.App.openCategoryDetailModal('uncategorized')" title="استعراض الأدوية غير المصنفة" style="${uncatCount > 0 ? 'border: 1px dashed var(--warning); background: rgba(245, 158, 11, 0.05);' : 'opacity: 0.85;'}">
-                    <i class='bx bx-help-circle square-icon' style="color: ${uncatCount > 0 ? 'var(--warning)' : '#94a3b8'}"></i>
-                    <h3>أدوية غير مصنفة</h3>
-                    <span class="square-meta" style="${uncatCount > 0 ? 'color: var(--warning); font-weight: bold;' : ''}">${uncatCount} صنف دواء</span>
+            const catCount = cats.length;
+
+            container.innerHTML = `
+                <!-- Action Buttons -->
+                <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+                    <button class="btn-primary sm-btn" onclick="window.App.openAddMedicine()" style="display:flex; align-items:center; gap:5px; padding:8px 14px; border-radius:10px; font-size:12px; font-weight:800;">
+                        <i class='bx bx-plus'></i> إضافة دواء جديد
+                    </button>
+                    <button class="btn-ghost sm-btn" onclick="window.App.openAddCategoryModal()" style="display:flex; align-items:center; gap:5px; padding:8px 14px; border-radius:10px; font-size:12px; font-weight:800; border:1px solid var(--border-color);">
+                        <i class='bx bx-folder-plus'></i> قسم جديد
+                    </button>
                 </div>
-            `;
 
-            container.innerHTML = html;
+                <!-- View Mode Toggle (Categories / All Medicines) -->
+                <div style="display:flex; background:var(--bg-secondary); border-radius:12px; padding:4px; gap:4px; border:1px solid var(--border-color); margin-bottom:12px;">
+                    <button type="button" class="btn-ghost sm-btn" onclick="window.App.setWhCatViewMode('categories')" style="flex:1; font-size:12px; padding:8px 10px; border-radius:9px; font-weight:800; ${viewMode === 'categories' ? 'background:var(--primary); color:white;' : 'color:var(--text-muted);'}">
+                        <i class='bx bx-category'></i> حسب الأقسام (${catCount})
+                    </button>
+                    <button type="button" class="btn-ghost sm-btn" onclick="window.App.setWhCatViewMode('all-meds')" style="flex:1; font-size:12px; padding:8px 10px; border-radius:9px; font-weight:800; ${viewMode === 'all-meds' ? 'background:var(--primary); color:white;' : 'color:var(--text-muted);'}">
+                        <i class='bx bx-list-ul'></i> كل الأدوية (${totalMedCount})
+                    </button>
+                </div>
+
+                ${viewMode === 'all-meds' ? `
+                    <!-- Search Bar -->
+                    <div class="audit-toolbar" style="margin-bottom:10px;">
+                        <div class="audit-search-wrapper" style="width:100%;">
+                            <i class='bx bx-search'></i>
+                            <input type="text" class="audit-search-input" placeholder="🔍 بحث باسم الدواء أو الباركود..." value="${Utils.escapeHTML(searchQuery)}" oninput="window.App.handleWhCatSearch(this.value)">
+                            ${searchQuery ? `
+                                <button type="button" onclick="window.App.handleWhCatSearch('')" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:flex; align-items:center;">
+                                    <i class='bx bx-x' style="font-size:18px;"></i>
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+
+                    <!-- Sort -->
+                    <div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:10px;">
+                        <span style="font-size:11px; color:var(--text-muted); font-weight:bold;">الترتيب:</span>
+                        <select class="form-input" onchange="window.App.setWhCatSortMode(this.value)" style="padding:3px 8px; font-size:11px; border-radius:8px; width:auto; height:30px; background:var(--surface);">
+                            <option value="en" ${sortMode === 'en' ? 'selected' : ''}>🔤 أبجدي A-Z</option>
+                            <option value="ar" ${sortMode === 'ar' ? 'selected' : ''}>🔤 أبجدي أ-ي</option>
+                        </select>
+                    </div>
+
+                    <!-- Medicine Cards Grid -->
+                    ${displayedMeds.length === 0 ? `
+                        <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color);">
+                            <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
+                            <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة للبحث</p>
+                        </div>
+                    ` : `
+                        <div class="audit-square-grid">
+                            ${displayedMeds.map(m => this._renderWhMedicineCard(m)).join('')}
+                        </div>
+                    `}
+                ` : `
+                    <!-- Categories Grid -->
+                    <div class="audit-square-grid">
+                        ${cats.map(c => {
+                            const count = allMeds.filter(m => (m.categoryId || 'uncategorized') === c.id).length;
+                            const isUncat = c.id === 'uncategorized';
+                            const isSystem = isUncat || c.isSystem;
+                            return `
+                                <div class="square-card" onclick="window.App.openWhCatDetail('${c.id}')" style="cursor:pointer; position:relative; ${isUncat ? (count > 0 ? 'border:1px dashed var(--warning); background:rgba(245,158,11,0.05);' : 'opacity:0.85;') : ''}">
+                                    <button type="button" class="wh-cat-menu-btn" onclick="event.stopPropagation(); window.App.toggleWhCatMenu('${c.id}')" title="خيارات" style="position:absolute; top:4px; left:4px; width:24px; height:24px; border-radius:6px; border:1px solid var(--border-color); background:var(--surface); display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2; padding:0; box-shadow:0 1px 2px rgba(0,0,0,0.06);">
+                                        <i class='bx bx-dots-vertical-rounded' style="font-size:14px; color:var(--text-muted);"></i>
+                                    </button>
+                                    <div id="wh-cat-menu-${c.id}" class="wh-cat-popup-menu" style="display:none; position:absolute; top:30px; left:4px; z-index:10; background:var(--surface); border:1px solid var(--border-color); border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,0.12); min-width:160px; padding:6px 0; font-size:12px;">
+                                        <button onclick="event.stopPropagation(); window.App.openWhCatDetail('${c.id}'); window.App._closeAllWhCatMenus();" style="display:flex; align-items:center; gap:8px; width:100%; padding:8px 14px; border:none; background:none; cursor:pointer; font-family:inherit; font-size:12px; font-weight:600; color:var(--text-main); text-align:right;">
+                                            <i class='bx bx-show' style="font-size:15px; color:var(--primary);"></i> عرض الأدوية
+                                        </button>
+                                        ${!isSystem ? `
+                                            <button onclick="event.stopPropagation(); window.App.openEditCategoryModal('${c.id}'); window.App._closeAllWhCatMenus();" style="display:flex; align-items:center; gap:8px; width:100%; padding:8px 14px; border:none; background:none; cursor:pointer; font-family:inherit; font-size:12px; font-weight:600; color:var(--text-main); text-align:right;">
+                                                <i class='bx bx-edit' style="font-size:15px; color:var(--accent);"></i> تعديل القسم
+                                            </button>
+                                            <button onclick="event.stopPropagation(); window.App.deleteCategoryConfirm('${c.id}'); window.App._closeAllWhCatMenus();" style="display:flex; align-items:center; gap:8px; width:100%; padding:8px 14px; border:none; background:none; cursor:pointer; font-family:inherit; font-size:12px; font-weight:600; color:var(--danger); text-align:right;">
+                                                <i class='bx bx-trash' style="font-size:15px;"></i> حذف القسم
+                                            </button>
+                                        ` : `
+                                            <div style="padding:6px 14px; font-size:10px; color:var(--text-muted); font-weight:600;">
+                                                <i class='bx bx-lock-alt'></i> قسم أساسي لا يمكن حذفه
+                                            </div>
+                                        `}
+                                    </div>
+                                    <i class='bx ${c.icon || 'bx-category'} square-icon' style="color: ${isUncat ? (count > 0 ? 'var(--warning)' : '#94a3b8') : (c.color || 'var(--primary)')}"></i>
+                                    <h3>${Utils.escapeHTML(c.nameAR)}</h3>
+                                    <span class="square-meta">${count} صنف دواء</span>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `}
+            `;
         } catch (err) {
             console.error('Error rendering warehouse categories:', err);
         }
     },
 
+    // Render a single category's medicines (replaces the grid in-place)
+    async _renderWhCatDetail(container, cats, allMeds) {
+        const cat = cats.find(c => c.id === this.whSelectedCatId) || { id: this.whSelectedCatId, nameAR: 'غير مصنفة', icon: 'bx-help-circle', color: '#94a3b8' };
+        let medsInCat = allMeds.filter(m => (m.categoryId || 'uncategorized') === this.whSelectedCatId);
+        const totalInCat = medsInCat.length;
+        const isUncategorized = this.whSelectedCatId === 'uncategorized';
+
+        const searchQuery = this.whCatSearch || '';
+        const sortMode = this.whCatSortMode || 'en';
+
+        if (searchQuery.trim()) {
+            const q = searchQuery.trim().toLowerCase();
+            medsInCat = medsInCat.filter(m =>
+                (m.nameEN || '').toLowerCase().includes(q) ||
+                (m.nameAR || '').toLowerCase().includes(q) ||
+                (m.activeIngredient || '').toLowerCase().includes(q)
+            );
+        }
+        medsInCat.sort((a, b) => {
+            if (sortMode === 'ar') return (a.nameAR || '').localeCompare(b.nameAR || '', 'ar');
+            return (a.nameEN || '').localeCompare(b.nameEN || '', 'en');
+        });
+
+        container.innerHTML = `
+            <!-- Back Button + Category Header -->
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px; padding:10px 14px; background:var(--surface); border:1px solid var(--border-color); border-radius:12px;">
+                <button onclick="window.App.backToWhCategories()" style="width:34px; height:34px; border-radius:10px; border:1px solid var(--border-color); background:var(--bg-secondary); display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0;">
+                    <i class='bx bx-right-arrow-alt' style="font-size:18px; color:var(--primary);"></i>
+                </button>
+                <div style="display:flex; align-items:center; gap:8px; flex:1;">
+                    <i class='bx ${cat.icon || 'bx-category'}' style="font-size:22px; color:${cat.color || 'var(--primary)'};"></i>
+                    <div>
+                        <strong style="font-size:14px;">${Utils.escapeHTML(cat.nameAR)}</strong>
+                        <div style="font-size:11px; color:var(--text-muted);">${totalInCat} صنف مسجل</div>
+                    </div>
+                </div>
+                ${!isUncategorized ? `
+                    <button class="icon-btn" onclick="window.App.openEditCategoryModal('${cat.id}')" title="تعديل القسم" style="width:32px; height:32px;">
+                        <i class='bx bx-edit' style="font-size:15px;"></i>
+                    </button>
+                ` : ''}
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+                <button class="btn-primary sm-btn" onclick="window.App.openAddMedicineWithCat('${cat.id}')" style="display:flex; align-items:center; gap:5px; padding:7px 12px; border-radius:10px; font-size:11.5px; font-weight:800;">
+                    <i class='bx bx-plus-medical'></i> إضافة دواء جديد
+                </button>
+            </div>
+
+            <!-- Search Bar -->
+            <div class="audit-toolbar" style="margin-bottom:10px;">
+                <div class="audit-search-wrapper" style="width:100%;">
+                    <i class='bx bx-search'></i>
+                    <input type="text" class="audit-search-input" placeholder="🔍 بحث في ${Utils.escapeHTML(cat.nameAR)}..." value="${Utils.escapeHTML(searchQuery)}" oninput="window.App.handleWhCatSearch(this.value)">
+                    ${searchQuery ? `
+                        <button type="button" onclick="window.App.handleWhCatSearch('')" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:flex; align-items:center;">
+                            <i class='bx bx-x' style="font-size:18px;"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+
+            <!-- Sort -->
+            <div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:10px;">
+                <span style="font-size:11px; color:var(--text-muted); font-weight:bold;">الترتيب:</span>
+                <select class="form-input" onchange="window.App.setWhCatSortMode(this.value)" style="padding:3px 8px; font-size:11px; border-radius:8px; width:auto; height:30px; background:var(--surface);">
+                    <option value="en" ${sortMode === 'en' ? 'selected' : ''}>🔤 أبجدي A-Z</option>
+                    <option value="ar" ${sortMode === 'ar' ? 'selected' : ''}>🔤 أبجدي أ-ي</option>
+                </select>
+            </div>
+
+            <!-- Medicine Cards Grid -->
+            ${medsInCat.length === 0 ? `
+                <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color);">
+                    <i class='bx bx-capsule' style="font-size:32px; color:var(--text-muted); opacity:0.5;"></i>
+                    <p style="margin:8px 0; font-size:13px; color:var(--text-muted);">${searchQuery ? 'لا توجد أدوية مطابقة للبحث' : 'لا توجد أدوية في هذا القسم'}</p>
+                    ${!searchQuery ? `<button class="btn-primary sm-btn" onclick="window.App.openAddMedicineWithCat('${cat.id}')"><i class='bx bx-plus'></i> إضافة أول دواء</button>` : ''}
+                </div>
+            ` : `
+                <div class="audit-square-grid">
+                    ${medsInCat.map(m => this._renderWhMedicineCard(m, cat.id)).join('')}
+                </div>
+            `}
+        `;
+    },
+
+    // Warehouse medicine card (same style as audit)
+    _renderWhMedicineCard(med, catId = null) {
+        const langPref = localStorage.getItem('dawaa_med_lang_pref') || 'en';
+        let primaryName = med.nameEN || med.nameAR || 'دواء';
+        let secondaryName = (med.nameAR && med.nameAR !== med.nameEN) ? med.nameAR : '';
+
+        if (langPref === 'ar') {
+            primaryName = med.nameAR || med.nameEN || 'دواء';
+            secondaryName = (med.nameEN && med.nameEN !== med.nameAR) ? med.nameEN : '';
+        }
+
+        const safePrimary = Utils.escapeHTML(primaryName);
+        const safeSecondary = (secondaryName && secondaryName !== primaryName) ? Utils.escapeHTML(secondaryName) : '';
+        const imgUrl = (typeof Categories !== 'undefined' && Categories.getMedicineImage) ? Categories.getMedicineImage(med) : (med.imagePath || 'assets/icons/default-med.png');
+        const srcCat = catId ? `'${catId}'` : 'null';
+
+        return `
+            <div class="square-card" onclick="window.App.openMedicineDetails('${med.id}')" title="عرض تفاصيل" style="cursor:pointer; position:relative;">
+                <button type="button" class="audit-edit-med-btn" onclick="event.stopPropagation(); window.App.openEditMedicine('${med.id}')" title="تعديل بيانات الدواء" style="position:absolute; top:4px; left:4px; width:22px; height:22px; border-radius:6px; border:1px solid var(--border-color); background:var(--surface); display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2; padding:0; box-shadow:0 1px 2px rgba(0,0,0,0.08);">
+                    <i class='bx bx-edit-alt' style="font-size:11px; color:var(--primary);"></i>
+                </button>
+                <div style="width:38px; height:38px; border-radius:8px; overflow:hidden; margin-bottom:4px; flex-shrink:0; box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                    <img src="${imgUrl}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                </div>
+                <h3 style="font-size:11.5px; font-weight:800; margin:0 0 2px 0; line-height:1.25; word-break:break-word;">${safePrimary}</h3>
+                ${safeSecondary ? `<div style="font-size:10px; color:var(--text-muted); margin-bottom:2px; line-height:1.2; word-break:break-word;">${safeSecondary}</div>` : ''}
+                <div style="display:flex; gap:4px; margin-top:auto; padding-top:4px;">
+                    ${catId ? `<button type="button" onclick="event.stopPropagation(); window.App.openMoveCategoryModal('${med.id}', ${srcCat})" title="نقل لقسم آخر" style="width:24px; height:24px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-secondary); display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0;">
+                        <i class='bx bx-transfer' style="font-size:12px; color:var(--accent);"></i>
+                    </button>` : ''}
+                    <button type="button" onclick="event.stopPropagation(); window.App.deleteMasterMedicine('${med.id}')" title="حذف" style="width:24px; height:24px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-secondary); display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0;">
+                        <i class='bx bx-trash' style="font-size:12px; color:var(--danger);"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    },
+
+    // --- Warehouse Category View Handlers ---
+    setWhCatViewMode(mode) {
+        this.whCatViewMode = mode;
+        this.whCatSearch = '';
+        this.whSelectedCatId = null;
+        this.renderWarehouseCategories();
+    },
+
+    openWhCatDetail(catId) {
+        this.whCatViewMode = 'cat-detail';
+        this.whSelectedCatId = catId;
+        this.whCatSearch = '';
+        this.renderWarehouseCategories();
+    },
+
+    backToWhCategories() {
+        this.whCatViewMode = 'categories';
+        this.whSelectedCatId = null;
+        this.whCatSearch = '';
+        this.renderWarehouseCategories();
+    },
+
+    handleWhCatSearch(query) {
+        this.whCatSearch = query;
+        this.renderWarehouseCategories();
+    },
+
+    setWhCatSortMode(mode) {
+        this.whCatSortMode = mode;
+        this.renderWarehouseCategories();
+    },
+
+    toggleWhCatMenu(catId) {
+        this._closeAllWhCatMenus();
+        const menu = document.getElementById(`wh-cat-menu-${catId}`);
+        if (menu) {
+            menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+            if (menu.style.display === 'block') {
+                // Close on outside click
+                setTimeout(() => {
+                    const closer = (e) => {
+                        if (!menu.contains(e.target)) {
+                            menu.style.display = 'none';
+                            document.removeEventListener('click', closer);
+                        }
+                    };
+                    document.addEventListener('click', closer);
+                }, 10);
+            }
+        }
+    },
+
+    _closeAllWhCatMenus() {
+        document.querySelectorAll('.wh-cat-popup-menu').forEach(m => m.style.display = 'none');
+    },
+
     async renderWarehouseLocations() {
-        const container = document.getElementById('wh-locations-grid');
+        const container = document.getElementById('wh-locs-container');
         if (!container) return;
 
         try {
             const locs = await Locations.getAll();
             const allMeds = (await DB.getAll('medicineMaster')) || [];
 
-            const htmlPromises = locs.map(async (loc) => {
-                // Count medicines assigned to this location
-                const medsInLoc = allMeds.filter(m => {
-                    if (m.allowedLocations && Array.isArray(m.allowedLocations) && m.allowedLocations.length > 0) {
-                        return m.allowedLocations.includes(loc.id);
-                    }
-                    if (m.primaryLocation === loc.id) return true;
-                    return false;
-                });
-                const count = medsInLoc.length;
-                const primaryCount = allMeds.filter(m => m.primaryLocation === loc.id).length;
+            // If viewing a specific location's medicines
+            if (this.whLocViewMode === 'loc-detail' && this.whSelectedLocId) {
+                await this._renderWhLocDetail(container, locs, allMeds);
+                return;
+            }
 
-                return `
-                    <div class="square-card" onclick="window.App.openLocationDetailModal('${loc.id}')" title="استعراض أدوية ${Utils.escapeHTML(loc.nameAR)}">
-                        <i class='bx ${loc.icon || 'bx-map-pin'} square-icon' style="color: ${loc.color || 'var(--primary)'}"></i>
-                        <h3>${Utils.escapeHTML(loc.nameAR)}</h3>
-                        <span class="square-meta">${count} صنف</span>
-                        ${primaryCount > 0 ? `<span style="font-size:10px; color:var(--primary); font-weight:600;">⭐ ${primaryCount} أساسي</span>` : ''}
-                    </div>
-                `;
-            });
+            const searchQuery = this.whLocSearch || '';
+            const sortMode = this.whLocSortMode || 'en';
 
-            container.innerHTML = (await Promise.all(htmlPromises)).join('');
+            container.innerHTML = `
+                <!-- Action Button -->
+                <div style="display:flex; gap:8px; margin-bottom:12px;">
+                    <button class="btn-primary sm-btn" onclick="window.App.openAddLocationModal()" style="display:flex; align-items:center; gap:5px; padding:8px 14px; border-radius:10px; font-size:12px; font-weight:800;">
+                        <i class='bx bx-plus'></i> مكان تخزين جديد
+                    </button>
+                </div>
+
+                <!-- Locations Grid -->
+                <div class="audit-square-grid">
+                    ${(await Promise.all(locs.map(async (loc) => {
+                        const medsInLoc = allMeds.filter(m => {
+                            if (m.allowedLocations && Array.isArray(m.allowedLocations) && m.allowedLocations.length > 0) {
+                                return m.allowedLocations.includes(loc.id);
+                            }
+                            if (m.primaryLocation === loc.id) return true;
+                            return false;
+                        });
+                        const count = medsInLoc.length;
+                        const primaryCount = allMeds.filter(m => m.primaryLocation === loc.id).length;
+
+                        return `
+                            <div class="square-card" onclick="window.App.openWhLocDetail('${loc.id}')" style="cursor:pointer; position:relative;">
+                                <button type="button" onclick="event.stopPropagation(); window.App.toggleWhLocMenu('${loc.id}')" title="خيارات" style="position:absolute; top:4px; left:4px; width:24px; height:24px; border-radius:6px; border:1px solid var(--border-color); background:var(--surface); display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2; padding:0; box-shadow:0 1px 2px rgba(0,0,0,0.06);">
+                                    <i class='bx bx-dots-vertical-rounded' style="font-size:14px; color:var(--text-muted);"></i>
+                                </button>
+                                <div id="wh-loc-menu-${loc.id}" class="wh-cat-popup-menu" style="display:none; position:absolute; top:30px; left:4px; z-index:10; background:var(--surface); border:1px solid var(--border-color); border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,0.12); min-width:150px; padding:6px 0; font-size:12px;">
+                                    <button onclick="event.stopPropagation(); window.App.openWhLocDetail('${loc.id}'); window.App._closeAllWhCatMenus();" style="display:flex; align-items:center; gap:8px; width:100%; padding:8px 14px; border:none; background:none; cursor:pointer; font-family:inherit; font-size:12px; font-weight:600; color:var(--text-main); text-align:right;">
+                                        <i class='bx bx-show' style="font-size:15px; color:var(--primary);"></i> عرض الأدوية
+                                    </button>
+                                    <button onclick="event.stopPropagation(); window.App.openEditLocationModal('${loc.id}'); window.App._closeAllWhCatMenus();" style="display:flex; align-items:center; gap:8px; width:100%; padding:8px 14px; border:none; background:none; cursor:pointer; font-family:inherit; font-size:12px; font-weight:600; color:var(--text-main); text-align:right;">
+                                        <i class='bx bx-edit' style="font-size:15px; color:var(--accent);"></i> تعديل المكان
+                                    </button>
+                                    <button onclick="event.stopPropagation(); window.App.deleteLocationConfirm('${loc.id}'); window.App._closeAllWhCatMenus();" style="display:flex; align-items:center; gap:8px; width:100%; padding:8px 14px; border:none; background:none; cursor:pointer; font-family:inherit; font-size:12px; font-weight:600; color:var(--danger); text-align:right;">
+                                        <i class='bx bx-trash' style="font-size:15px;"></i> حذف المكان
+                                    </button>
+                                </div>
+                                <i class='bx ${loc.icon || 'bx-map-pin'} square-icon' style="color: ${loc.color || 'var(--primary)'}"></i>
+                                <h3>${Utils.escapeHTML(loc.nameAR)}</h3>
+                                <span class="square-meta">${count} صنف</span>
+                                ${primaryCount > 0 ? `<span style="font-size:10px; color:var(--primary); font-weight:600;">⭐ ${primaryCount} أساسي</span>` : ''}
+                            </div>
+                        `;
+                    }))).join('')}
+                </div>
+            `;
         } catch (err) {
             console.error('Error rendering warehouse locations:', err);
+        }
+    },
+
+    // Location drill-down detail view
+    async _renderWhLocDetail(container, locs, allMeds) {
+        const loc = locs.find(l => l.id === this.whSelectedLocId);
+        if (!loc) { this.backToWhLocations(); return; }
+
+        let medsInLoc = allMeds.filter(m => {
+            if (m.allowedLocations && Array.isArray(m.allowedLocations) && m.allowedLocations.length > 0) {
+                return m.allowedLocations.includes(loc.id);
+            }
+            if (m.primaryLocation === loc.id) return true;
+            return false;
+        });
+        const totalInLoc = medsInLoc.length;
+        const searchQuery = this.whLocSearch || '';
+        const sortMode = this.whLocSortMode || 'en';
+
+        if (searchQuery.trim()) {
+            const q = searchQuery.trim().toLowerCase();
+            medsInLoc = medsInLoc.filter(m =>
+                (m.nameEN || '').toLowerCase().includes(q) ||
+                (m.nameAR || '').toLowerCase().includes(q) ||
+                (m.activeIngredient || '').toLowerCase().includes(q)
+            );
+        }
+        medsInLoc.sort((a, b) => {
+            if (sortMode === 'ar') return (a.nameAR || '').localeCompare(b.nameAR || '', 'ar');
+            return (a.nameEN || '').localeCompare(b.nameEN || '', 'en');
+        });
+
+        container.innerHTML = `
+            <!-- Back + Location Header -->
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px; padding:10px 14px; background:var(--surface); border:1px solid var(--border-color); border-radius:12px;">
+                <button onclick="window.App.backToWhLocations()" style="width:34px; height:34px; border-radius:10px; border:1px solid var(--border-color); background:var(--bg-secondary); display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0;">
+                    <i class='bx bx-right-arrow-alt' style="font-size:18px; color:var(--primary);"></i>
+                </button>
+                <div style="display:flex; align-items:center; gap:8px; flex:1;">
+                    <i class='bx ${loc.icon || 'bx-map-pin'}' style="font-size:22px; color:${loc.color || 'var(--primary)'};"></i>
+                    <div>
+                        <strong style="font-size:14px;">${Utils.escapeHTML(loc.nameAR)}</strong>
+                        <div style="font-size:11px; color:var(--text-muted);">${totalInLoc} صنف في هذا المكان</div>
+                    </div>
+                </div>
+                <button class="icon-btn" onclick="window.App.openEditLocationModal('${loc.id}')" title="تعديل المكان" style="width:32px; height:32px;">
+                    <i class='bx bx-edit' style="font-size:15px;"></i>
+                </button>
+            </div>
+
+            <!-- Search -->
+            <div class="audit-toolbar" style="margin-bottom:10px;">
+                <div class="audit-search-wrapper" style="width:100%;">
+                    <i class='bx bx-search'></i>
+                    <input type="text" class="audit-search-input" placeholder="🔍 بحث في ${Utils.escapeHTML(loc.nameAR)}..." value="${Utils.escapeHTML(searchQuery)}" oninput="window.App.handleWhLocSearch(this.value)">
+                    ${searchQuery ? `
+                        <button type="button" onclick="window.App.handleWhLocSearch('')" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 8px; display:flex; align-items:center;">
+                            <i class='bx bx-x' style="font-size:18px;"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+
+            <!-- Sort -->
+            <div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:10px;">
+                <span style="font-size:11px; color:var(--text-muted); font-weight:bold;">الترتيب:</span>
+                <select class="form-input" onchange="window.App.setWhLocSortMode(this.value)" style="padding:3px 8px; font-size:11px; border-radius:8px; width:auto; height:30px; background:var(--surface);">
+                    <option value="en" ${sortMode === 'en' ? 'selected' : ''}>🔤 أبجدي A-Z</option>
+                    <option value="ar" ${sortMode === 'ar' ? 'selected' : ''}>🔤 أبجدي أ-ي</option>
+                </select>
+            </div>
+
+            <!-- Medicine Cards -->
+            ${medsInLoc.length === 0 ? `
+                <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color);">
+                    <i class='bx bx-map-pin' style="font-size:32px; color:var(--text-muted); opacity:0.5;"></i>
+                    <p style="margin:8px 0; font-size:13px; color:var(--text-muted);">${searchQuery ? 'لا توجد أدوية مطابقة للبحث' : 'لا توجد أدوية في هذا المكان'}</p>
+                </div>
+            ` : `
+                <div class="audit-square-grid">
+                    ${medsInLoc.map(m => {
+                        return this._renderWhMedicineCard(m);
+                    }).join('')}
+                </div>
+            `}
+        `;
+    },
+
+    // Location view handlers
+    whLocViewMode: null,
+    whSelectedLocId: null,
+    whLocSearch: '',
+    whLocSortMode: 'en',
+
+    openWhLocDetail(locId) {
+        this.whLocViewMode = 'loc-detail';
+        this.whSelectedLocId = locId;
+        this.whLocSearch = '';
+        this.renderWarehouseLocations();
+    },
+
+    backToWhLocations() {
+        this.whLocViewMode = null;
+        this.whSelectedLocId = null;
+        this.whLocSearch = '';
+        this.renderWarehouseLocations();
+    },
+
+    handleWhLocSearch(query) {
+        this.whLocSearch = query;
+        this.renderWarehouseLocations();
+    },
+
+    setWhLocSortMode(mode) {
+        this.whLocSortMode = mode;
+        this.renderWarehouseLocations();
+    },
+
+    toggleWhLocMenu(locId) {
+        this._closeAllWhCatMenus();
+        const menu = document.getElementById(`wh-loc-menu-${locId}`);
+        if (menu) {
+            menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+            if (menu.style.display === 'block') {
+                setTimeout(() => {
+                    const closer = (e) => {
+                        if (!menu.contains(e.target)) {
+                            menu.style.display = 'none';
+                            document.removeEventListener('click', closer);
+                        }
+                    };
+                    document.addEventListener('click', closer);
+                }, 10);
+            }
         }
     },
 

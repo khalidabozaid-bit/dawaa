@@ -79,7 +79,7 @@
             <div class="app-logo">
                 <i class='bx bxs-capsule'></i>
                 <h1>دواء</h1>
-                <span id="app-version-tag" style="display: none;">v18.11.4</span>
+                <span id="app-version-tag" style="display: none;">v18.11.5</span>
                 <span id="network-status" style="display: none;"></span>
             </div>
             
@@ -242,26 +242,15 @@
                                 <div id="inventory-items-list" class="items-list"></div>
             </div>
 
-            <!-- Section 2: Categories Management -->
+            <!-- Section 2: Categories Management (Full Audit-Style View) -->
             <div id="wh-cats-section" style="display: none;">
-                <div class="section-actions mb-15" style="display: flex; justify-content: space-between; align-items: center;">
-                    <p class="text-muted small">تصنيفات الأدوية العلاجية وإدارتها</p>
-                    <button class="btn-primary sm-btn" onclick="window.App.openAddCategoryModal()">
-                        <i class='bx bx-plus'></i> تصنيف جديد
-                    </button>
-                </div>
-                <div id="wh-categories-grid" class="audit-square-grid"></div>
+                <div id="wh-cats-container"></div>
             </div>
 
             <!-- Section 3: Storage Locations Management -->
             <div id="wh-locs-section" style="display: none;">
-                <div class="section-actions mb-15" style="display: flex; justify-content: space-between; align-items: center;">
-                    <p class="text-muted small">أماكن ومواقع حفظ الأدوية (صيدلية، ثلاجة، دولاب...)</p>
-                    <button class="btn-primary sm-btn" onclick="window.App.openAddLocationModal()">
-                        <i class='bx bx-plus'></i> مكان تخزين جديد
-                    </button>
-                </div>
-                <div id="wh-locations-grid" class="audit-square-grid"></div>
+                <div id="wh-locs-container"></div>
+            </div>
             </div>
         </section>
 
