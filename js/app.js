@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.22.0', // Inverted Negative-Polarity QR/DataMatrix Scanner + Torch + Sticky Keyboard Save/Scan Bar in Audit Count
+    VERSION: '18.22.1', // Linked Groups: Load ALL medicines + Category Filter + Smart Auto-Suggestions (Active & Brand)
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -11454,6 +11454,112 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         `;
     },
 
+    // --- Smart Auto-Suggestions for Linked Drug Groups (v18.22.1) ---
+    _computeSuggestedDrugGroups(allMeds = [], existingGroups = []) {
+        const alreadyGrouped = new Set();
+        for (const g of (existingGroups || [])) {
+            for (const mid of (g.medicineIds || [])) alreadyGrouped.add(mid);
+        }
+
+        const ungrouped = (allMeds || []).filter(m => m && !alreadyGrouped.has(m.id));
+        const suggestions = [];
+        const usedInSuggestion = new Set();
+
+        // 1. Group by normalized Active Ingredient (2+ medicines)
+        const byActive = new Map();
+        for (const m of ungrouped) {
+            const key = this._normalizeActiveKey ? this._normalizeActiveKey(m.activeIngredient || '') : '';
+            if (!key) continue;
+            if (!byActive.has(key)) byActive.set(key, { label: (m.activeIngredient || '').trim(), meds: [] });
+            byActive.get(key).meds.push(m);
+        }
+        for (const [, bucket] of byActive.entries()) {
+            if (bucket.meds.length >= 2) {
+                bucket.meds.sort((a, b) => (a.nameEN || a.nameAR || '').localeCompare(b.nameEN || b.nameAR || ''));
+                suggestions.push({
+                    suggestedName: `مجموعة ${bucket.label}`,
+                    reason: 'نفس المادة الفعالة 🧬',
+                    meds: bucket.meds
+                });
+                bucket.meds.forEach(m => usedInSuggestion.add(m.id));
+            }
+        }
+
+        // 2. Group remaining by shared brand first-word stem (min 4 alpha chars, e.g. Panadol / Augmentin / Voltaren)
+        const byBrand = new Map();
+        for (const m of ungrouped) {
+            if (usedInSuggestion.has(m.id)) continue;
+            const enWord = String(m.nameEN || '').trim().toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).find(w => w.length >= 4);
+            const arWord = !enWord ? String(m.nameAR || '').trim().replace(/[^\u0600-\u06FF\s]/g, ' ').split(/\s+/).find(w => w.length >= 3) : null;
+            const stem = enWord || arWord;
+            if (!stem) continue;
+            const displayWord = enWord
+                ? (String(m.nameEN || '').trim().split(/\s+/).find(w => w.toLowerCase().includes(enWord)) || enWord)
+                : arWord;
+            if (!byBrand.has(stem)) byBrand.set(stem, { label: displayWord, meds: [] });
+            byBrand.get(stem).meds.push(m);
+        }
+        for (const [, bucket] of byBrand.entries()) {
+            if (bucket.meds.length >= 2) {
+                bucket.meds.sort((a, b) => (a.nameEN || a.nameAR || '').localeCompare(b.nameEN || b.nameAR || ''));
+                suggestions.push({
+                    suggestedName: `عائلة ${bucket.label}`,
+                    reason: 'نفس الاسم التجاري ✨',
+                    meds: bucket.meds
+                });
+            }
+        }
+
+        suggestions.sort((a, b) => b.meds.length - a.meds.length || a.suggestedName.localeCompare(b.suggestedName));
+        return suggestions;
+    },
+
+    async _dgQuickCreateSuggested(idx) {
+        const sug = this._dgSuggestionsCache?.[idx];
+        if (!sug || !sug.meds || sug.meds.length < 2) return;
+        try {
+            const now = new Date().toISOString();
+            const colorIdx = (this._drugGroupsCache?.length || 0) % this._DRUG_GROUP_COLORS.length;
+            const groupObj = {
+                id: `grp_${Date.now()}`,
+                name: sug.suggestedName,
+                color: this._DRUG_GROUP_COLORS[colorIdx].hex,
+                medicineIds: sug.meds.map(m => m.id),
+                createdAt: now,
+                updatedAt: now,
+                syncStatus: 'local'
+            };
+            await DB.put('drug_groups', groupObj);
+            if (typeof Sync !== 'undefined' && Sync.pushDrugGroup) {
+                Sync.pushDrugGroup(groupObj).catch(() => {});
+            }
+            await this.loadDrugGroupsCache(true);
+            UI.showToast(`تم إنشاء المجموعة «${groupObj.name}» (${groupObj.medicineIds.length} أصناف) 🔗✨`, 'success');
+            await this.openDrugGroupsManagerModal();
+            await this.refreshAllViews();
+        } catch (err) {
+            console.error('_dgQuickCreateSuggested error:', err);
+            UI.showToast('تعذر إنشاء المجموعة', 'danger');
+        }
+    },
+
+    _dgApplySuggestionToEditor(idx) {
+        const st = this._dgEditState;
+        const sug = this._dgSuggestionsCache?.[idx];
+        if (!st || !sug) return;
+        for (const m of sug.meds) {
+            if (!st.selectedIds.includes(m.id)) st.selectedIds.push(m.id);
+        }
+        const nameEl = document.getElementById('dg-name-input');
+        if (nameEl && !nameEl.value.trim()) {
+            st.name = sug.suggestedName;
+            nameEl.value = sug.suggestedName;
+        }
+        UI.showToast(`تم إضافة ${sug.meds.length} أصناف مقترحة ✨`, 'success');
+        this._dgRenderSelected();
+        this._dgRenderSearchResults();
+    },
+
     // --- Drug Groups Manager & Editor Modals ---
     async openDrugGroupsManagerModal() {
         try {
@@ -11462,6 +11568,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 DB.getAll('medicineMaster')
             ]);
             const medMap = new Map((allMeds || []).map(m => [m.id, m]));
+            const suggestions = this._computeSuggestedDrugGroups(allMeds || [], groups);
+            this._dgSuggestionsCache = suggestions;
 
             UI.showModal(`
                 <div class="sheet-handle"></div>
@@ -11482,12 +11590,12 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     ${this._renderGroupTogglePillHtml()}
                 </div>
 
-                <div style="max-height:52vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;">
+                <div style="max-height:56vh; overflow-y:auto; display:flex; flex-direction:column; gap:10px;">
                     ${groups.length === 0 ? `
-                        <div style="text-align:center; padding:26px 14px; background:var(--bg-secondary); border-radius:12px; border:1px dashed var(--border-color);">
-                            <i class='bx bx-link-alt' style="font-size:34px; color:#7c3aed; opacity:0.6;"></i>
-                            <p style="font-size:13px; font-weight:700; margin:8px 0 4px 0;">لا توجد مجموعات مرتبطة بعد</p>
-                            <small class="text-muted">اضغط «إنشاء مجموعة جديدة» لربط أدوية متشابهة أو بديلة معاً</small>
+                        <div style="text-align:center; padding:18px 14px; background:var(--bg-secondary); border-radius:12px; border:1px dashed var(--border-color);">
+                            <i class='bx bx-link-alt' style="font-size:30px; color:#7c3aed; opacity:0.6;"></i>
+                            <p style="font-size:13px; font-weight:700; margin:6px 0 3px 0;">لا توجد مجموعات مرتبطة بعد</p>
+                            <small class="text-muted">اضغط «إنشاء مجموعة جديدة» أو اختر من الاقتراحات الجاهزة بالأسفل 👇</small>
                         </div>
                     ` : groups.map(g => {
                         const pal = this._getDrugGroupPalette(g.color);
@@ -11514,6 +11622,33 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                             </div>
                         `;
                     }).join('')}
+
+                    ${suggestions.length > 0 ? `
+                        <div style="margin-top:4px; padding-top:10px; border-top:1px dashed var(--border-color);">
+                            <div style="font-size:12.5px; font-weight:800; color:#7c3aed; margin-bottom:8px; display:flex; align-items:center; gap:5px;">
+                                <i class='bx bx-sparkles' style="font-size:16px;"></i>
+                                <span>اقتراحات ذكية لمجموعات جاهزة (${suggestions.length})</span>
+                            </div>
+                            <div style="display:flex; flex-direction:column; gap:7px;">
+                                ${suggestions.slice(0, 15).map((sug, idx) => `
+                                    <div style="padding:9px 11px; border-radius:11px; background:rgba(124,58,237,0.05); border:1px solid rgba(124,58,237,0.25);">
+                                        <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-bottom:5px; flex-wrap:wrap;">
+                                            <div style="min-width:0; flex:1;">
+                                                <strong style="font-size:12.5px; color:var(--text-main); display:block;">${Utils.escapeHTML(sug.suggestedName)}</strong>
+                                                <span style="font-size:10px; color:#7c3aed; font-weight:700;">${sug.reason} • ${sug.meds.length} أصناف</span>
+                                            </div>
+                                            <button type="button" class="btn-primary sm-btn" onclick="window.App._dgQuickCreateSuggested(${idx})" style="height:29px; padding:0 10px; font-size:11px; border-radius:7px; background:#7c3aed; white-space:nowrap;">
+                                                ⚡ إنشاء فوراً
+                                            </button>
+                                        </div>
+                                        <div style="display:flex; gap:4px; flex-wrap:wrap;">
+                                            ${sug.meds.map(m => `<span style="font-size:10px; padding:2px 6px; border-radius:5px; background:var(--surface); border:1px solid var(--border-color); color:var(--text-main);">${Utils.escapeHTML(m.nameEN || m.nameAR)}</span>`).join('')}
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
                 </div>
 
                 <div class="form-actions mt-15">
@@ -11528,12 +11663,18 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
     async openEditDrugGroupModal(groupId = null, preAddMedId = null) {
         try {
-            const [groups, allMeds] = await Promise.all([
+            const [groups, allMeds, allCats] = await Promise.all([
                 this.loadDrugGroupsCache(true),
-                DB.getAll('medicineMaster')
+                DB.getAll('medicineMaster'),
+                Categories.getAllSorted()
             ]);
+            const sortedMeds = [...(allMeds || [])].sort((a, b) =>
+                (a.nameEN || a.nameAR || '').localeCompare(b.nameEN || b.nameAR || '', 'en')
+            );
             const existing = groupId ? groups.find(g => g.id === groupId) : null;
-            const medMap = new Map((allMeds || []).map(m => [m.id, m]));
+            const medMap = new Map(sortedMeds.map(m => [m.id, m]));
+            const suggestions = this._computeSuggestedDrugGroups(sortedMeds, groups);
+            this._dgSuggestionsCache = suggestions;
 
             const initialIds = existing
                 ? (existing.medicineIds || []).filter(id => medMap.has(id))
@@ -11552,10 +11693,12 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 name: suggestedName,
                 color: existing?.color || this._DRUG_GROUP_COLORS[0].hex,
                 selectedIds: [...initialIds],
-                allMeds: allMeds || [],
+                allMeds: sortedMeds,
+                allCats: allCats || [],
                 medMap,
                 groups,
                 query: '',
+                catFilter: '',
                 returnToMedId: preAddMedId || null
             };
 
@@ -11593,14 +11736,20 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     <div id="dg-selected-list" style="display:flex; flex-direction:column; gap:5px; max-height:18vh; overflow-y:auto;"></div>
                 </div>
 
-                <!-- Search & Add Medicines -->
+                <!-- Search, Category Filter & Full Medicines List + Smart Suggestions -->
                 <div class="form-group mb-10">
-                    <label class="form-label" style="font-size:12px;">➕ إضافة أدوية للمجموعة (نفس المادة أو مختلفة):</label>
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-bottom:6px; flex-wrap:wrap;">
+                        <label class="form-label" style="margin:0; font-size:12px;">➕ إضافة أدوية للمجموعة <span id="dg-avail-count" style="color:var(--primary); font-weight:700;"></span></label>
+                        <select id="dg-cat-filter" class="form-select" onchange="window.App._dgFilterByCat(this.value)" style="width:auto; max-width:165px; height:28px; padding:2px 8px; font-size:11px; border-radius:7px;">
+                            <option value="">كل الأقسام</option>
+                            ${(allCats || []).map(c => `<option value="${Utils.escapeHTML(c.id)}">${Utils.escapeHTML(c.nameAR || c.id)}</option>`).join('')}
+                        </select>
+                    </div>
                     <div class="audit-search-wrapper" style="width:100%; margin-bottom:6px;">
                         <i class='bx bx-search'></i>
                         <input type="text" id="dg-med-search" class="audit-search-input" placeholder="🔍 ابحث بالاسم أو المادة الفعالة أو الباركود..." oninput="window.App._dgSearchMeds(this.value)">
                     </div>
-                    <div id="dg-med-results" style="max-height:22vh; overflow-y:auto; display:flex; flex-direction:column; gap:5px;"></div>
+                    <div id="dg-med-results" style="max-height:34vh; overflow-y:auto; display:flex; flex-direction:column; gap:5px;"></div>
                 </div>
 
                 <div class="form-actions mt-12" style="display:flex; gap:8px;">
@@ -11742,27 +11891,22 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         this._dgRenderSearchResults();
     },
 
+    _dgFilterByCat(catId) {
+        if (!this._dgEditState) return;
+        this._dgEditState.catFilter = catId || '';
+        this._dgRenderSearchResults();
+    },
+
     _dgRenderSearchResults() {
         const st = this._dgEditState;
         const box = document.getElementById('dg-med-results');
+        const availCnt = document.getElementById('dg-avail-count');
         if (!st || !box) return;
 
         const q = String(st.query || '').trim();
         let candidates = st.allMeds.filter(m => !st.selectedIds.includes(m.id));
-        if (q) {
-            candidates = Utils.smartFilter(candidates, q, (pq, m) => Utils.smartScoreMed(pq, m));
-        } else if (st.selectedIds.length > 0) {
-            // Prioritize same active ingredient / similar names when search box is empty!
-            const firstMed = st.medMap.get(st.selectedIds[0]);
-            const sims = firstMed ? this._findSimilarMedicines(firstMed, candidates, 8).map(x => x.med) : [];
-            const simIds = new Set(sims.map(m => m.id));
-            candidates = [...sims, ...candidates.filter(m => !simIds.has(m.id))];
-        }
-        candidates = candidates.slice(0, 25);
-
-        if (candidates.length === 0) {
-            box.innerHTML = `<div style="text-align:center; padding:10px; font-size:11.5px; color:var(--text-muted);">لا توجد أدوية أخرى مطابقة</div>`;
-            return;
+        if (st.catFilter) {
+            candidates = candidates.filter(m => (m.categoryId || 'uncategorized') === st.catFilter);
         }
 
         // Map med -> other group (to warn if already in another group)
@@ -11772,19 +11916,88 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             for (const mid of (g.medicineIds || [])) otherGrpMap.set(mid, g.name);
         }
 
-        box.innerHTML = candidates.map(m => {
+        const renderRow = (m, suggestionReason = '') => {
             const otherGrp = otherGrpMap.get(m.id);
             return `
-                <div onclick="window.App._dgAddMed('${Utils.escapeHTML(m.id)}')" style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:7px 9px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:8px; cursor:pointer;">
+                <div onclick="window.App._dgAddMed('${Utils.escapeHTML(m.id)}')" style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:7px 9px; background:${suggestionReason ? 'rgba(124,58,237,0.06)' : 'var(--bg-secondary)'}; border:1px solid ${suggestionReason ? 'rgba(124,58,237,0.32)' : 'var(--border-color)'}; border-radius:8px; cursor:pointer;">
                     <div style="flex:1; min-width:0;">
                         <div style="font-size:12px; font-weight:700; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHTML(m.nameEN || m.nameAR)}</div>
                         ${m.nameAR && m.nameAR !== m.nameEN ? `<div style="font-size:10px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHTML(m.nameAR)}</div>` : ''}
-                        ${otherGrp ? `<div style="font-size:9.5px; color:#d97706;">⚠️ حالياً في «${Utils.escapeHTML(otherGrp)}» (سينتقل لهذه المجموعة)</div>` : ''}
+                        <div style="display:flex; gap:5px; flex-wrap:wrap; margin-top:2px;">
+                            ${suggestionReason ? `<span style="font-size:9.5px; font-weight:800; color:#7c3aed; background:rgba(124,58,237,0.12); padding:1px 5px; border-radius:4px;">✨ ${Utils.escapeHTML(suggestionReason)}</span>` : ''}
+                            ${m.activeIngredient ? `<span style="font-size:9.5px; color:var(--primary);">💊 ${Utils.escapeHTML(m.activeIngredient)}</span>` : ''}
+                            ${otherGrp ? `<span style="font-size:9.5px; color:#d97706;">⚠️ في «${Utils.escapeHTML(otherGrp)}»</span>` : ''}
+                        </div>
                     </div>
                     <span style="font-size:11px; font-weight:800; color:#7c3aed; background:rgba(124,58,237,0.1); padding:3px 8px; border-radius:6px; flex-shrink:0;">+ إضافة</span>
                 </div>
             `;
-        }).join('');
+        };
+
+        if (q) {
+            candidates = Utils.smartFilter(candidates, q, (pq, m) => Utils.smartScoreMed(pq, m));
+            if (availCnt) availCnt.textContent = `(${candidates.length} نتيجة)`;
+            if (candidates.length === 0) {
+                box.innerHTML = `<div style="text-align:center; padding:12px; font-size:11.5px; color:var(--text-muted);">لا توجد أدوية مطابقة</div>`;
+                return;
+            }
+            box.innerHTML = candidates.map(m => renderRow(m)).join('');
+            return;
+        }
+
+        // No search query: show Smart Suggestions section + ALL remaining medicines alphabetically!
+        if (availCnt) availCnt.textContent = `(${candidates.length} دواء متاح)`;
+        let html = '';
+
+        if (st.selectedIds.length === 0 && !st.catFilter && Array.isArray(this._dgSuggestionsCache) && this._dgSuggestionsCache.length > 0) {
+            // Ready-made group suggestions ribbon when starting from scratch
+            html += `
+                <div style="padding:8px 9px; border-radius:9px; background:rgba(124,58,237,0.06); border:1px dashed rgba(124,58,237,0.35); margin-bottom:4px;">
+                    <div style="font-size:11px; font-weight:800; color:#7c3aed; margin-bottom:6px;">✨ اقتراحات مجموعات جاهزة (اضغط للإضافة السريعة):</div>
+                    <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                        ${this._dgSuggestionsCache.slice(0, 10).map((sug, idx) => `
+                            <button type="button" onclick="window.App._dgApplySuggestionToEditor(${idx})" style="font-size:10.5px; font-weight:700; padding:4px 8px; border-radius:7px; border:1px solid rgba(124,58,237,0.35); background:var(--surface); color:#5b21b6; cursor:pointer; display:inline-flex; align-items:center; gap:4px;">
+                                <span>⚡ ${Utils.escapeHTML(sug.suggestedName)}</span>
+                                <span style="font-size:9.5px; background:rgba(124,58,237,0.12); padding:0 5px; border-radius:99px;">${sug.meds.length}</span>
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        let suggestedIds = new Set();
+        if (st.selectedIds.length > 0) {
+            // Compute smart suggestions for ALL selected medicines (same active ingredient / similar names / same category)
+            const suggestionScores = new Map(); // medId -> { med, score, reason }
+            for (const sid of st.selectedIds) {
+                const sm = st.medMap.get(sid);
+                if (!sm) continue;
+                const sims = this._findSimilarMedicines(sm, candidates, 12);
+                for (const s of sims) {
+                    const prev = suggestionScores.get(s.med.id);
+                    if (!prev || s.score > prev.score) {
+                        suggestionScores.set(s.med.id, s);
+                    }
+                }
+            }
+            const topSuggested = Array.from(suggestionScores.values())
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 12);
+            if (topSuggested.length > 0) {
+                suggestedIds = new Set(topSuggested.map(x => x.med.id));
+                html += `<div style="font-size:11px; font-weight:800; color:#7c3aed; margin:2px 0;">✨ أدوية مقترحة لإضافتها لهذه المجموعة (${topSuggested.length}):</div>`;
+                html += topSuggested.map(x => renderRow(x.med, x.reason)).join('');
+            }
+        }
+
+        const rest = candidates.filter(m => !suggestedIds.has(m.id));
+        if (rest.length > 0) {
+            html += `<div style="font-size:11px; font-weight:800; color:var(--text-muted); margin:${html ? '6px' : '2px'} 0 2px 0;">📋 جميع الأدوية (${rest.length}):</div>`;
+            html += rest.map(m => renderRow(m)).join('');
+        }
+
+        box.innerHTML = html || `<div style="text-align:center; padding:12px; font-size:11.5px; color:var(--text-muted);">تم اختيار جميع الأدوية</div>`;
     },
 
     async _dgSaveGroup() {
