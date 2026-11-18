@@ -126,6 +126,25 @@ export const Sync = {
                 }
             } catch (te) { console.warn('Sync pull trash notice:', te.message); }
 
+            // 7. Pull Linked Drug Groups (v18.21.0)
+            try {
+                const dgSnap = await firestore.collection('drug_groups').get();
+                const cloudDgIds = new Set();
+                if (!dgSnap.empty) {
+                    for (const doc of dgSnap.docs) {
+                        cloudDgIds.add(doc.id);
+                        await DB.put('drug_groups', { ...doc.data(), id: doc.id, syncStatus: 'synced' });
+                    }
+                }
+                const localDgs = (await DB.getAll('drug_groups')) || [];
+                for (const g of localDgs) {
+                    if (!cloudDgIds.has(g.id) && g.syncStatus !== 'local') {
+                        await DB.delete('drug_groups', g.id);
+                    }
+                }
+                if (window.App) window.App._drugGroupsCache = null;
+            } catch (dge) { console.warn('Sync pull drug_groups notice:', dge.message); }
+
             console.log('Sync: Full cloud state synchronization complete ✅');
             // v18.11.6: Invalidate dashboard cache so fresh data renders immediately
             if (window.App) {
@@ -309,6 +328,29 @@ export const Sync = {
             await firestore.collection('trash').doc(id).delete();
         } catch (e) {
             console.warn('Sync deleteTrashItem notice:', e.message);
+        }
+    },
+
+    // --- Linked Drug Groups Cloud Sync (v18.21.0) ---
+    async pushDrugGroup(group) {
+        const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+        if (!firestore || !group || !group.id) return;
+        try {
+            const payload = { ...group, syncStatus: 'synced' };
+            await firestore.collection('drug_groups').doc(group.id).set(payload, { merge: true });
+            await DB.put('drug_groups', payload);
+        } catch (e) {
+            console.warn('Sync pushDrugGroup notice:', e.message);
+        }
+    },
+
+    async deleteDrugGroup(id) {
+        const firestore = (typeof db !== 'undefined' ? db : window.db) || (window.firebase?.firestore ? window.firebase.firestore() : null);
+        if (!firestore || !id) return;
+        try {
+            await firestore.collection('drug_groups').doc(id).delete();
+        } catch (e) {
+            console.warn('Sync deleteDrugGroup notice:', e.message);
         }
     },
 
@@ -740,6 +782,29 @@ export const Sync = {
                 }
             }, err => console.warn('Sync Live inventory_sync notice:', err.message));
             this._liveListeners.push(unsubInv);
+        } catch (e) { console.warn("Sync stream setup notice:", e.message); }
+
+        // 7. Live Linked Drug Groups Collection (v18.21.0)
+        try {
+            const unsubDg = firestore.collection('drug_groups').onSnapshot(async (snapshot) => {
+                const changes = snapshot.docChanges();
+                let updated = false;
+                for (const change of changes) {
+                    if (change.type === 'added' || change.type === 'modified') {
+                        const grp = { ...change.doc.data(), id: change.doc.id, syncStatus: 'synced' };
+                        await DB.put('drug_groups', grp);
+                        updated = true;
+                    } else if (change.type === 'removed') {
+                        await DB.delete('drug_groups', change.doc.id);
+                        updated = true;
+                    }
+                }
+                if (updated && window.App) {
+                    window.App._drugGroupsCache = null;
+                    if (window.App.refreshAllViews) window.App.refreshAllViews();
+                }
+            }, err => console.warn('Sync Live drug_groups notice:', err.message));
+            this._liveListeners.push(unsubDg);
         } catch (e) { console.warn("Sync stream setup notice:", e.message); }
     },
 

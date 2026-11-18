@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.20.0', // Stock Transfer (Location/Medicine) & Full Duplicate Medicine Merge Engine (live + open audits + barcodes)
+    VERSION: '18.21.0', // Linked Drug Groups (drug_groups + cloud sync + Large Merged Card Toggle + Boxed Excel Group Export)
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1123,6 +1123,9 @@ const App = {
             // v18.19.0: Multi-Barcode Support — keep commercial barcodes strictly separate from internal DB id
             const medBarcodes = this.getMedicineBarcodes(med);
             const safeMedId = Utils.escapeHTML(med.id);
+            await this.loadDrugGroupsCache();
+            const linkedGroup = this.getMedicineGroup(med.id);
+            const linkedGroupPal = linkedGroup ? this._getDrugGroupPalette(linkedGroup.color) : null;
 
             // Fetch physical storage locations in the clinic building
             const allLocations = (await Locations.getAll()) || [];
@@ -1219,6 +1222,22 @@ const App = {
                             حفظ
                         </button>
                     </div>
+                </div>
+
+                <!-- Linked Drug Group Quick Bar (v18.21.0) -->
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; background:${linkedGroup ? linkedGroupPal.soft : 'var(--bg-secondary)'}; border:1px solid ${linkedGroup ? linkedGroupPal.hex + '45' : 'var(--border-color)'}; border-radius:12px; padding:9px 12px; margin-bottom:16px; flex-wrap:wrap;">
+                    <div style="display:flex; align-items:center; gap:6px; min-width:0;">
+                        <i class='bx bx-link' style="font-size:17px; color:${linkedGroup ? linkedGroupPal.hex : 'var(--text-muted)'};"></i>
+                        ${linkedGroup ? `
+                            <div>
+                                <div style="font-size:12px; font-weight:800; color:${linkedGroupPal.hex};">مجموعة: ${Utils.escapeHTML(linkedGroup.name)}</div>
+                                <div style="font-size:10.5px; color:var(--text-muted);">${(linkedGroup.medicineIds || []).length} أصناف مرتبطة</div>
+                            </div>
+                        ` : `<span style="font-size:12px; color:var(--text-muted); font-weight:600;">غير مربوط بمجموعة أدوية</span>`}
+                    </div>
+                    <button type="button" class="btn-ghost sm-btn" onclick="window.App.openQuickLinkMedToGroupModal('${safeMedId}')" style="height:30px; padding:0 10px; font-size:11px; font-weight:800; border-radius:8px; border:1px solid ${linkedGroup ? linkedGroupPal.hex + '50' : 'var(--border-color)'}; color:${linkedGroup ? linkedGroupPal.hex : '#7c3aed'}; background:var(--surface);">
+                        ${linkedGroup ? 'إدارة الرابط' : '🔗 ربط بمجموعة'}
+                    </button>
                 </div>
 
                 <!-- Physical Clinic Storage Locations (أماكن الحفظ والتواجد في مبنى العيادة) -->
@@ -3010,6 +3029,7 @@ const App = {
             const allCats = (await Categories.getAllSorted()) || [];
             const allLocs = (await Locations.getAll()) || [];
             const allSessions = (await Audit.getAllSessions()) || [];
+            const allDrugGroups = (await this.loadDrugGroupsCache(true)) || [];
 
             // Build category checkboxes
             const catChecks = allCats.map(c => {
@@ -3044,6 +3064,7 @@ const App = {
             const locModeVal = saved.locationMode || 'columns';
             const expiryVal = saved.expiryMode || 'all';
             const sortVal = saved.sortMode || 'name';
+            const linkedGroupsVal = !!saved.includeLinkedGroups;
 
             UI.showModal(`
                 <div class="modal-header">
@@ -3086,6 +3107,19 @@ const App = {
                         <label style="cursor:pointer;"><input type="radio" name="cex-group" value="active" ${groupModeVal==='active'?'checked':''}> مجمّع بالمادة الفعالة 🧬</label>
                         <label style="cursor:pointer;"><input type="radio" name="cex-group" value="none" ${groupModeVal==='none'?'checked':''}> قائمة مسطحة</label>
                     </div>
+                </div>
+
+                <!-- 2b. Optional Linked Drug Groups Boxes + Group Total Column (v18.21.0) -->
+                <div class="cex-section" style="margin-bottom:16px; padding:10px 12px; background:rgba(124,58,237,0.06); border:1px solid rgba(124,58,237,0.28); border-radius:10px;">
+                    <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; font-weight:700; font-size:13px; color:#5b21b6;">
+                        <input type="checkbox" id="cex-linked-groups" ${linkedGroupsVal ? 'checked' : ''} style="width:17px; height:17px; margin-top:2px; accent-color:#7c3aed;">
+                        <span>
+                            🔗 وضع الأدوية المرتبطة تحت بعض داخل مربع + عمود «إجمالي المجموعة»
+                            <small style="display:block; font-weight:500; color:var(--text-muted); font-size:11px; margin-top:2px;">
+                                خيار اختياري — يوجد حالياً ${allDrugGroups.length} مجموعة مرتبطة في مستودعك
+                            </small>
+                        </span>
+                    </label>
                 </div>
 
                 <!-- 3. Locations -->
@@ -3164,6 +3198,7 @@ const App = {
         const locationMode = document.querySelector('input[name="cex-loc"]:checked')?.value || 'columns';
         const expiryMode = document.querySelector('input[name="cex-exp"]:checked')?.value || 'all';
         const sortMode = document.querySelector('input[name="cex-sort"]:checked')?.value || 'name';
+        const includeLinkedGroups = !!document.getElementById('cex-linked-groups')?.checked;
 
         // Collect category & location filters
         const selectedCats = Array.from(document.querySelectorAll('.cex-cat-cb:checked')).map(c => c.value);
@@ -3172,12 +3207,12 @@ const App = {
         // Save preferences
         try {
             localStorage.setItem('dawaa_export_prefs', JSON.stringify({
-                nameMode, groupMode, locationMode, expiryMode, sortMode
+                nameMode, groupMode, locationMode, expiryMode, sortMode, includeLinkedGroups
             }));
         } catch(e) {}
 
         UI.closeModal();
-        this.exportCustomInventory({ source, sessionId, nameMode, groupMode, locationMode, expiryMode, sortMode, selectedCats, selectedLocs });
+        this.exportCustomInventory({ source, sessionId, nameMode, groupMode, locationMode, expiryMode, sortMode, includeLinkedGroups, selectedCats, selectedLocs });
     },
 
     async exportCustomInventory(opts) {
@@ -3361,6 +3396,9 @@ const App = {
 
             // --- Step 4: Build sheet ---
             const groupMode = opts.groupMode || (opts.groupByCat === false ? 'none' : 'category');
+            const allDrugGroups = opts.includeLinkedGroups ? ((await this.loadDrugGroupsCache(true)) || []) : [];
+            const medToGroupMap = this._medToGroupMap || new Map();
+            const useLinkedGroups = !!(opts.includeLinkedGroups && allDrugGroups.length > 0);
 
             if (groupMode === 'category' || groupMode === 'active') {
                 // === GROUPED BY CATEGORY OR ACTIVE INGREDIENT ===
@@ -3419,6 +3457,8 @@ const App = {
                 }
 
                 headers.push('الإجمالي');
+                const groupTotalColIdx = useLinkedGroups ? headers.length : -1;
+                if (useLinkedGroups) headers.push('إجمالي المجموعة');
 
                 if (opts.expiryMode === 'all') {
                     headers.push('الصلاحيات');
@@ -3428,6 +3468,7 @@ const App = {
 
                 const aoa = [headers];
                 const groupRowIndices = [];
+                const linkedGroupBoxes = [];
                 let rowCounter = 1;
 
                 for (const grp of sortedGroups) {
@@ -3445,8 +3486,18 @@ const App = {
                     groupRowIndices.push(aoa.length);
                     aoa.push(grpRow);
 
+                    // Pull linked-group medicines adjacent to each other if optional box export is enabled
+                    const orderedBlock = useLinkedGroups
+                        ? this._orderMedsWithLinkedGroups(grp.meds, medToGroupMap)
+                        : { ordered: grp.meds, spans: [] };
+                    const sectionStartRow = aoa.length;
+                    const spannedMedIds = new Set();
+                    for (const sp of orderedBlock.spans) {
+                        for (const x of sp.items) spannedMedIds.add(x.id || x.medicineId);
+                    }
+
                     // Medicine rows with sequential numbering
-                    for (const m of grp.meds) {
+                    for (const m of orderedBlock.ordered) {
                         const row = [rowCounter++];
                         if (opts.nameMode === 'both' || opts.nameMode === 'en') row.push(m.nameEN);
                         if (opts.nameMode === 'both' || opts.nameMode === 'ar') row.push(m.nameAR);
@@ -3467,6 +3518,11 @@ const App = {
 
                         row.push(m.total);
 
+                        if (useLinkedGroups) {
+                            const soloGrp = (!spannedMedIds.has(m.id || m.medicineId)) ? medToGroupMap.get(m.id || m.medicineId) : null;
+                            row.push(soloGrp ? `${soloGrp.name}: ${m.total}` : '');
+                        }
+
                         if (opts.expiryMode === 'all') {
                             row.push(formatExpiries(m));
                         } else if (opts.expiryMode === 'earliest') {
@@ -3474,6 +3530,20 @@ const App = {
                         }
 
                         aoa.push(row);
+                    }
+
+                    // Record Excel box borders + vertical total cell for every 2+ linked-group span
+                    for (const sp of orderedBlock.spans) {
+                        const rStart = sectionStartRow + sp.startOffset;
+                        const rEnd = sectionStartRow + sp.endOffset;
+                        const grpSum = Math.round(sp.items.reduce((s, x) => s + (parseFloat(x.total) || 0), 0) * 1000) / 1000;
+                        aoa[rStart][groupTotalColIdx] = `${sp.group.name}\n${grpSum}`;
+                        linkedGroupBoxes.push({
+                            startRow: rStart,
+                            endRow: rEnd,
+                            totalColIdx: groupTotalColIdx,
+                            palette: this._getDrugGroupPalette(sp.group.color)
+                        });
                     }
 
                     // For active ingredient grouping, when a group has 2+ alternatives, add merged active total row
@@ -3493,10 +3563,11 @@ const App = {
                 aoa.push([]);
                 aoa.push(countRow);
 
-                // Build sheet with native Excel styling (Bold + Larger font for Category rows, NO merged rows)
+                // Build sheet with native Excel styling (Bold + Larger font for Category rows + optional Linked Group boxes)
                 const ws = XLSX.utils.aoa_to_sheet(aoa);
                 ws['!cols'] = headers.map((h, i) => {
                     if (i === 0) return { wch: 6 };
+                    if (i === groupTotalColIdx) return { wch: 22 };
                     let maxLen = h.length;
                     for (const row of aoa) {
                         const cellLen = String(row[i] || '').length;
@@ -3505,7 +3576,7 @@ const App = {
                     return { wch: Math.min(maxLen + 4, 55) };
                 });
 
-                this._applyExcelSheetStyles(ws, aoa.length, headers.length, groupRowIndices, aoa.length - 1);
+                this._applyExcelSheetStyles(ws, aoa.length, headers.length, groupRowIndices, aoa.length - 1, linkedGroupBoxes);
 
                 const wb = XLSX.utils.book_new();
                 const sheetTitle = groupMode === 'active' ? 'حسب المادة الفعالة' : 'المخزون';
@@ -3515,8 +3586,16 @@ const App = {
                 UI.showToast(`تم تصدير ${medsArray.length} دواء ✅`, 'success');
 
             } else {
-                // === FLAT LIST (with sequential numbering 'م' + total medicine count footer) ===
-                const finalRows = medsArray.map((m, idx) => {
+                // === FLAT LIST (with sequential numbering 'م' + optional Linked Groups boxes + total medicine count footer) ===
+                const orderedFlat = useLinkedGroups
+                    ? this._orderMedsWithLinkedGroups(medsArray, medToGroupMap)
+                    : { ordered: medsArray, spans: [] };
+                const spannedFlatIds = new Set();
+                for (const sp of orderedFlat.spans) {
+                    for (const x of sp.items) spannedFlatIds.add(x.id || x.medicineId);
+                }
+
+                const finalRows = orderedFlat.ordered.map((m, idx) => {
                     const row = { 'م': idx + 1 };
                     if (opts.nameMode === 'both' || opts.nameMode === 'en') row['Medicine Name (EN)'] = m.nameEN;
                     if (opts.nameMode === 'both' || opts.nameMode === 'ar') row['اسم الدواء (AR)'] = m.nameAR;
@@ -3546,6 +3625,10 @@ const App = {
                     }
 
                     row['الإجمالي'] = m.total;
+                    if (useLinkedGroups) {
+                        const soloGrp = (!spannedFlatIds.has(m.id || m.medicineId)) ? medToGroupMap.get(m.id || m.medicineId) : null;
+                        row['إجمالي المجموعة'] = soloGrp ? `${soloGrp.name}: ${m.total}` : '';
+                    }
 
                     if (opts.expiryMode === 'all') {
                         row['الصلاحيات'] = formatExpiries(m);
@@ -3561,8 +3644,21 @@ const App = {
                     return;
                 }
 
-                // Append empty row + total medicine count row
                 const keys = Object.keys(finalRows[0]);
+                const flatGroupTotalColIdx = useLinkedGroups ? keys.indexOf('إجمالي المجموعة') : -1;
+                const flatLinkedBoxes = [];
+                for (const sp of orderedFlat.spans) {
+                    const grpSum = Math.round(sp.items.reduce((s, x) => s + (parseFloat(x.total) || 0), 0) * 1000) / 1000;
+                    finalRows[sp.startOffset]['إجمالي المجموعة'] = `${sp.group.name}\n${grpSum}`;
+                    flatLinkedBoxes.push({
+                        startRow: sp.startOffset + 1, // +1 for header row 0
+                        endRow: sp.endOffset + 1,
+                        totalColIdx: flatGroupTotalColIdx,
+                        palette: this._getDrugGroupPalette(sp.group.color)
+                    });
+                }
+
+                // Append empty row + total medicine count row
                 const emptyRow = {};
                 const countRow = {};
                 keys.forEach((k, i) => {
@@ -3576,10 +3672,11 @@ const App = {
                 const ws = XLSX.utils.json_to_sheet(finalRows);
                 ws['!cols'] = keys.map((key, idx) => {
                     if (idx === 0) return { wch: 6 };
+                    if (idx === flatGroupTotalColIdx) return { wch: 22 };
                     const maxLen = Math.max(key.length, ...finalRows.map(r => String(r[key] || '').length));
                     return { wch: Math.min(maxLen + 4, 55) };
                 });
-                this._applyExcelSheetStyles(ws, finalRows.length + 1, keys.length, [], finalRows.length);
+                this._applyExcelSheetStyles(ws, finalRows.length + 1, keys.length, [], finalRows.length, flatLinkedBoxes);
 
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws, 'المخزون');
@@ -3600,7 +3697,7 @@ const App = {
      * - Footer Row ("إجمالي عدد الأدوية"): Bold 12pt on soft gray
      * - RTL sheet view
      */
-    _applyExcelSheetStyles(ws, rowCount, colCount, groupRowIndices = [], footerRowIdx = -1) {
+    _applyExcelSheetStyles(ws, rowCount, colCount, groupRowIndices = [], footerRowIdx = -1, linkedGroupBoxes = []) {
         if (!ws || !window.XLSX?.utils?.encode_cell) return;
         const groupSet = new Set(groupRowIndices);
 
@@ -3629,7 +3726,7 @@ const App = {
             const isHeader = r === 0;
             const isGroup = groupSet.has(r);
             const isFooter = r === footerRowIdx;
-            rowsMeta.push({ hpt: isHeader ? 26 : (isGroup ? 28 : (isFooter ? 24 : 20)) });
+            rowsMeta.push({ hpt: isHeader ? 26 : (isGroup ? 28 : (isFooter ? 24 : 22)) });
 
             const style = isHeader ? headerStyle : (isGroup ? categoryStyle : (isFooter ? footerStyle : normalStyle));
             for (let c = 0; c < colCount; c++) {
@@ -3643,6 +3740,53 @@ const App = {
                 }
             }
         }
+
+        // Optional Linked Drug Group Boxes (outer colored square border + vertically merged Group Total column)
+        if (Array.isArray(linkedGroupBoxes) && linkedGroupBoxes.length > 0) {
+            if (!Array.isArray(ws['!merges'])) ws['!merges'] = [];
+            const thinInner = { style: 'thin', color: { rgb: 'CBD5E1' } };
+
+            for (const box of linkedGroupBoxes) {
+                const { startRow, endRow, totalColIdx, palette } = box;
+                const borderHex = palette?.excelBorder || '7C3AED';
+                const fillHex = palette?.excelFill || 'F5F3FF';
+                const totalFillHex = palette?.excelTotalFill || 'EDE9FE';
+                const outerEdge = { style: 'medium', color: { rgb: borderHex } };
+
+                for (let r = startRow; r <= endRow; r++) {
+                    for (let c = 0; c < colCount; c++) {
+                        const ref = XLSX.utils.encode_cell({ r, c });
+                        if (!ws[ref]) ws[ref] = { t: 's', v: '' };
+                        const isTotalCol = c === totalColIdx;
+                        const border = {
+                            top: r === startRow ? outerEdge : (isTotalCol ? undefined : thinInner),
+                            bottom: r === endRow ? outerEdge : (isTotalCol ? undefined : thinInner),
+                            left: (c === 0 || isTotalCol) ? outerEdge : thinInner,
+                            right: (c === colCount - 1 || isTotalCol) ? outerEdge : thinInner
+                        };
+                        ws[ref].s = isTotalCol
+                            ? {
+                                font: { name: 'Arial', sz: 12, bold: true, color: { rgb: borderHex } },
+                                fill: { patternType: 'solid', fgColor: { rgb: totalFillHex } },
+                                alignment: { vertical: 'center', horizontal: 'center', wrapText: true },
+                                border
+                            }
+                            : {
+                                font: { name: 'Arial', sz: 11 },
+                                fill: { patternType: 'solid', fgColor: { rgb: fillHex } },
+                                alignment: { vertical: 'center' },
+                                border
+                            };
+                    }
+                }
+
+                // Merge ONLY the "إجمالي المجموعة" cell vertically across the group's rows
+                if (totalColIdx >= 0 && endRow > startRow) {
+                    ws['!merges'].push({ s: { r: startRow, c: totalColIdx }, e: { r: endRow, c: totalColIdx } });
+                }
+            }
+        }
+
         ws['!rows'] = rowsMeta;
         ws['!views'] = [{ rightToLeft: true }];
     },
@@ -5557,9 +5701,13 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         if (!container) return;
 
         try {
-            const cats = await Categories.getAllSorted();
-            const allMeds = (await DB.getAll('medicineMaster')) || [];
-            const totalMedCount = allMeds.length;
+            const [cats, allMeds] = await Promise.all([
+                Categories.getAllSorted(),
+                DB.getAll('medicineMaster'),
+                this.loadDrugGroupsCache(),
+                this.loadWhInvStockMap()
+            ]);
+            const totalMedCount = (allMeds || []).length;
 
             // If viewing a specific category's medicines
             if (this.whCatViewMode === 'cat-detail' && this.whSelectedCatId) {
@@ -5592,6 +5740,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     <button class="btn-ghost sm-btn" onclick="window.App.openActiveIngredientAnalysisModal()" style="display:flex; align-items:center; gap:5px; padding:8px 12px; border-radius:10px; font-size:12px; font-weight:800; border:1px solid rgba(139,92,246,0.4); color:#7c3aed; background:rgba(139,92,246,0.06);">
                         <i class='bx bx-dna'></i> بالمادة الفعالة
                     </button>
+                    <button class="btn-ghost sm-btn" onclick="window.App.openDrugGroupsManagerModal()" style="display:flex; align-items:center; gap:5px; padding:8px 12px; border-radius:10px; font-size:12px; font-weight:800; border:1px solid rgba(37,99,235,0.4); color:#2563eb; background:rgba(37,99,235,0.06);">
+                        <i class='bx bx-link'></i> المجموعات${(this._drugGroupsCache?.length || 0) > 0 ? ` (${this._drugGroupsCache.length})` : ''}
+                    </button>
                     <button class="btn-ghost sm-btn" onclick="window.App.openTrashModal()" style="display:flex; align-items:center; gap:5px; padding:8px 12px; border-radius:10px; font-size:12px; font-weight:800; border:1px solid rgba(239,68,68,0.35); color:var(--danger); background:rgba(239,68,68,0.05);">
                         <i class='bx bx-trash'></i> سلة المهملات
                     </button>
@@ -5619,13 +5770,16 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         </div>
                     </div>
 
-                    <!-- Sort -->
-                    <div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:10px;">
-                        <span style="font-size:11px; color:var(--text-muted); font-weight:bold;">الترتيب:</span>
-                        <select class="form-input" onchange="window.App.setWhCatSortMode(this.value)" style="padding:3px 8px; font-size:11px; border-radius:8px; width:auto; height:30px; background:var(--surface);">
-                            <option value="en" ${sortMode === 'en' ? 'selected' : ''}>🔤 أبجدي A-Z</option>
-                            <option value="ar" ${sortMode === 'ar' ? 'selected' : ''}>🔤 أبجدي أ-ي</option>
-                        </select>
+                    <!-- Sort & Linked Groups Toggle -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+                        ${this._renderGroupTogglePillHtml()}
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <span style="font-size:11px; color:var(--text-muted); font-weight:bold;">الترتيب:</span>
+                            <select class="form-input" onchange="window.App.setWhCatSortMode(this.value)" style="padding:3px 8px; font-size:11px; border-radius:8px; width:auto; height:30px; background:var(--surface);">
+                                <option value="en" ${sortMode === 'en' ? 'selected' : ''}>🔤 أبجدي A-Z</option>
+                                <option value="ar" ${sortMode === 'ar' ? 'selected' : ''}>🔤 أبجدي أ-ي</option>
+                            </select>
+                        </div>
                     </div>
 
                     <!-- Medicine Cards Grid (Updated in-place on search — never loses focus!) -->
@@ -5729,13 +5883,16 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             </div>
 
-            <!-- Sort -->
-            <div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:10px;">
-                <span style="font-size:11px; color:var(--text-muted); font-weight:bold;">الترتيب:</span>
-                <select class="form-input" onchange="window.App.setWhCatSortMode(this.value)" style="padding:3px 8px; font-size:11px; border-radius:8px; width:auto; height:30px; background:var(--surface);">
-                    <option value="en" ${sortMode === 'en' ? 'selected' : ''}>🔤 أبجدي A-Z</option>
-                    <option value="ar" ${sortMode === 'ar' ? 'selected' : ''}>🔤 أبجدي أ-ي</option>
-                </select>
+            <!-- Sort & Linked Groups Toggle -->
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+                ${this._renderGroupTogglePillHtml()}
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-size:11px; color:var(--text-muted); font-weight:bold;">الترتيب:</span>
+                    <select class="form-input" onchange="window.App.setWhCatSortMode(this.value)" style="padding:3px 8px; font-size:11px; border-radius:8px; width:auto; height:30px; background:var(--surface);">
+                        <option value="en" ${sortMode === 'en' ? 'selected' : ''}>🔤 أبجدي A-Z</option>
+                        <option value="ar" ${sortMode === 'ar' ? 'selected' : ''}>🔤 أبجدي أ-ي</option>
+                    </select>
+                </div>
             </div>
 
             <!-- Medicine Cards Grid (Updated in-place on search — never loses focus!) -->
@@ -5760,9 +5917,11 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const safeSecondary = (secondaryName && secondaryName !== primaryName) ? Utils.escapeHTML(secondaryName) : '';
         const imgUrl = (typeof Categories !== 'undefined' && Categories.getMedicineImage) ? Categories.getMedicineImage(med) : (med.imagePath || 'assets/icons/default-med.png');
         const srcCat = catId ? `'${catId}'` : 'null';
+        const grp = this.getMedicineGroup(med.id);
+        const grpPal = grp ? this._getDrugGroupPalette(grp.color) : null;
 
         return `
-            <div class="square-card" onclick="window.App.openMedicineDetails('${med.id}')" title="عرض تفاصيل" style="cursor:pointer; position:relative;">
+            <div class="square-card" onclick="window.App.openMedicineDetails('${med.id}')" title="عرض تفاصيل" style="cursor:pointer; position:relative; ${grpPal ? `border-color:${grpPal.hex}50;` : ''}">
                 <button type="button" class="audit-edit-med-btn" onclick="event.stopPropagation(); window.App.openEditMedicine('${med.id}')" title="تعديل بيانات الدواء" style="position:absolute; top:4px; left:4px; width:22px; height:22px; border-radius:6px; border:1px solid var(--border-color); background:var(--surface); display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2; padding:0; box-shadow:0 1px 2px rgba(0,0,0,0.08);">
                     <i class='bx bx-edit-alt' style="font-size:11px; color:var(--primary);"></i>
                 </button>
@@ -5771,6 +5930,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
                 <h3 style="font-size:11.5px; font-weight:800; margin:0 0 2px 0; line-height:1.25; word-break:break-word;">${safePrimary}</h3>
                 ${safeSecondary ? `<div style="font-size:10px; color:var(--text-muted); margin-bottom:2px; line-height:1.2; word-break:break-word;">${safeSecondary}</div>` : ''}
+                ${grp ? `<span style="font-size:9px; font-weight:700; padding:1px 5px; border-radius:5px; background:${grpPal.soft}; color:${grpPal.hex}; margin-bottom:2px; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">🔗 ${Utils.escapeHTML(grp.name)}</span>` : ''}
                 <div style="display:flex; gap:4px; margin-top:auto; padding-top:4px;">
                     ${catId ? `<button type="button" onclick="event.stopPropagation(); window.App.openMoveCategoryModal('${med.id}', ${srcCat})" title="نقل لقسم آخر" style="width:24px; height:24px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-secondary); display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0;">
                         <i class='bx bx-transfer' style="font-size:12px; color:var(--accent);"></i>
@@ -5831,7 +5991,18 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             `;
         }
-        return `<div class="audit-square-grid">${meds.map(m => this._renderWhMedicineCard(m, catId)).join('')}</div>`;
+        if (!this.isShowGroupedCards()) {
+            return `<div class="audit-square-grid">${meds.map(m => this._renderWhMedicineCard(m, catId)).join('')}</div>`;
+        }
+        const entries = this._groupItemsByLinkedGroup(meds, m => m.id);
+        return `
+            <div class="audit-square-grid">
+                ${entries.map(e => e.type === 'group'
+                    ? this._renderWhMergedGroupCard(e.group, e.items, catId)
+                    : this._renderWhMedicineCard(e.item, catId)
+                ).join('')}
+            </div>
+        `;
     },
 
     handleWhCatSearch(query, resetInput = false) {
@@ -5893,8 +6064,12 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         if (!container) return;
 
         try {
-            const locs = await Locations.getAll();
-            const allMeds = (await DB.getAll('medicineMaster')) || [];
+            const [locs, allMeds] = await Promise.all([
+                Locations.getAll(),
+                DB.getAll('medicineMaster'),
+                this.loadDrugGroupsCache(),
+                this.loadWhInvStockMap()
+            ]);
 
             // If viewing a specific location's medicines
             if (this.whLocViewMode === 'loc-detail' && this.whSelectedLocId) {
@@ -6004,13 +6179,16 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 </div>
             </div>
 
-            <!-- Sort -->
-            <div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:10px;">
-                <span style="font-size:11px; color:var(--text-muted); font-weight:bold;">الترتيب:</span>
-                <select class="form-input" onchange="window.App.setWhLocSortMode(this.value)" style="padding:3px 8px; font-size:11px; border-radius:8px; width:auto; height:30px; background:var(--surface);">
-                    <option value="en" ${sortMode === 'en' ? 'selected' : ''}>🔤 أبجدي A-Z</option>
-                    <option value="ar" ${sortMode === 'ar' ? 'selected' : ''}>🔤 أبجدي أ-ي</option>
-                </select>
+            <!-- Sort & Linked Groups Toggle -->
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+                ${this._renderGroupTogglePillHtml()}
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-size:11px; color:var(--text-muted); font-weight:bold;">الترتيب:</span>
+                    <select class="form-input" onchange="window.App.setWhLocSortMode(this.value)" style="padding:3px 8px; font-size:11px; border-radius:8px; width:auto; height:30px; background:var(--surface);">
+                        <option value="en" ${sortMode === 'en' ? 'selected' : ''}>🔤 أبجدي A-Z</option>
+                        <option value="ar" ${sortMode === 'ar' ? 'selected' : ''}>🔤 أبجدي أ-ي</option>
+                    </select>
+                </div>
             </div>
 
             <!-- Medicine Cards (Updated in-place on search — never loses focus!) -->
@@ -6873,6 +7051,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
     async renderAuditView() {
         const container = document.getElementById('audit-main-container');
         if (!container) return;
+        await this.loadDrugGroupsCache();
 
         // If no active session or at root level: show sessions dashboard
         if (!this.selectedAuditSessionId || this.auditLevel === 'sessions') {
@@ -7837,21 +8016,13 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                             ⚠️ عد ناقص (${partialCount})
                         </button>
                     </div>
+                    ${this._renderGroupTogglePillHtml()}
                 </div>
             </div>
 
             <!-- Merged Cards (Updated in-place on search — never loses focus!) -->
             <div id="audit-merged-results-box">
-                ${mergedList.length === 0 ? `
-                    <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
-                        <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
-                        <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة</p>
-                    </div>
-                ` : `
-                    <div style="display:flex; flex-direction:column; gap:12px;">
-                        ${mergedList.map(item => this.renderMergedMedicineCard(item, activeLocs)).join('')}
-                    </div>
-                `}
+                ${this._renderAuditMergedListHtml(mergedList, activeLocs)}
             </div>
         `;
     },
@@ -7882,12 +8053,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 if (a.isFullyCounted !== b.isFullyCounted) return a.isFullyCounted ? 1 : -1;
                 return (a.med.nameEN || '').localeCompare(b.med.nameEN || '');
             });
-            box.innerHTML = list.length === 0 ? `
-                <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
-                    <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
-                    <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة</p>
-                </div>
-            ` : `<div style="display:flex; flex-direction:column; gap:12px;">${list.map(item => this.renderMergedMedicineCard(item, activeLocs)).join('')}</div>`;
+            box.innerHTML = this._renderAuditMergedListHtml(list, activeLocs);
             return;
         }
         this.renderAuditView();
@@ -8088,7 +8254,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     </button>
                 </div>
 
-                <div style="display:flex; align-items:center; gap:6px;">
+                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                    ${viewMode === 'all-meds' ? this._renderGroupTogglePillHtml() : ''}
                     <span style="font-size:11px; color:var(--text-muted); font-weight:bold;">الترتيب:</span>
                     <select class="form-input" onchange="window.App.setAuditSortMode(this.value)" style="padding:3px 8px; font-size:11px; border-radius:8px; width:auto; height:30px; background:var(--surface);">
                         <option value="status" ${sortMode === 'status' ? 'selected' : ''}>⏳ غير المعدود أولاً</option>
@@ -8140,16 +8307,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     ✅ تم العد (${countedCount})
                 </button>
             </div>
-            ${displayedMeds.length === 0 ? `
-                <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
-                    <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
-                    <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة لبحثك في هذا المكان</p>
-                </div>
-            ` : `
-                <div class="audit-square-grid">
-                    ${displayedMeds.map(med => this.renderAuditMedicineCard(med)).join('')}
-                </div>
-            `}
+            ${this._renderAuditMedsGridHtml(displayedMeds)}
         `;
     },
 
@@ -8416,12 +8574,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 list = this.filterAuditMedicines(list, this.auditMedSearch);
             }
             list = this.sortAuditMedicines(list, this._auditMedCache.sortMode);
-            box.innerHTML = list.length === 0 ? `
-                <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
-                    <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
-                    <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة لبحثك أو الفلتر المحدد</p>
-                </div>
-            ` : `<div class="audit-square-grid">${list.map(med => this.renderAuditMedicineCard(med)).join('')}</div>`;
+            box.innerHTML = this._renderAuditMedsGridHtml(list);
             return;
         }
         this.renderAuditView();
@@ -8516,6 +8669,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         const safeSecondary = (secondaryName && secondaryName !== primaryName && typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(secondaryName) : (secondaryName && secondaryName !== primaryName ? secondaryName : '');
         const safeActive = (med.activeIngredient && typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(med.activeIngredient) : (med.activeIngredient || '');
         const imgUrl = (typeof Categories !== 'undefined' && Categories.getMedicineImage) ? Categories.getMedicineImage(med) : (med.imagePath || 'assets/icons/default-med.png');
+        const grp = this.getMedicineGroup(med.id);
+        const grpPal = grp ? this._getDrugGroupPalette(grp.color) : null;
+        const grpBadgeHtml = grp ? `<span style="font-size:9px; font-weight:700; padding:1px 5px; border-radius:5px; background:${grpPal.soft}; color:${grpPal.hex}; margin-bottom:2px; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">🔗 ${Utils.escapeHTML(grp.name)}</span>` : '';
 
         if (med.isCounted) {
             const batchesHtml = (med.batches && med.batches.length > 0)
@@ -8543,6 +8699,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     </div>
                     <h3 style="font-size: 11.5px; font-weight: 800; margin: 0 0 2px 0; line-height: 1.25; word-break: break-word;">${safePrimary}</h3>
                     ${safeSecondary ? `<div style="font-size: 10px; color: var(--text-muted); margin-bottom: 2px; line-height: 1.2; word-break: break-word;">${safeSecondary}</div>` : ''}
+                    ${grpBadgeHtml}
                     ${safeActive ? `<div style="font-size: 9px; color: var(--primary); opacity: 0.9; margin-bottom: 3px; display:flex; align-items:center; gap:3px;"><i class='bx bx-dna'></i> ${safeActive}</div>` : ''}
                     <div class="counted-qty-tag" style="font-size: 11px; font-weight: 800; background: rgba(16,185,129,0.15); color: var(--secondary); padding: 2px 8px; border-radius: 6px; margin: 2px 0;">
                         إجمالي: ${med.countedQty}
@@ -8566,6 +8723,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     </div>
                     <h3 style="font-size: 11.5px; font-weight: 800; margin: 0 0 2px 0; line-height: 1.25; word-break: break-word;">${safePrimary}</h3>
                     ${safeSecondary ? `<div style="font-size: 10px; color: var(--text-muted); margin-bottom: 2px; line-height: 1.2; word-break: break-word;">${safeSecondary}</div>` : ''}
+                    ${grpBadgeHtml}
                     ${safeActive ? `<div style="font-size: 9px; color: var(--primary); opacity: 0.9; margin-bottom: 3px; display:flex; align-items:center; gap:3px;"><i class='bx bx-dna'></i> ${safeActive}</div>` : ''}
                     <span class="square-meta" style="color: var(--primary); font-size: 10px; margin-top: auto; font-weight:700;">بانتظار العد ⏳</span>
                 </div>
@@ -8683,7 +8841,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         </button>
                     </div>
 
-                    <div style="display:flex; align-items:center; gap:6px;">
+                    <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                        ${this._renderGroupTogglePillHtml()}
                         <span style="font-size:11px; color:var(--text-muted); font-weight:bold;">الترتيب:</span>
                         <select class="form-input" onchange="window.App.setAuditSortMode(this.value)" style="padding:3px 8px; font-size:11px; border-radius:8px; width:auto; height:30px; background:var(--surface);">
                             <option value="status" ${sortMode === 'status' ? 'selected' : ''}>⏳ غير المعدود أولاً</option>
@@ -8696,16 +8855,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
             <!-- Square Medicines Grid with Smart Sorting (Updated in-place on search — never loses focus!) -->
             <div id="audit-med-results-box">
-                ${filteredMedicines.length === 0 ? `
-                    <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
-                        <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
-                        <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة لبحثك أو الفلتر المحدد</p>
-                    </div>
-                ` : `
-                    <div class="audit-square-grid">
-                        ${filteredMedicines.map(med => this.renderAuditMedicineCard(med)).join('')}
-                    </div>
-                `}
+                ${this._renderAuditMedsGridHtml(filteredMedicines)}
             </div>
         `;
     },
@@ -10593,6 +10743,997 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         await this.refreshAllViews();
     },
     // ===================== End Stock Transfer & Medicine Merge Engine =====================
+
+    // ===================== Linked Drug Groups Engine (v18.21.0) =====================
+    _DRUG_GROUP_COLORS: [
+        { hex: '#7c3aed', name: 'بنفسجي', soft: 'rgba(124,58,237,0.08)', excelFill: 'F5F3FF', excelTotalFill: 'EDE9FE', excelBorder: '7C3AED' },
+        { hex: '#2563eb', name: 'أزرق', soft: 'rgba(37,99,235,0.08)', excelFill: 'EFF6FF', excelTotalFill: 'DBEAFE', excelBorder: '2563EB' },
+        { hex: '#0d9488', name: 'فيروزي', soft: 'rgba(13,148,136,0.08)', excelFill: 'F0FDFA', excelTotalFill: 'CCFBF1', excelBorder: '0D9488' },
+        { hex: '#d97706', name: 'عنبر', soft: 'rgba(217,119,6,0.08)', excelFill: 'FFFBEB', excelTotalFill: 'FEF3C7', excelBorder: 'D97706' },
+        { hex: '#e11d48', name: 'وردي', soft: 'rgba(225,29,72,0.08)', excelFill: 'FFF1F2', excelTotalFill: 'FFE4E6', excelBorder: 'E11D48' },
+        { hex: '#059669', name: 'أخضر', soft: 'rgba(5,150,105,0.08)', excelFill: 'ECFDF5', excelTotalFill: 'D1FAE5', excelBorder: '059669' }
+    ],
+
+    _getDrugGroupPalette(colorHex) {
+        return this._DRUG_GROUP_COLORS.find(c => c.hex.toLowerCase() === String(colorHex || '').toLowerCase()) || this._DRUG_GROUP_COLORS[0];
+    },
+
+    isShowGroupedCards() {
+        try { return localStorage.getItem('dawaa_show_drug_groups') === '1'; } catch (e) { return false; }
+    },
+
+    async toggleShowGroupedCards() {
+        const next = !this.isShowGroupedCards();
+        try { localStorage.setItem('dawaa_show_drug_groups', next ? '1' : '0'); } catch (e) {}
+        await this.loadDrugGroupsCache(true);
+        UI.showToast(next ? 'تم تفعيل عرض المجموعات المدمجة 🔗✨' : 'تم العودة لعرض الكروت الفردية العادية', 'info');
+        if (this.currentView === 'audit') {
+            await this.renderAuditView();
+        } else {
+            if (typeof this.renderWarehouseCategories === 'function') await this.renderWarehouseCategories();
+            if (typeof this.renderWarehouseLocations === 'function') await this.renderWarehouseLocations();
+        }
+    },
+
+    _renderGroupTogglePillHtml() {
+        const on = this.isShowGroupedCards();
+        const grpCount = Array.isArray(this._drugGroupsCache) ? this._drugGroupsCache.length : 0;
+        return `
+            <button type="button" onclick="window.App.toggleShowGroupedCards()" title="إظهار الأدوية المرتبطة في كارت واحد أكبر مجمّع بالكميات والصلاحيات" style="display:inline-flex; align-items:center; gap:5px; height:30px; padding:0 10px; border-radius:8px; font-size:11px; font-weight:800; cursor:pointer; white-space:nowrap; border:1.5px solid ${on ? '#7c3aed' : 'var(--border-color)'}; background:${on ? '#7c3aed' : 'var(--surface)'}; color:${on ? 'white' : 'var(--text-main)'};">
+                <i class='bx bx-link' style="font-size:14px;"></i>
+                <span>${on ? 'المجموعات مدمجة ✓' : 'دمج المجموعات'}${grpCount > 0 ? ` (${grpCount})` : ''}</span>
+            </button>
+        `;
+    },
+
+    async loadDrugGroupsCache(force = false) {
+        if (!force && Array.isArray(this._drugGroupsCache) && this._medToGroupMap) {
+            return this._drugGroupsCache;
+        }
+        try {
+            const groups = (await DB.getAll('drug_groups')) || [];
+            groups.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'));
+            this._drugGroupsCache = groups;
+            this._medToGroupMap = new Map();
+            for (const g of groups) {
+                if (!g || !Array.isArray(g.medicineIds)) continue;
+                for (const mid of g.medicineIds) {
+                    if (!this._medToGroupMap.has(mid)) {
+                        this._medToGroupMap.set(mid, g);
+                    }
+                }
+            }
+            return groups;
+        } catch (err) {
+            console.warn('loadDrugGroupsCache notice:', err);
+            this._drugGroupsCache = [];
+            this._medToGroupMap = new Map();
+            return [];
+        }
+    },
+
+    async loadWhInvStockMap() {
+        try {
+            const allInv = (await DB.getAll('inventory')) || [];
+            const byMed = new Map();
+            for (const item of allInv) {
+                const q = parseFloat(item.quantity) || 0;
+                if (q <= 0 || !item.medicineId) continue;
+                if (!byMed.has(item.medicineId)) byMed.set(item.medicineId, []);
+                byMed.get(item.medicineId).push({ quantity: q, expiryDate: String(item.expiryDate || '').trim() });
+            }
+            const res = new Map();
+            for (const [mid, arr] of byMed.entries()) {
+                const merged = this._mergeBatchesByExpiry(arr, []);
+                const totalQty = Math.round(merged.reduce((s, b) => s + b.quantity, 0) * 1000) / 1000;
+                const earliestExp = merged.find(b => b.expiryDate)?.expiryDate || '';
+                res.set(mid, { totalQty, batches: merged, earliestExp });
+            }
+            this._whInvStockByMed = res;
+            return res;
+        } catch (e) {
+            this._whInvStockByMed = new Map();
+            return this._whInvStockByMed;
+        }
+    },
+
+    getMedicineGroup(medId) {
+        return this._medToGroupMap?.get(medId) || null;
+    },
+
+    /**
+     * Pure helper: Groups a sorted array of items by their Linked Drug Group.
+     * Preserves first-appearance order; groups with >= 2 present items become one `{ type: 'group', group, items }` entry.
+     */
+    _groupItemsByLinkedGroup(items, getMedIdFn, medToGroupMap = null) {
+        const gMap = medToGroupMap || this._medToGroupMap || new Map();
+        if (!Array.isArray(items) || items.length === 0) return [];
+
+        // Count how many items of each group exist in this filtered list
+        const groupBuckets = new Map(); // groupId -> { group, items[] }
+        for (const item of items) {
+            const mid = getMedIdFn(item);
+            const grp = gMap.get(mid);
+            if (!grp) continue;
+            if (!groupBuckets.has(grp.id)) groupBuckets.set(grp.id, { group: grp, items: [] });
+            groupBuckets.get(grp.id).items.push(item);
+        }
+
+        // Order items inside each group according to group.medicineIds order
+        for (const bucket of groupBuckets.values()) {
+            const orderMap = new Map((bucket.group.medicineIds || []).map((id, i) => [id, i]));
+            bucket.items.sort((a, b) => (orderMap.get(getMedIdFn(a)) ?? 999) - (orderMap.get(getMedIdFn(b)) ?? 999));
+        }
+
+        const emittedGroups = new Set();
+        const result = [];
+        for (const item of items) {
+            const mid = getMedIdFn(item);
+            const grp = gMap.get(mid);
+            if (grp && groupBuckets.get(grp.id)?.items.length >= 2) {
+                if (!emittedGroups.has(grp.id)) {
+                    emittedGroups.add(grp.id);
+                    result.push({ type: 'group', group: grp, items: groupBuckets.get(grp.id).items });
+                }
+            } else {
+                result.push({ type: 'single', item, group: grp || null });
+            }
+        }
+        return result;
+    },
+
+    /**
+     * Pure helper for Excel Export: pulls members of each linked group adjacent in order,
+     * returning `{ ordered, spans }` where spans mark contiguous 2+ member group blocks.
+     */
+    _orderMedsWithLinkedGroups(medsList, medToGroupMap) {
+        const entries = this._groupItemsByLinkedGroup(medsList, m => m.id || m.medicineId, medToGroupMap);
+        const ordered = [];
+        const spans = []; // { startOffset, endOffset, group, items }
+        for (const entry of entries) {
+            if (entry.type === 'group') {
+                const startOffset = ordered.length;
+                for (const m of entry.items) ordered.push(m);
+                const endOffset = ordered.length - 1;
+                spans.push({ startOffset, endOffset, group: entry.group, items: entry.items });
+            } else {
+                ordered.push(entry.item);
+            }
+        }
+        return { ordered, spans };
+    },
+
+    _toggleGroupCardCollapse(domId) {
+        const body = document.getElementById(domId);
+        const icon = document.getElementById(`${domId}-chev`);
+        if (!body) return;
+        const hidden = body.style.display === 'none';
+        body.style.display = hidden ? 'flex' : 'none';
+        if (icon) icon.style.transform = hidden ? 'rotate(0deg)' : 'rotate(180deg)';
+    },
+
+    _renderMergedExpiryStripHtml(mergedBatches) {
+        if (!Array.isArray(mergedBatches) || mergedBatches.length === 0) return '';
+        const pills = mergedBatches.slice(0, 6).map(b => {
+            const badge = this.calcExpiryBadge(b.expiryDate);
+            return `<span style="font-size:10px; font-weight:700; padding:2px 6px; border-radius:6px; background:${badge.bg}; color:${badge.color}; white-space:nowrap;">${b.expiryDate || 'غير محدد'} (${b.quantity})</span>`;
+        }).join('');
+        const extra = mergedBatches.length > 6 ? `<span style="font-size:10px; color:var(--text-muted); font-weight:700;">+${mergedBatches.length - 6} أخرى</span>` : '';
+        return `
+            <div style="margin-top:8px; padding-top:7px; border-top:1px dashed var(--border-color); display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
+                <span style="font-size:10px; font-weight:800; color:var(--text-muted);">📅 صلاحيات المجموعة:</span>
+                ${pills}${extra}
+            </div>
+        `;
+    },
+
+    _renderWhMergedGroupCard(group, memberMeds, catId = null) {
+        const pal = this._getDrugGroupPalette(group.color);
+        const stockMap = this._whInvStockByMed || new Map();
+        const allGroupBatches = [];
+        let groupTotalQty = 0;
+
+        for (const m of memberMeds) {
+            const st = stockMap.get(m.id);
+            if (st) {
+                groupTotalQty += st.totalQty;
+                allGroupBatches.push(...st.batches);
+            }
+        }
+        groupTotalQty = Math.round(groupTotalQty * 1000) / 1000;
+        const mergedBatches = this._mergeBatchesByExpiry(allGroupBatches, []);
+        const earliestExp = mergedBatches.find(b => b.expiryDate)?.expiryDate || '';
+        const expBadge = earliestExp ? this.calcExpiryBadge(earliestExp) : null;
+        const domId = `wh-grp-${group.id}-${catId || 'all'}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const totalInGroupDef = (group.medicineIds || []).length;
+        const langPref = localStorage.getItem('dawaa_med_lang_pref') || 'en';
+
+        return `
+            <div style="grid-column: 1 / -1; background:var(--surface); border:2px solid ${pal.hex}; border-radius:14px; padding:12px; box-shadow:0 3px 12px rgba(0,0,0,0.06);">
+                <!-- Group Header -->
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:9px; padding-bottom:8px; border-bottom:1px solid ${pal.hex}30; flex-wrap:wrap;">
+                    <div style="display:flex; align-items:center; gap:7px; min-width:0; flex:1;">
+                        <span style="width:28px; height:28px; border-radius:8px; background:${pal.soft}; color:${pal.hex}; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;">
+                            <i class='bx bx-link' style="font-size:17px;"></i>
+                        </span>
+                        <div style="min-width:0;">
+                            <div style="font-size:13.5px; font-weight:800; color:${pal.hex}; line-height:1.25; word-break:break-word;">
+                                ${Utils.escapeHTML(group.name)}
+                            </div>
+                            <div style="font-size:10.5px; color:var(--text-muted); margin-top:1px;">
+                                ${memberMeds.length}${totalInGroupDef > memberMeds.length ? ` من ${totalInGroupDef}` : ''} أصناف مرتبطة
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                        <span style="font-size:12px; font-weight:800; padding:4px 9px; border-radius:8px; background:${pal.soft}; color:${pal.hex};">
+                            الإجمالي: ${groupTotalQty}
+                        </span>
+                        ${expBadge ? `<span style="font-size:10px; font-weight:700; padding:3px 7px; border-radius:7px; background:${expBadge.bg}; color:${expBadge.color};">${earliestExp}</span>` : ''}
+                        <button type="button" onclick="window.App.openEditDrugGroupModal('${Utils.escapeHTML(group.id)}')" title="تعديل المجموعة" style="width:28px; height:28px; border-radius:7px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-muted); display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
+                            <i class='bx bx-edit-alt' style="font-size:14px;"></i>
+                        </button>
+                        <button type="button" onclick="window.App._toggleGroupCardCollapse('${domId}')" title="طيّ / توسيع" style="width:28px; height:28px; border-radius:7px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-muted); display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
+                            <i id="${domId}-chev" class='bx bx-chevron-up' style="font-size:17px; transition:transform 0.15s;"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Member Medicines Rows -->
+                <div id="${domId}" style="display:flex; flex-direction:column; gap:7px;">
+                    ${memberMeds.map(m => {
+                        let pName = m.nameEN || m.nameAR || 'دواء';
+                        let sName = (m.nameAR && m.nameAR !== m.nameEN) ? m.nameAR : '';
+                        if (langPref === 'ar') { pName = m.nameAR || m.nameEN || 'دواء'; sName = (m.nameEN && m.nameEN !== m.nameAR) ? m.nameEN : ''; }
+                        const imgUrl = Categories.getMedicineImage(m);
+                        const st = stockMap.get(m.id);
+                        const qty = st ? st.totalQty : 0;
+                        const batchesHtml = (st && st.batches.length > 0)
+                            ? st.batches.slice(0, 3).map(b => {
+                                const bd = this.calcExpiryBadge(b.expiryDate);
+                                return `<span style="font-size:9.5px; font-weight:600; padding:1px 5px; border-radius:4px; background:${bd.bg}; color:${bd.color};">${b.quantity}×${b.expiryDate || '؟'}</span>`;
+                            }).join('')
+                            : '';
+                        return `
+                            <div onclick="window.App.openMedicineDetails('${Utils.escapeHTML(m.id)}')" style="display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:10px; background:var(--bg-secondary); border:1px solid var(--border-color); cursor:pointer;">
+                                <div style="width:36px; height:36px; border-radius:8px; overflow:hidden; flex-shrink:0; background:var(--surface);">
+                                    <img src="${imgUrl}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                                </div>
+                                <div style="flex:1; min-width:0;">
+                                    <div style="font-size:12px; font-weight:800; color:var(--text-main); line-height:1.25; word-break:break-word;">${Utils.escapeHTML(pName)}</div>
+                                    ${sName ? `<div style="font-size:10.5px; color:var(--text-muted); line-height:1.2;">${Utils.escapeHTML(sName)}</div>` : ''}
+                                    ${batchesHtml ? `<div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:3px;">${batchesHtml}</div>` : ''}
+                                </div>
+                                <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+                                    <span style="font-size:12px; font-weight:800; padding:3px 8px; border-radius:7px; background:${qty > 0 ? 'rgba(16,185,129,0.12)' : 'var(--surface)'}; color:${qty > 0 ? '#059669' : 'var(--text-muted)'};">
+                                        ${qty}
+                                    </span>
+                                    <button type="button" onclick="event.stopPropagation(); window.App.openEditMedicine('${Utils.escapeHTML(m.id)}')" title="تعديل" style="width:26px; height:26px; border-radius:6px; border:1px solid var(--border-color); background:var(--surface); display:flex; align-items:center; justify-content:center; cursor:pointer;">
+                                        <i class='bx bx-edit-alt' style="font-size:13px; color:var(--primary);"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+
+                ${this._renderMergedExpiryStripHtml(mergedBatches)}
+            </div>
+        `;
+    },
+
+    _renderAuditLocationGroupCard(group, memberMeds) {
+        const pal = this._getDrugGroupPalette(group.color);
+        const allBatches = [];
+        let groupTotal = 0;
+        let countedMembers = 0;
+        for (const m of memberMeds) {
+            if (m.isCounted) countedMembers++;
+            const recBatches = (Array.isArray(m.batches) && m.batches.length > 0)
+                ? this._mergeBatchesByExpiry(m.batches, [])
+                : (m.countRecord ? this._extractRecordBatches(m.countRecord)
+                    : (m.isCounted && (parseFloat(m.countedQty) || 0) > 0 ? [{ quantity: parseFloat(m.countedQty) || 0, expiryDate: String(m.countedExpiry || '').trim() }] : []));
+            allBatches.push(...recBatches);
+            groupTotal += recBatches.reduce((s, b) => s + b.quantity, 0);
+        }
+        groupTotal = Math.round(groupTotal * 1000) / 1000;
+        const mergedBatches = this._mergeBatchesByExpiry(allBatches, []);
+        const earliestExp = mergedBatches.find(b => b.expiryDate)?.expiryDate || '';
+        const expBadge = earliestExp ? this.calcExpiryBadge(earliestExp) : null;
+        const allDone = countedMembers === memberMeds.length && memberMeds.length > 0;
+        const domId = `aud-loc-grp-${group.id}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const langPref = localStorage.getItem('dawaa_med_lang_pref') || 'en';
+
+        return `
+            <div style="grid-column: 1 / -1; background:var(--surface); border:2px solid ${allDone ? '#10b981' : pal.hex}; border-radius:14px; padding:12px; box-shadow:0 3px 12px rgba(0,0,0,0.06);">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:9px; padding-bottom:8px; border-bottom:1px solid ${pal.hex}30; flex-wrap:wrap;">
+                    <div style="display:flex; align-items:center; gap:7px; min-width:0; flex:1;">
+                        <span style="width:28px; height:28px; border-radius:8px; background:${pal.soft}; color:${pal.hex}; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;">
+                            <i class='bx bx-link' style="font-size:17px;"></i>
+                        </span>
+                        <div style="min-width:0;">
+                            <div style="font-size:13.5px; font-weight:800; color:${pal.hex}; line-height:1.25;">${Utils.escapeHTML(group.name)}</div>
+                            <div style="font-size:10.5px; color:${allDone ? '#059669' : 'var(--text-muted)'}; font-weight:700; margin-top:1px;">
+                                ${allDone ? '✅ اكتمل جرد المجموعة' : `تم عد ${countedMembers} / ${memberMeds.length} صنف`}
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                        <span style="font-size:12.5px; font-weight:800; padding:4px 9px; border-radius:8px; background:${pal.soft}; color:${pal.hex};">
+                            الإجمالي: ${groupTotal}
+                        </span>
+                        ${expBadge ? `<span style="font-size:10px; font-weight:700; padding:3px 7px; border-radius:7px; background:${expBadge.bg}; color:${expBadge.color};">${earliestExp}</span>` : ''}
+                        <button type="button" onclick="window.App._toggleGroupCardCollapse('${domId}')" style="width:28px; height:28px; border-radius:7px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-muted); display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
+                            <i id="${domId}-chev" class='bx bx-chevron-up' style="font-size:17px; transition:transform 0.15s;"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="${domId}" style="display:flex; flex-direction:column; gap:7px;">
+                    ${memberMeds.map(m => {
+                        let pName = m.nameEN || m.nameAR || 'دواء';
+                        let sName = (m.nameAR && m.nameAR !== m.nameEN) ? m.nameAR : '';
+                        if (langPref === 'ar') { pName = m.nameAR || m.nameEN || 'دواء'; sName = (m.nameEN && m.nameEN !== m.nameAR) ? m.nameEN : ''; }
+                        const imgUrl = Categories.getMedicineImage(m);
+                        const bs = (Array.isArray(m.batches) && m.batches.length > 0)
+                            ? this._mergeBatchesByExpiry(m.batches, [])
+                            : (m.countRecord ? this._extractRecordBatches(m.countRecord)
+                                : (m.isCounted && (parseFloat(m.countedQty) || 0) > 0 ? [{ quantity: parseFloat(m.countedQty) || 0, expiryDate: String(m.countedExpiry || '').trim() }] : []));
+                        const qty = m.isCounted ? (parseFloat(m.countedQty ?? m.countRecord?.quantity) || 0) : null;
+                        const pillsHtml = bs.slice(0, 3).map(b => {
+                            const bd = this.calcExpiryBadge(b.expiryDate);
+                            return `<span style="font-size:9.5px; font-weight:600; padding:1px 5px; border-radius:4px; background:${bd.bg}; color:${bd.color};">${b.quantity}×${b.expiryDate || '؟'}</span>`;
+                        }).join('');
+                        return `
+                            <div onclick="window.App.openCountModal('${Utils.escapeHTML(m.id)}')" style="display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:10px; background:${m.isCounted ? 'rgba(16,185,129,0.06)' : 'var(--bg-secondary)'}; border:1px solid ${m.isCounted ? 'rgba(16,185,129,0.35)' : 'var(--border-color)'}; cursor:pointer;">
+                                <div style="width:36px; height:36px; border-radius:8px; overflow:hidden; flex-shrink:0; background:var(--surface);">
+                                    <img src="${imgUrl}" loading="lazy" onerror="this.onerror=null; this.src='assets/icons/default-med.png';" style="width:100%; height:100%; object-fit:cover;">
+                                </div>
+                                <div style="flex:1; min-width:0;">
+                                    <div style="font-size:12px; font-weight:800; color:var(--text-main); line-height:1.25;">${Utils.escapeHTML(pName)}</div>
+                                    ${sName ? `<div style="font-size:10.5px; color:var(--text-muted);">${Utils.escapeHTML(sName)}</div>` : ''}
+                                    ${pillsHtml ? `<div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:3px;">${pillsHtml}</div>` : ''}
+                                </div>
+                                <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+                                    <span style="font-size:11.5px; font-weight:800; padding:4px 9px; border-radius:7px; background:${m.isCounted ? '#10b981' : 'var(--primary)'}; color:white;">
+                                        ${m.isCounted ? `✅ ${qty}` : 'عدّ ✏️'}
+                                    </span>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+
+                ${this._renderMergedExpiryStripHtml(mergedBatches)}
+            </div>
+        `;
+    },
+
+    _renderAuditMedsGridHtml(meds) {
+        if (!meds || meds.length === 0) {
+            return `
+                <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
+                    <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
+                    <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة لبحثك أو الفلتر المحدد</p>
+                </div>
+            `;
+        }
+        if (!this.isShowGroupedCards()) {
+            return `<div class="audit-square-grid">${meds.map(med => this.renderAuditMedicineCard(med)).join('')}</div>`;
+        }
+        const entries = this._groupItemsByLinkedGroup(meds, m => m.id);
+        return `
+            <div class="audit-square-grid">
+                ${entries.map(e => e.type === 'group'
+                    ? this._renderAuditLocationGroupCard(e.group, e.items)
+                    : this.renderAuditMedicineCard(e.item)
+                ).join('')}
+            </div>
+        `;
+    },
+
+    _renderAuditMergedGroupCard(group, memberItems, activeLocs) {
+        const pal = this._getDrugGroupPalette(group.color);
+        const allBatches = [];
+        let groupTotal = 0;
+        let countedMembers = 0;
+        for (const item of memberItems) {
+            if (item.isCounted) countedMembers++;
+            groupTotal += (parseFloat(item.totalQty) || 0);
+            if (Array.isArray(item.mergedBatches)) allBatches.push(...item.mergedBatches);
+        }
+        groupTotal = Math.round(groupTotal * 1000) / 1000;
+        const mergedBatches = this._mergeBatchesByExpiry(allBatches, []);
+        const earliestExp = mergedBatches.find(b => b.expiryDate)?.expiryDate || '';
+        const expBadge = earliestExp ? this.calcExpiryBadge(earliestExp) : null;
+        const allDone = countedMembers === memberItems.length && memberItems.length > 0;
+        const domId = `aud-mrg-grp-${group.id}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+        return `
+            <div style="background:var(--surface); border:2px solid ${allDone ? '#10b981' : pal.hex}; border-radius:16px; padding:13px; box-shadow:0 4px 14px rgba(0,0,0,0.07);">
+                <!-- Group Header -->
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px; padding-bottom:9px; border-bottom:1.5px solid ${pal.hex}30; flex-wrap:wrap;">
+                    <div style="display:flex; align-items:center; gap:8px; min-width:0; flex:1;">
+                        <span style="width:32px; height:32px; border-radius:9px; background:${pal.soft}; color:${pal.hex}; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;">
+                            <i class='bx bx-link' style="font-size:19px;"></i>
+                        </span>
+                        <div style="min-width:0;">
+                            <div style="font-size:14.5px; font-weight:800; color:${pal.hex}; line-height:1.25;">${Utils.escapeHTML(group.name)}</div>
+                            <div style="font-size:11px; color:${allDone ? '#059669' : 'var(--text-muted)'}; font-weight:700;">
+                                ${memberItems.length} أصناف مرتبطة • تم جرد ${countedMembers}/${memberItems.length}
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                        <span style="font-size:14px; font-weight:800; padding:5px 11px; border-radius:9px; background:${pal.soft}; color:${pal.hex};">
+                            الإجمالي: ${groupTotal} وحدة
+                        </span>
+                        ${expBadge ? `<span style="font-size:10.5px; font-weight:700; padding:4px 8px; border-radius:7px; background:${expBadge.bg}; color:${expBadge.color};">📅 ${earliestExp}</span>` : ''}
+                        <button type="button" onclick="window.App._toggleGroupCardCollapse('${domId}')" style="width:28px; height:28px; border-radius:7px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-muted); display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
+                            <i id="${domId}-chev" class='bx bx-chevron-up' style="font-size:17px; transition:transform 0.15s;"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Member Cards Stacked -->
+                <div id="${domId}" style="display:flex; flex-direction:column; gap:8px;">
+                    ${memberItems.map(item => this.renderMergedMedicineCard(item, activeLocs)).join('')}
+                </div>
+
+                ${this._renderMergedExpiryStripHtml(mergedBatches)}
+            </div>
+        `;
+    },
+
+    _renderAuditMergedListHtml(list, activeLocs) {
+        if (!list || list.length === 0) {
+            return `
+                <div class="empty-state p-20" style="text-align:center; background:var(--surface); border-radius:14px; border:1px dashed var(--border-color); margin:15px 0;">
+                    <i class='bx bx-search-alt' style="font-size:32px; color:var(--text-muted); opacity:0.6;"></i>
+                    <p style="margin:6px 0 0 0; font-size:13px; color:var(--text-muted);">لا توجد أدوية مطابقة</p>
+                </div>
+            `;
+        }
+        if (!this.isShowGroupedCards()) {
+            return `<div style="display:flex; flex-direction:column; gap:12px;">${list.map(item => this.renderMergedMedicineCard(item, activeLocs)).join('')}</div>`;
+        }
+        const entries = this._groupItemsByLinkedGroup(list, item => item.med.id);
+        return `
+            <div style="display:flex; flex-direction:column; gap:12px;">
+                ${entries.map(e => e.type === 'group'
+                    ? this._renderAuditMergedGroupCard(e.group, e.items, activeLocs)
+                    : this.renderMergedMedicineCard(e.item, activeLocs)
+                ).join('')}
+            </div>
+        `;
+    },
+
+    // --- Drug Groups Manager & Editor Modals ---
+    async openDrugGroupsManagerModal() {
+        try {
+            const [groups, allMeds] = await Promise.all([
+                this.loadDrugGroupsCache(true),
+                DB.getAll('medicineMaster')
+            ]);
+            const medMap = new Map((allMeds || []).map(m => [m.id, m]));
+
+            UI.showModal(`
+                <div class="sheet-handle"></div>
+                <div class="modal-header" style="border-bottom:1px solid var(--border-color); padding-bottom:10px; margin-bottom:12px;">
+                    <h2 style="font-size:16px; margin:0; display:flex; align-items:center; gap:7px;">
+                        <i class='bx bx-link' style="color:#7c3aed; font-size:22px;"></i>
+                        <span>المجموعات المرتبطة (${groups.length})</span>
+                    </h2>
+                    <p class="text-muted" style="font-size:11.5px; margin-top:4px;">
+                        اربط الأدوية المتشابهة أو البديلة في مجموعة واحدة لجمع كمياتها وصلاحياتها في كارت كبير أو مربع في الإكسل (مع بقاء كل دواء مستقلاً).
+                    </p>
+                </div>
+
+                <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; align-items:center;">
+                    <button type="button" class="btn-primary sm-btn" onclick="window.App.openEditDrugGroupModal(null)" style="flex:1; height:38px; border-radius:10px; background:#7c3aed; font-size:12.5px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:5px;">
+                        <i class='bx bx-plus-circle' style="font-size:17px;"></i> إنشاء مجموعة جديدة
+                    </button>
+                    ${this._renderGroupTogglePillHtml()}
+                </div>
+
+                <div style="max-height:52vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;">
+                    ${groups.length === 0 ? `
+                        <div style="text-align:center; padding:26px 14px; background:var(--bg-secondary); border-radius:12px; border:1px dashed var(--border-color);">
+                            <i class='bx bx-link-alt' style="font-size:34px; color:#7c3aed; opacity:0.6;"></i>
+                            <p style="font-size:13px; font-weight:700; margin:8px 0 4px 0;">لا توجد مجموعات مرتبطة بعد</p>
+                            <small class="text-muted">اضغط «إنشاء مجموعة جديدة» لربط أدوية متشابهة أو بديلة معاً</small>
+                        </div>
+                    ` : groups.map(g => {
+                        const pal = this._getDrugGroupPalette(g.color);
+                        const members = (g.medicineIds || []).map(id => medMap.get(id)).filter(Boolean);
+                        return `
+                            <div style="padding:10px 12px; border-radius:12px; background:var(--surface); border:1.5px solid ${pal.hex}45; border-right:4px solid ${pal.hex};">
+                                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;">
+                                    <div style="min-width:0; flex:1;">
+                                        <strong style="font-size:13.5px; color:${pal.hex}; display:block;">🔗 ${Utils.escapeHTML(g.name)}</strong>
+                                        <small style="font-size:11px; color:var(--text-muted);">${members.length} أصناف مرتبطة</small>
+                                    </div>
+                                    <div style="display:flex; gap:5px;">
+                                        <button type="button" class="btn-ghost sm-btn" onclick="window.App.openEditDrugGroupModal('${Utils.escapeHTML(g.id)}')" style="height:30px; padding:0 9px; font-size:11.5px; border:1px solid var(--border-color); border-radius:7px;">
+                                            <i class='bx bx-edit-alt'></i> تعديل
+                                        </button>
+                                        <button type="button" class="btn-ghost sm-btn text-danger" onclick="window.App.deleteDrugGroup('${Utils.escapeHTML(g.id)}')" title="حذف المجموعة (لا يحذف الأدوية)" style="height:30px; padding:0 8px; font-size:12px; border:1px solid rgba(239,68,68,0.3); border-radius:7px;">
+                                            <i class='bx bx-trash'></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                                    ${members.map(m => `<span style="font-size:10.5px; padding:2px 7px; border-radius:6px; background:var(--bg-secondary); border:1px solid var(--border-color); color:var(--text-main); font-weight:600;">${Utils.escapeHTML(m.nameEN || m.nameAR)}</span>`).join('') || '<span style="font-size:11px; color:var(--text-muted);">لا توجد أصناف</span>'}
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+
+                <div class="form-actions mt-15">
+                    <button type="button" class="btn-ghost w-100" onclick="window.UI.closeModal()">إغلاق</button>
+                </div>
+            `);
+        } catch (err) {
+            console.error('openDrugGroupsManagerModal error:', err);
+            UI.showToast('خطأ في تحميل المجموعات', 'danger');
+        }
+    },
+
+    async openEditDrugGroupModal(groupId = null, preAddMedId = null) {
+        try {
+            const [groups, allMeds] = await Promise.all([
+                this.loadDrugGroupsCache(true),
+                DB.getAll('medicineMaster')
+            ]);
+            const existing = groupId ? groups.find(g => g.id === groupId) : null;
+            const medMap = new Map((allMeds || []).map(m => [m.id, m]));
+
+            const initialIds = existing
+                ? (existing.medicineIds || []).filter(id => medMap.has(id))
+                : [];
+            if (preAddMedId && medMap.has(preAddMedId) && !initialIds.includes(preAddMedId)) {
+                initialIds.push(preAddMedId);
+            }
+
+            const preMed = preAddMedId ? medMap.get(preAddMedId) : null;
+            const suggestedName = existing
+                ? existing.name
+                : (preMed?.activeIngredient ? `مجموعة ${preMed.activeIngredient}` : '');
+
+            this._dgEditState = {
+                groupId: existing ? existing.id : null,
+                name: suggestedName,
+                color: existing?.color || this._DRUG_GROUP_COLORS[0].hex,
+                selectedIds: [...initialIds],
+                allMeds: allMeds || [],
+                medMap,
+                groups,
+                query: '',
+                returnToMedId: preAddMedId || null
+            };
+
+            UI.showModal(`
+                <div class="sheet-handle"></div>
+                <div class="modal-header" style="border-bottom:1px solid var(--border-color); padding-bottom:10px; margin-bottom:12px;">
+                    <h2 style="font-size:15.5px; margin:0; display:flex; align-items:center; gap:6px;">
+                        <i class='bx bx-link' style="color:#7c3aed; font-size:21px;"></i>
+                        <span>${existing ? 'تعديل المجموعة المرتبطة ✏️' : 'إنشاء مجموعة مرتبطة جديدة 🔗'}</span>
+                    </h2>
+                </div>
+
+                <div class="form-group mb-10">
+                    <label class="form-label" style="font-size:12px;">اسم المجموعة:</label>
+                    <input type="text" id="dg-name-input" class="form-input" placeholder="مثلاً: بدائل بنادول أو أمبولات الطوارئ..." value="${Utils.escapeHTML(suggestedName)}" oninput="window.App._dgEditState.name = this.value;" style="font-weight:700;">
+                </div>
+
+                <div class="form-group mb-10">
+                    <label class="form-label" style="font-size:12px;">لون التمييز (في الكارت والإكسل):</label>
+                    <div id="dg-color-picker" style="display:flex; gap:8px; flex-wrap:wrap;">
+                        ${this._DRUG_GROUP_COLORS.map(c => `
+                            <button type="button" onclick="window.App._dgSelectColor('${c.hex}')" data-dg-color="${c.hex}" style="width:32px; height:32px; border-radius:9px; background:${c.hex}; border:3px solid ${c.hex === this._dgEditState.color ? '#0f172a' : 'transparent'}; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,0.15);" title="${c.name}"></button>
+                        `).join('')}
+                    </div>
+                </div>
+
+                <!-- Selected Medicines List -->
+                <div class="form-group mb-10" style="padding:9px 10px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-bottom:6px; flex-wrap:wrap;">
+                        <label class="form-label" style="margin:0; font-size:12px;">الأدوية المرتبطة <span id="dg-sel-count" style="color:#7c3aed; font-weight:800;"></span></label>
+                        <button type="button" id="dg-same-active-btn" onclick="window.App._dgAddSameActive()" style="display:none; font-size:10.5px; font-weight:800; padding:3px 8px; border-radius:6px; border:1px solid rgba(124,58,237,0.4); background:rgba(124,58,237,0.08); color:#7c3aed; cursor:pointer;">
+                            ⚡ إضافة كل نفس المادة الفعالة
+                        </button>
+                    </div>
+                    <div id="dg-selected-list" style="display:flex; flex-direction:column; gap:5px; max-height:18vh; overflow-y:auto;"></div>
+                </div>
+
+                <!-- Search & Add Medicines -->
+                <div class="form-group mb-10">
+                    <label class="form-label" style="font-size:12px;">➕ إضافة أدوية للمجموعة (نفس المادة أو مختلفة):</label>
+                    <div class="audit-search-wrapper" style="width:100%; margin-bottom:6px;">
+                        <i class='bx bx-search'></i>
+                        <input type="text" id="dg-med-search" class="audit-search-input" placeholder="🔍 ابحث بالاسم أو المادة الفعالة أو الباركود..." oninput="window.App._dgSearchMeds(this.value)">
+                    </div>
+                    <div id="dg-med-results" style="max-height:22vh; overflow-y:auto; display:flex; flex-direction:column; gap:5px;"></div>
+                </div>
+
+                <div class="form-actions mt-12" style="display:flex; gap:8px;">
+                    <button type="button" class="btn-primary" onclick="window.App._dgSaveGroup()" style="flex:1; height:42px; border-radius:10px; background:#7c3aed; font-size:13px;">
+                        💾 حفظ المجموعة
+                    </button>
+                    <button type="button" class="btn-ghost" onclick="window.App.openDrugGroupsManagerModal()" style="height:42px; padding:0 14px; border:1px solid var(--border-color); border-radius:10px;">
+                        رجوع
+                    </button>
+                </div>
+            `);
+
+            this._dgRenderSelected();
+            this._dgRenderSearchResults();
+        } catch (err) {
+            console.error('openEditDrugGroupModal error:', err);
+            UI.showToast('خطأ في فتح محرر المجموعة', 'danger');
+        }
+    },
+
+    _dgSelectColor(hex) {
+        if (!this._dgEditState) return;
+        this._dgEditState.color = hex;
+        document.querySelectorAll('[data-dg-color]').forEach(btn => {
+            btn.style.borderColor = btn.dataset.dgColor === hex ? '#0f172a' : 'transparent';
+        });
+    },
+
+    _dgRenderSelected() {
+        const st = this._dgEditState;
+        const box = document.getElementById('dg-selected-list');
+        const cnt = document.getElementById('dg-sel-count');
+        const sameBtn = document.getElementById('dg-same-active-btn');
+        if (!st || !box) return;
+
+        if (cnt) cnt.textContent = `(${st.selectedIds.length})`;
+
+        // Check if any selected med has an active ingredient with unadded matches
+        let hasSameActiveCandidates = false;
+        const activeKeys = new Set(
+            st.selectedIds
+                .map(id => this._normalizeActiveKey(st.medMap.get(id)?.activeIngredient || ''))
+                .filter(Boolean)
+        );
+        if (activeKeys.size > 0) {
+            hasSameActiveCandidates = st.allMeds.some(m =>
+                !st.selectedIds.includes(m.id) &&
+                activeKeys.has(this._normalizeActiveKey(m.activeIngredient || ''))
+            );
+        }
+        if (sameBtn) sameBtn.style.display = hasSameActiveCandidates ? 'inline-flex' : 'none';
+
+        if (st.selectedIds.length === 0) {
+            box.innerHTML = `<div style="font-size:11px; color:var(--text-muted); text-align:center; padding:6px;">اختر دواين على الأقل من البحث بالأسفل</div>`;
+            return;
+        }
+
+        box.innerHTML = st.selectedIds.map((id, idx) => {
+            const m = st.medMap.get(id);
+            if (!m) return '';
+            return `
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; padding:5px 8px; background:var(--surface); border:1px solid var(--border-color); border-radius:8px;">
+                    <div style="min-width:0; flex:1;">
+                        <div style="font-size:12px; font-weight:800; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${idx + 1}. ${Utils.escapeHTML(m.nameEN || m.nameAR)}</div>
+                        ${m.activeIngredient ? `<div style="font-size:10px; color:var(--primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">💊 ${Utils.escapeHTML(m.activeIngredient)}</div>` : ''}
+                    </div>
+                    <div style="display:flex; gap:3px; flex-shrink:0;">
+                        ${idx > 0 ? `<button type="button" onclick="window.App._dgMoveMed(${idx}, -1)" title="أعلى" style="width:24px; height:24px; border:1px solid var(--border-color); background:var(--bg-secondary); border-radius:6px; cursor:pointer;"><i class='bx bx-chevron-up'></i></button>` : ''}
+                        ${idx < st.selectedIds.length - 1 ? `<button type="button" onclick="window.App._dgMoveMed(${idx}, 1)" title="أسفل" style="width:24px; height:24px; border:1px solid var(--border-color); background:var(--bg-secondary); border-radius:6px; cursor:pointer;"><i class='bx bx-chevron-down'></i></button>` : ''}
+                        <button type="button" onclick="window.App._dgRemoveMed('${Utils.escapeHTML(id)}')" title="إزالة" style="width:24px; height:24px; border:1px solid rgba(239,68,68,0.3); background:var(--surface); color:var(--danger); border-radius:6px; cursor:pointer;"><i class='bx bx-x'></i></button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    },
+
+    _dgMoveMed(idx, dir) {
+        const st = this._dgEditState;
+        if (!st) return;
+        const target = idx + dir;
+        if (target < 0 || target >= st.selectedIds.length) return;
+        const tmp = st.selectedIds[idx];
+        st.selectedIds[idx] = st.selectedIds[target];
+        st.selectedIds[target] = tmp;
+        this._dgRenderSelected();
+    },
+
+    _dgAddMed(medId) {
+        const st = this._dgEditState;
+        if (!st || !medId || st.selectedIds.includes(medId)) return;
+        st.selectedIds.push(medId);
+        // Auto-suggest group name if still empty
+        const nameEl = document.getElementById('dg-name-input');
+        if (nameEl && !nameEl.value.trim()) {
+            const m = st.medMap.get(medId);
+            if (m?.activeIngredient) {
+                st.name = `مجموعة ${m.activeIngredient}`;
+                nameEl.value = st.name;
+            }
+        }
+        this._dgRenderSelected();
+        this._dgRenderSearchResults();
+    },
+
+    _dgRemoveMed(medId) {
+        const st = this._dgEditState;
+        if (!st) return;
+        st.selectedIds = st.selectedIds.filter(id => id !== medId);
+        this._dgRenderSelected();
+        this._dgRenderSearchResults();
+    },
+
+    _dgAddSameActive() {
+        const st = this._dgEditState;
+        if (!st) return;
+        const activeKeys = new Set(
+            st.selectedIds
+                .map(id => this._normalizeActiveKey(st.medMap.get(id)?.activeIngredient || ''))
+                .filter(Boolean)
+        );
+        let added = 0;
+        for (const m of st.allMeds) {
+            if (st.selectedIds.includes(m.id)) continue;
+            if (activeKeys.has(this._normalizeActiveKey(m.activeIngredient || ''))) {
+                st.selectedIds.push(m.id);
+                added++;
+            }
+        }
+        if (added > 0) {
+            UI.showToast(`تم إضافة ${added} دواء بنفس المادة الفعالة ⚡`, 'success');
+            this._dgRenderSelected();
+            this._dgRenderSearchResults();
+        }
+    },
+
+    _dgSearchMeds(query) {
+        if (!this._dgEditState) return;
+        this._dgEditState.query = query || '';
+        this._dgRenderSearchResults();
+    },
+
+    _dgRenderSearchResults() {
+        const st = this._dgEditState;
+        const box = document.getElementById('dg-med-results');
+        if (!st || !box) return;
+
+        const q = String(st.query || '').trim();
+        let candidates = st.allMeds.filter(m => !st.selectedIds.includes(m.id));
+        if (q) {
+            candidates = Utils.smartFilter(candidates, q, (pq, m) => Utils.smartScoreMed(pq, m));
+        } else if (st.selectedIds.length > 0) {
+            // Prioritize same active ingredient / similar names when search box is empty!
+            const firstMed = st.medMap.get(st.selectedIds[0]);
+            const sims = firstMed ? this._findSimilarMedicines(firstMed, candidates, 8).map(x => x.med) : [];
+            const simIds = new Set(sims.map(m => m.id));
+            candidates = [...sims, ...candidates.filter(m => !simIds.has(m.id))];
+        }
+        candidates = candidates.slice(0, 25);
+
+        if (candidates.length === 0) {
+            box.innerHTML = `<div style="text-align:center; padding:10px; font-size:11.5px; color:var(--text-muted);">لا توجد أدوية أخرى مطابقة</div>`;
+            return;
+        }
+
+        // Map med -> other group (to warn if already in another group)
+        const otherGrpMap = new Map();
+        for (const g of (st.groups || [])) {
+            if (g.id === st.groupId) continue;
+            for (const mid of (g.medicineIds || [])) otherGrpMap.set(mid, g.name);
+        }
+
+        box.innerHTML = candidates.map(m => {
+            const otherGrp = otherGrpMap.get(m.id);
+            return `
+                <div onclick="window.App._dgAddMed('${Utils.escapeHTML(m.id)}')" style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:7px 9px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:8px; cursor:pointer;">
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:12px; font-weight:700; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHTML(m.nameEN || m.nameAR)}</div>
+                        ${m.nameAR && m.nameAR !== m.nameEN ? `<div style="font-size:10px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHTML(m.nameAR)}</div>` : ''}
+                        ${otherGrp ? `<div style="font-size:9.5px; color:#d97706;">⚠️ حالياً في «${Utils.escapeHTML(otherGrp)}» (سينتقل لهذه المجموعة)</div>` : ''}
+                    </div>
+                    <span style="font-size:11px; font-weight:800; color:#7c3aed; background:rgba(124,58,237,0.1); padding:3px 8px; border-radius:6px; flex-shrink:0;">+ إضافة</span>
+                </div>
+            `;
+        }).join('');
+    },
+
+    async _dgSaveGroup() {
+        const st = this._dgEditState;
+        if (!st) return;
+        const name = (document.getElementById('dg-name-input')?.value || st.name || '').trim();
+        if (!name) return UI.showToast('يرجى كتابة اسم للمجموعة', 'warning');
+        if (st.selectedIds.length < 2) return UI.showToast('اختر دواين على الأقل لتكوين مجموعة مرتبطة', 'warning');
+
+        try {
+            const now = new Date().toISOString();
+            const groupId = st.groupId || `grp_${Date.now()}`;
+            const selectedSet = new Set(st.selectedIds);
+
+            // Enforce 1 medicine = 1 group: remove these meds from any other group automatically
+            const allGroups = (await DB.getAll('drug_groups')) || [];
+            for (const other of allGroups) {
+                if (other.id === groupId || !Array.isArray(other.medicineIds)) continue;
+                const filtered = other.medicineIds.filter(mid => !selectedSet.has(mid));
+                if (filtered.length !== other.medicineIds.length) {
+                    if (filtered.length < 2) {
+                        await DB.delete('drug_groups', other.id);
+                        if (typeof Sync !== 'undefined' && Sync.deleteDrugGroup) {
+                            Sync.deleteDrugGroup(other.id).catch(() => {});
+                        }
+                    } else {
+                        other.medicineIds = filtered;
+                        other.updatedAt = now;
+                        await DB.put('drug_groups', other);
+                        if (typeof Sync !== 'undefined' && Sync.pushDrugGroup) {
+                            Sync.pushDrugGroup(other).catch(() => {});
+                        }
+                    }
+                }
+            }
+
+            const existing = allGroups.find(g => g.id === groupId);
+            const groupObj = {
+                id: groupId,
+                name,
+                color: st.color || this._DRUG_GROUP_COLORS[0].hex,
+                medicineIds: [...st.selectedIds],
+                createdAt: existing?.createdAt || now,
+                updatedAt: now,
+                syncStatus: 'local'
+            };
+
+            await DB.put('drug_groups', groupObj);
+            if (typeof Sync !== 'undefined' && Sync.pushDrugGroup) {
+                Sync.pushDrugGroup(groupObj).catch(() => {});
+            }
+
+            await this.loadDrugGroupsCache(true);
+            UI.closeModal();
+            UI.showToast(`تم حفظ المجموعة «${name}» (${groupObj.medicineIds.length} أصناف) 🔗✨`, 'success');
+            await this.refreshAllViews();
+            if (st.returnToMedId) {
+                await this.openMedicineDetails(st.returnToMedId);
+            }
+        } catch (err) {
+            console.error('_dgSaveGroup error:', err);
+            UI.showToast('فشل حفظ المجموعة', 'danger');
+        }
+    },
+
+    async deleteDrugGroup(groupId) {
+        if (!confirm('هل تريد حذف هذه المجموعة المرتبطة؟\n(الأدوية وكمياتها ستبقى كما هي تماماً بدون أي حذف)')) return;
+        try {
+            await DB.delete('drug_groups', groupId);
+            if (typeof Sync !== 'undefined' && Sync.deleteDrugGroup) {
+                Sync.deleteDrugGroup(groupId).catch(() => {});
+            }
+            await this.loadDrugGroupsCache(true);
+            UI.showToast('تم فك وحذف المجموعة بنجاح (الأدوية سليمة 100%) ✅', 'success');
+            await this.openDrugGroupsManagerModal();
+            await this.refreshAllViews();
+        } catch (err) {
+            console.error('deleteDrugGroup error:', err);
+            UI.showToast('تعذر حذف المجموعة', 'danger');
+        }
+    },
+
+    async openQuickLinkMedToGroupModal(medId) {
+        const [med, groups] = await Promise.all([
+            DB.get('medicineMaster', medId),
+            this.loadDrugGroupsCache(true)
+        ]);
+        if (!med) return;
+        const currentGrp = this.getMedicineGroup(medId);
+
+        UI.showModal(`
+            <div class="sheet-handle"></div>
+            <div class="modal-header" style="border-bottom:1px solid var(--border-color); padding-bottom:10px; margin-bottom:12px;">
+                <h2 style="font-size:15.5px; margin:0; display:flex; align-items:center; gap:6px;">
+                    <i class='bx bx-link' style="color:#7c3aed; font-size:20px;"></i>
+                    <span>ربط بمجموعة: ${Utils.escapeHTML(med.nameEN || med.nameAR)}</span>
+                </h2>
+            </div>
+
+            <button type="button" class="btn-primary w-100" onclick="window.App.openEditDrugGroupModal(null, '${Utils.escapeHTML(medId)}')" style="margin-bottom:12px; height:40px; border-radius:10px; background:#7c3aed; font-size:12.5px;">
+                <i class='bx bx-plus-circle'></i> إنشاء مجموعة جديدة تبدأ بهذا الدواء
+            </button>
+
+            ${groups.length > 0 ? `
+                <div style="font-size:12px; font-weight:800; margin-bottom:7px; color:var(--text-main);">أو أضفه لمجموعة موجودة بالفعل:</div>
+                <div style="display:flex; flex-direction:column; gap:6px; max-height:36vh; overflow-y:auto;">
+                    ${groups.map(g => {
+                        const pal = this._getDrugGroupPalette(g.color);
+                        const isHere = currentGrp?.id === g.id;
+                        return `
+                            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 10px; border-radius:9px; background:var(--bg-secondary); border:1.5px solid ${isHere ? pal.hex : 'var(--border-color)'};">
+                                <div>
+                                    <strong style="font-size:12.5px; color:${pal.hex};">🔗 ${Utils.escapeHTML(g.name)}</strong>
+                                    <div style="font-size:10.5px; color:var(--text-muted);">${(g.medicineIds || []).length} أصناف</div>
+                                </div>
+                                ${isHere ? `
+                                    <div style="display:flex; gap:5px;">
+                                        <button type="button" class="btn-ghost sm-btn" onclick="window.App.openEditDrugGroupModal('${Utils.escapeHTML(g.id)}')" style="height:28px; padding:0 8px; font-size:11px; border:1px solid var(--border-color);">تعديل</button>
+                                        <button type="button" class="btn-ghost sm-btn text-danger" onclick="window.App.unlinkMedFromGroup('${Utils.escapeHTML(medId)}', '${Utils.escapeHTML(g.id)}')" style="height:28px; padding:0 8px; font-size:11px; border:1px solid rgba(239,68,68,0.3);">فك الربط</button>
+                                    </div>
+                                ` : `
+                                    <button type="button" class="btn-primary sm-btn" onclick="window.App.addMedToExistingGroup('${Utils.escapeHTML(medId)}', '${Utils.escapeHTML(g.id)}')" style="height:28px; padding:0 10px; font-size:11px; background:${pal.hex};">ربط هنا</button>
+                                `}
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            ` : ''}
+
+            <div class="form-actions mt-15">
+                <button type="button" class="btn-ghost w-100" onclick="window.App.openMedicineDetails('${Utils.escapeHTML(medId)}')">رجوع للتفاصيل</button>
+            </div>
+        `);
+    },
+
+    async addMedToExistingGroup(medId, targetGroupId) {
+        try {
+            const allGroups = (await DB.getAll('drug_groups')) || [];
+            const now = new Date().toISOString();
+            for (const g of allGroups) {
+                if (g.id === targetGroupId) continue;
+                if (Array.isArray(g.medicineIds) && g.medicineIds.includes(medId)) {
+                    const rem = g.medicineIds.filter(id => id !== medId);
+                    if (rem.length < 2) {
+                        await DB.delete('drug_groups', g.id);
+                        if (typeof Sync !== 'undefined' && Sync.deleteDrugGroup) Sync.deleteDrugGroup(g.id).catch(() => {});
+                    } else {
+                        g.medicineIds = rem;
+                        g.updatedAt = now;
+                        await DB.put('drug_groups', g);
+                        if (typeof Sync !== 'undefined' && Sync.pushDrugGroup) Sync.pushDrugGroup(g).catch(() => {});
+                    }
+                }
+            }
+            const target = allGroups.find(g => g.id === targetGroupId);
+            if (!target) return;
+            if (!Array.isArray(target.medicineIds)) target.medicineIds = [];
+            if (!target.medicineIds.includes(medId)) target.medicineIds.push(medId);
+            target.updatedAt = now;
+            await DB.put('drug_groups', target);
+            if (typeof Sync !== 'undefined' && Sync.pushDrugGroup) Sync.pushDrugGroup(target).catch(() => {});
+
+            await this.loadDrugGroupsCache(true);
+            UI.showToast(`تم ربط الدواء بمجموعة «${target.name}» 🔗✅`, 'success');
+            await this.openMedicineDetails(medId);
+            await this.refreshAllViews();
+        } catch (err) {
+            console.error('addMedToExistingGroup error:', err);
+            UI.showToast('تعذر ربط الدواء', 'danger');
+        }
+    },
+
+    async unlinkMedFromGroup(medId, groupId) {
+        try {
+            const g = await DB.get('drug_groups', groupId);
+            if (!g) return;
+            const rem = (g.medicineIds || []).filter(id => id !== medId);
+            if (rem.length < 2) {
+                await DB.delete('drug_groups', groupId);
+                if (typeof Sync !== 'undefined' && Sync.deleteDrugGroup) Sync.deleteDrugGroup(groupId).catch(() => {});
+            } else {
+                g.medicineIds = rem;
+                g.updatedAt = new Date().toISOString();
+                await DB.put('drug_groups', g);
+                if (typeof Sync !== 'undefined' && Sync.pushDrugGroup) Sync.pushDrugGroup(g).catch(() => {});
+            }
+            await this.loadDrugGroupsCache(true);
+            UI.showToast('تم فك ربط الدواء من المجموعة ✅', 'success');
+            await this.openMedicineDetails(medId);
+            await this.refreshAllViews();
+        } catch (err) {
+            console.error('unlinkMedFromGroup error:', err);
+        }
+    },
+    // ===================== End Linked Drug Groups Engine =====================
 
     // --- Dedicated Expiry Monitor with Audit Reference & Session Selector ---
     async openExpiryMonitorModal() {

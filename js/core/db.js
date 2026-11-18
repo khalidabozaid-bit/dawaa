@@ -6,7 +6,7 @@
  */
 
 const DB_NAME = 'DawaaMedicalDB';
-const DB_VERSION = 9; // v18.15.0: Added cloud-synced Recycle Bin (trash) store
+const DB_VERSION = 10; // v18.21.0: Added cloud-synced Linked Drug Groups (drug_groups) store
 
 const STORES = {
     MASTER: 'medicineMaster', 
@@ -16,7 +16,8 @@ const STORES = {
     AUDITS: 'audits',
     LOCATIONS: 'locations',
     AUDIT_SESSIONS: 'audit_sessions',
-    TRASH: 'trash'
+    TRASH: 'trash',
+    DRUG_GROUPS: 'drug_groups'
 };
 
 export const DB = {
@@ -83,6 +84,11 @@ export const DB = {
                 // Recycle Bin / Trash Store (v18.15.0)
                 if (!db.objectStoreNames.contains(STORES.TRASH)) {
                     db.createObjectStore(STORES.TRASH, { keyPath: 'id' });
+                }
+
+                // Linked Drug Groups Store (v18.21.0)
+                if (!db.objectStoreNames.contains(STORES.DRUG_GROUPS)) {
+                    db.createObjectStore(STORES.DRUG_GROUPS, { keyPath: 'id' });
                 }
             };
 
