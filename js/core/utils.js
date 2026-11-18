@@ -430,10 +430,11 @@ export const Utils = {
 
     smartScoreMed(queryOrPrepared, med, extraFields = []) {
         if (!med) return 0;
+        const multiBarcodes = Array.isArray(med.barcodes) ? med.barcodes : [];
         return this.smartScore(
             queryOrPrepared,
             [med.nameEN, med.nameAR],
-            [med.activeIngredient, med.barcode, med.id, ...extraFields]
+            [med.activeIngredient, med.barcode, ...multiBarcodes, med.id, ...extraFields]
         );
     },
 

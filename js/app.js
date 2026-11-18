@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.18.0', // GS1 DataMatrix & QR 2D Pharma Scanner — auto-extracts EAN-13 barcode + Expiry Date + Batch
+    VERSION: '18.19.0', // Multi-Barcode Support per Medicine (med.barcodes[] + chips UI + append-on-link + universal search)
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1120,9 +1120,9 @@ const App = {
             const safePrimary = (typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(primaryName) : primaryName;
             const safeSecondary = (typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(secondaryName) : secondaryName;
             const safeActive = (med.activeIngredient && typeof Utils !== 'undefined' && Utils.escapeHTML) ? Utils.escapeHTML(med.activeIngredient) : (med.activeIngredient || '');
-            // v18.14.0: Keep commercial barcode strictly separate from internal DB id
-            const realBarcode = (med.barcode && String(med.barcode).trim() !== '' && String(med.barcode).trim() !== String(med.id)) ? String(med.barcode).trim() : '';
-            const safeBarcode = realBarcode ? Utils.escapeHTML(realBarcode) : '';
+            // v18.19.0: Multi-Barcode Support — keep commercial barcodes strictly separate from internal DB id
+            const medBarcodes = this.getMedicineBarcodes(med);
+            const safeMedId = Utils.escapeHTML(med.id);
 
             // Fetch physical storage locations in the clinic building
             const allLocations = (await Locations.getAll()) || [];
@@ -1170,22 +1170,56 @@ const App = {
                     </div>
                 </div>
 
-                <!-- Barcode & Identification Quick Bar (Strictly separate from internal DB #id) -->
-                ${safeBarcode ? `
-                    <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px; padding:8px 12px; margin-bottom:16px; flex-wrap:wrap;">
-                        <span style="font-size:12px; font-weight:bold; color:var(--text-muted); display:flex; align-items:center; gap:6px;">
-                            <i class='bx bx-barcode' style="font-size:16px; color:var(--primary);"></i> الباركود: <code style="color:var(--text-main);">${safeBarcode}</code>
+                <!-- Multi-Barcode Section (Strictly separate from internal DB #id) -->
+                <div style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:12px; padding:10px 12px; margin-bottom:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-bottom:${medBarcodes.length > 0 ? '8px' : '0'}; flex-wrap:wrap;">
+                        <span style="font-size:12px; font-weight:800; color:var(--text-main); display:inline-flex; align-items:center; gap:5px;">
+                            <i class='bx bx-barcode' style="font-size:17px; color:var(--primary);"></i>
+                            باركودات العبوة
+                            ${medBarcodes.length > 0 ? `<span style="font-size:10.5px; background:rgba(59,130,246,0.12); color:var(--primary); padding:1px 6px; border-radius:99px;">${medBarcodes.length}</span>` : `<span style="font-size:11px; font-weight:500; color:var(--text-muted);">(لا يوجد)</span>`}
                         </span>
-                        <div style="display:flex; gap:6px;">
-                            <button type="button" class="btn-ghost sm-btn" onclick="navigator.clipboard.writeText('${safeBarcode}'); window.UI.showToast('تم نسخ الباركود 📋', 'info');" style="font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--border-color);">
-                                نسخ <i class='bx bx-copy'></i>
+                        <div style="display:flex; gap:5px; align-items:center;">
+                            <button type="button" class="btn-ghost sm-btn" onclick="window.App.quickScanAddBarcodeToMed('${safeMedId}')" title="مسح وإضافة باركود جديد بالكاميرا" style="font-size:11px; height:30px; padding:0 9px; border-radius:7px; border:1px solid rgba(124,58,237,0.35); color:#7c3aed; background:var(--surface); display:inline-flex; align-items:center; gap:4px;">
+                                <i class='bx bx-camera' style="font-size:14px;"></i> مسح
                             </button>
-                            <button type="button" class="btn-ghost sm-btn" onclick="window.App.clearMedicineBarcode('${Utils.escapeHTML(med.id)}')" title="مسح الباركود (دون المساس بكود الدواء في القاعدة)" style="font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid rgba(239,68,68,0.35); color:var(--danger);">
-                                مسح <i class='bx bx-trash'></i>
+                            <button type="button" class="btn-ghost sm-btn" onclick="const box=document.getElementById('det-add-bc-box'); if(box){ const show = box.style.display==='none'; box.style.display=show?'flex':'none'; if(show) document.getElementById('det-add-bc-input')?.focus(); }" title="إضافة باركود يدوياً" style="font-size:11px; height:30px; padding:0 9px; border-radius:7px; border:1px solid var(--border-color); color:var(--primary); background:var(--surface); display:inline-flex; align-items:center; gap:3px;">
+                                <i class='bx bx-plus' style="font-size:14px;"></i> إضافة
                             </button>
                         </div>
                     </div>
-                ` : ''}
+
+                    ${medBarcodes.length > 0 ? `
+                        <div style="display:flex; flex-direction:column; gap:6px;">
+                            ${medBarcodes.map((bc, idx) => {
+                                const safeBc = Utils.escapeHTML(bc);
+                                const safeBcJs = bc.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                                return `
+                                    <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; background:var(--surface); border:1px solid var(--border-color); border-radius:8px; padding:6px 9px;">
+                                        <div style="display:flex; align-items:center; gap:6px; min-width:0; flex:1;">
+                                            <code style="font-family:monospace; font-size:12.5px; font-weight:700; color:var(--text-main); word-break:break-all;">${safeBc}</code>
+                                            ${idx === 0 && medBarcodes.length > 1 ? `<span style="font-size:9.5px; font-weight:700; background:rgba(16,185,129,0.12); color:#059669; padding:1px 5px; border-radius:4px; flex-shrink:0;">أساسي</span>` : ''}
+                                        </div>
+                                        <div style="display:flex; gap:4px; flex-shrink:0;">
+                                            <button type="button" class="btn-ghost sm-btn" onclick="navigator.clipboard.writeText('${safeBcJs}'); window.UI.showToast('تم نسخ الباركود 📋', 'info');" title="نسخ" style="font-size:11px; height:28px; padding:0 7px; border-radius:6px; border:1px solid var(--border-color);">
+                                                <i class='bx bx-copy'></i>
+                                            </button>
+                                            <button type="button" class="btn-ghost sm-btn" onclick="window.App.removeMedicineBarcode('${safeMedId}', '${safeBcJs}')" title="حذف هذا الباركود فقط" style="font-size:11px; height:28px; padding:0 7px; border-radius:6px; border:1px solid rgba(239,68,68,0.35); color:var(--danger);">
+                                                <i class='bx bx-trash'></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    ` : ''}
+
+                    <div id="det-add-bc-box" style="display:none; gap:6px; align-items:center; margin-top:8px;">
+                        <input type="text" id="det-add-bc-input" class="form-input" placeholder="اكتب الباركود أو امسحه بجهاز USB..." style="flex:1; min-width:0; font-family:monospace; height:36px; font-size:12.5px; background:var(--surface);" onkeydown="if(event.key==='Enter'){event.preventDefault(); window.App.addBarcodeToMedicine('${safeMedId}', this.value);}">
+                        <button type="button" class="btn-primary sm-btn" onclick="window.App.addBarcodeToMedicine('${safeMedId}', document.getElementById('det-add-bc-input')?.value || '')" style="height:36px; padding:0 12px; font-size:12px; border-radius:8px; flex-shrink:0;">
+                            حفظ
+                        </button>
+                    </div>
+                </div>
 
                 <!-- Physical Clinic Storage Locations (أماكن الحفظ والتواجد في مبنى العيادة) -->
                 <div style="margin-bottom:16px;">
@@ -1365,15 +1399,19 @@ const App = {
                         <input type="text" id="m-active" class="form-input" placeholder="Paracetamol">
                     </div>
 
-                    <div class="form-group mb-12">
-                        <label class="form-label" for="m-barcode">باركود العبوة (اختياري — منفصل عن كود النظام):</label>
+                    <div class="form-group mb-12" style="padding:10px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px;">
+                        <label class="form-label" for="m-barcode" style="margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+                            <span>باركودات العبوة (يدعم أكثر من باركود):</span>
+                            <span id="m-barcodes-count" style="font-size:10.5px; color:var(--primary); font-weight:700;"></span>
+                        </label>
+                        <div id="m-barcodes-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;"></div>
                         <div style="display:flex; gap:6px; align-items:center;">
-                            <input type="text" id="m-barcode" class="form-input" placeholder="اكتب الباركود أو استخدم زر الكاميرا" style="flex:1; font-family:monospace;">
-                            <button type="button" class="btn-ghost sm-btn" onclick="window.App.startBarcodeScanner('m-barcode')" title="قراءة بالكاميرا" style="padding:8px 10px; border:1px solid var(--border-color); border-radius:8px; color:var(--primary); flex-shrink:0;">
-                                <i class='bx bx-camera' style="font-size:18px;"></i>
+                            <input type="text" id="m-barcode" class="form-input" placeholder="اكتب باركود واضغط +" style="flex:1; min-width:0; font-family:monospace; background:var(--surface);" onkeydown="if(event.key==='Enter'){event.preventDefault(); window.App._addFormBarcode('m');}">
+                            <button type="button" class="btn-primary sm-btn" onclick="window.App._addFormBarcode('m')" title="إضافة باركود للقائمة" style="padding:0 11px; height:40px; border-radius:8px; flex-shrink:0;">
+                                <i class='bx bx-plus' style="font-size:19px;"></i>
                             </button>
-                            <button type="button" class="btn-ghost sm-btn" onclick="const el=document.getElementById('m-barcode'); if(el) el.value='';" title="مسح الباركود" style="padding:8px 10px; border:1px solid rgba(239,68,68,0.35); border-radius:8px; color:var(--danger); flex-shrink:0;">
-                                <i class='bx bx-trash' style="font-size:17px;"></i>
+                            <button type="button" class="btn-ghost sm-btn" onclick="window.App._scanFormBarcode('m')" title="مسح وإضافة بالكاميرا (يدعم 1D و 2D)" style="padding:0 10px; height:40px; border:1px solid var(--border-color); border-radius:8px; color:var(--primary); background:var(--surface); flex-shrink:0;">
+                                <i class='bx bx-camera' style="font-size:18px;"></i>
                             </button>
                         </div>
                     </div>
@@ -1436,6 +1474,7 @@ const App = {
                     </div>
                 </form>
             `);
+            this._initFormBarcodes('m', []);
         } catch (err) {
             UI.showToast('خطأ في النافذة', 'danger');
         }
@@ -1495,18 +1534,19 @@ const App = {
 
                     <div class="form-group mb-12" style="padding:10px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:6px; flex-wrap:wrap;">
-                            <label class="form-label" for="e-barcode" style="margin:0;">باركود العبوة (قابل للتعديل أو الحذف):</label>
+                            <label class="form-label" for="e-barcode" style="margin:0;">باركودات العبوة <span id="e-barcodes-count" style="font-size:10.5px; color:var(--primary); font-weight:700;"></span></label>
                             <span style="font-size:11px; color:var(--text-muted); font-family:monospace; background:var(--surface); padding:2px 7px; border-radius:6px; border:1px solid var(--border-color);">
                                 كود النظام: #${Utils.escapeHTML(med.id)}
                             </span>
                         </div>
+                        <div id="e-barcodes-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;"></div>
                         <div style="display:flex; gap:6px; align-items:center;">
-                            <input type="text" id="e-barcode" class="form-input" placeholder="لا يوجد باركود — اكتب أو امسح بالكاميرا" value="${Utils.escapeHTML(med.barcode && String(med.barcode).trim() !== String(med.id) ? med.barcode : '')}" style="flex:1; font-family:monospace; background:var(--surface);">
-                            <button type="button" class="btn-ghost sm-btn" onclick="window.App.startBarcodeScanner('e-barcode')" title="قراءة الباركود بالكاميرا" style="padding:8px 10px; border:1px solid var(--border-color); border-radius:8px; color:var(--primary); background:var(--surface); flex-shrink:0;">
-                                <i class='bx bx-camera' style="font-size:18px;"></i>
+                            <input type="text" id="e-barcode" class="form-input" placeholder="أضف باركود جديد واضغط + أو امسح بالكاميرا" style="flex:1; min-width:0; font-family:monospace; background:var(--surface);" onkeydown="if(event.key==='Enter'){event.preventDefault(); window.App._addFormBarcode('e');}">
+                            <button type="button" class="btn-primary sm-btn" onclick="window.App._addFormBarcode('e')" title="إضافة باركود للقائمة" style="padding:0 11px; height:40px; border-radius:8px; flex-shrink:0;">
+                                <i class='bx bx-plus' style="font-size:19px;"></i>
                             </button>
-                            <button type="button" class="btn-ghost sm-btn" onclick="const el=document.getElementById('e-barcode'); if(el){el.value=''; window.UI.showToast('تم مسح الباركود — اضغط حفظ للتأكيد 🗑️', 'info');}" title="مسح الباركود (دون المساس بكود النظام)" style="padding:8px 10px; border:1px solid rgba(239,68,68,0.35); border-radius:8px; color:var(--danger); background:var(--surface); flex-shrink:0;">
-                                <i class='bx bx-trash' style="font-size:17px;"></i>
+                            <button type="button" class="btn-ghost sm-btn" onclick="window.App._scanFormBarcode('e')" title="مسح وإضافة باركود بالكاميرا (يدعم 1D و 2D)" style="padding:0 10px; height:40px; border:1px solid var(--border-color); border-radius:8px; color:var(--primary); background:var(--surface); flex-shrink:0;">
+                                <i class='bx bx-camera' style="font-size:18px;"></i>
                             </button>
                         </div>
                     </div>
@@ -1574,6 +1614,7 @@ const App = {
                     </div>
                 </form>
             `);
+            this._initFormBarcodes('e', this.getMedicineBarcodes(med), med.id);
         } catch (err) {
             console.warn('Category Load Error:', err);
         }
@@ -1707,6 +1748,237 @@ const App = {
         });
         return this._html5QrLoading;
     },
+
+    // ===================== Multi-Barcode Helpers (v18.19.0) =====================
+    /**
+     * Extract all deduplicated commercial barcodes for a medicine.
+     * Supports both legacy single `med.barcode` and modern `med.barcodes[]`.
+     * Strictly separates internal DB `med.id` from commercial barcodes.
+     */
+    getMedicineBarcodes(med) {
+        if (!med) return [];
+        const medIdStr = med.id != null ? String(med.id).trim() : '';
+        const seen = new Set();
+        const result = [];
+
+        const pushCode = (raw, ignoreIfSameAsId = false) => {
+            const c = String(raw || '').trim();
+            if (!c) return;
+            if (ignoreIfSameAsId && medIdStr && c === medIdStr) return;
+            if (seen.has(c)) return;
+            seen.add(c);
+            result.push(c);
+        };
+
+        // Primary barcode first if valid
+        if (med.barcode) pushCode(med.barcode, true);
+        // Then any additional barcodes in med.barcodes[]
+        if (Array.isArray(med.barcodes)) {
+            for (const b of med.barcodes) pushCode(b, false);
+        }
+        return result;
+    },
+
+    /**
+     * Normalize an array of barcode strings (parses GS1 2D -> EAN-13, trims, deduplicates)
+     * Returns `{ barcode: primary, barcodes: all }` keeping backwards compatibility.
+     */
+    normalizeBarcodesField(list) {
+        const arr = Array.isArray(list) ? list : (list ? [list] : []);
+        const seen = new Set();
+        const clean = [];
+        for (const raw of arr) {
+            const trimmed = String(raw || '').trim();
+            if (!trimmed) continue;
+            const parsed = typeof this.parsePharmaBarcode === 'function' ? this.parsePharmaBarcode(trimmed) : { barcode: trimmed };
+            const code = String(parsed.barcode || trimmed).trim();
+            if (!code || seen.has(code)) continue;
+            seen.add(code);
+            clean.push(code);
+        }
+        return { barcode: clean[0] || '', barcodes: clean };
+    },
+
+    /**
+     * Check whether a medicine matches a scanned barcode (EAN-13 or GTIN-14)
+     * across ALL of its commercial barcodes (`med.barcode` and `med.barcodes[]`).
+     */
+    medicineMatchesBarcode(med, code, gtin14 = null) {
+        const c = String(code || '').trim();
+        const g14 = gtin14 ? String(gtin14).trim() : null;
+        if (!med || !c) return false;
+        const barcodes = this.getMedicineBarcodes(med);
+        for (const mb of barcodes) {
+            if (mb === c) return true;
+            if (g14 && (mb === g14 || ('0' + mb) === g14)) return true;
+            if (('0' + c) === mb || ('0' + mb) === c) return true;
+        }
+        return false;
+    },
+
+    _initFormBarcodes(prefix, initialList = [], medId = null) {
+        if (!this._formBarcodes) this._formBarcodes = {};
+        if (!this._formBarcodeMedIds) this._formBarcodeMedIds = {};
+        const { barcodes } = this.normalizeBarcodesField(initialList);
+        this._formBarcodes[prefix] = [...barcodes];
+        this._formBarcodeMedIds[prefix] = medId;
+        this._renderFormBarcodes(prefix);
+    },
+
+    _renderFormBarcodes(prefix) {
+        const list = (this._formBarcodes && this._formBarcodes[prefix]) ? this._formBarcodes[prefix] : [];
+        const chipsEl = document.getElementById(`${prefix}-barcodes-chips`);
+        const countEl = document.getElementById(`${prefix}-barcodes-count`);
+        if (countEl) {
+            countEl.textContent = list.length > 0 ? `(${list.length} باركود)` : '';
+        }
+        if (!chipsEl) return;
+        if (list.length === 0) {
+            chipsEl.innerHTML = `<span style="font-size:11px; color:var(--text-muted);">لا توجد باركودات مضافة بعد — اكتب الباركود واضغط ➕ أو امسح بالكاميرا</span>`;
+            return;
+        }
+        chipsEl.innerHTML = list.map((bc, idx) => {
+            const safeBc = Utils.escapeHTML(bc);
+            const safeBcJs = bc.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            return `
+                <span style="display:inline-flex; align-items:center; gap:5px; padding:4px 8px; border-radius:8px; background:var(--surface); border:1px solid ${idx === 0 ? 'rgba(59,130,246,0.45)' : 'var(--border-color)'}; font-family:monospace; font-size:12px; font-weight:700; color:var(--text-main);">
+                    <i class='bx bx-barcode' style="color:var(--primary); font-size:14px;"></i>
+                    <span>${safeBc}</span>
+                    ${idx === 0 && list.length > 1 ? `<span style="font-family:inherit; font-size:9px; background:rgba(16,185,129,0.12); color:#059669; padding:1px 4px; border-radius:4px;">أساسي</span>` : ''}
+                    <button type="button" onclick="navigator.clipboard.writeText('${safeBcJs}'); window.UI.showToast('تم نسخ الباركود 📋', 'info');" title="نسخ" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:0 2px; font-size:13px; display:inline-flex;">
+                        <i class='bx bx-copy'></i>
+                    </button>
+                    <button type="button" onclick="window.App._removeFormBarcode('${prefix}', ${idx})" title="إزالة هذا الباركود" style="background:none; border:none; color:var(--danger); cursor:pointer; padding:0 2px; font-size:15px; line-height:1; display:inline-flex;">
+                        <i class='bx bx-x'></i>
+                    </button>
+                </span>
+            `;
+        }).join('');
+    },
+
+    _addFormBarcode(prefix, rawCode = null) {
+        if (!this._formBarcodes) this._formBarcodes = {};
+        if (!Array.isArray(this._formBarcodes[prefix])) this._formBarcodes[prefix] = [];
+
+        const inputEl = document.getElementById(`${prefix}-barcode`);
+        const raw = rawCode !== null ? String(rawCode).trim() : (inputEl?.value || '').trim();
+        if (!raw) {
+            if (rawCode === null) UI.showToast('اكتب الباركود أولاً أو استخدم زر الكاميرا 📷', 'warning');
+            return;
+        }
+        const parsed = this.parsePharmaBarcode(raw);
+        const code = String(parsed.barcode || raw).trim();
+        if (!code) return;
+
+        if (this._formBarcodes[prefix].includes(code)) {
+            UI.showToast(`الباركود ${code} مضاف بالفعل لهذا الدواء`, 'info');
+            if (inputEl && rawCode === null) inputEl.value = '';
+            return;
+        }
+
+        this._formBarcodes[prefix].push(code);
+        if (inputEl && rawCode === null) inputEl.value = '';
+        this._renderFormBarcodes(prefix);
+        UI.showToast(`تم إضافة الباركود ${code} ✅ (الإجمالي: ${this._formBarcodes[prefix].length})`, 'success');
+
+        // Lightweight background warning if another medicine already uses this barcode
+        const selfId = this._formBarcodeMedIds?.[prefix] || null;
+        DB.getAll('medicineMaster').then(all => {
+            const conflict = (all || []).find(m => m.id !== selfId && this.medicineMatchesBarcode(m, code));
+            if (conflict) {
+                UI.showToast(`⚠️ تنبيه: هذا الباركود مسجل أيضاً على "${conflict.nameEN || conflict.nameAR}"`, 'warning');
+            }
+        }).catch(() => {});
+    },
+
+    _scanFormBarcode(prefix) {
+        this.startBarcodeScanner(
+            (scannedCode) => this._addFormBarcode(prefix, scannedCode),
+            {
+                title: 'إضافة باركود للدواء',
+                subtitle: 'وجّه الكاميرا للباركود أو المربع 2D (يمكنك تكرار المسح لإضافة باركودات أخرى)'
+            }
+        );
+    },
+
+    _removeFormBarcode(prefix, idx) {
+        if (!this._formBarcodes || !Array.isArray(this._formBarcodes[prefix])) return;
+        this._formBarcodes[prefix].splice(idx, 1);
+        this._renderFormBarcodes(prefix);
+    },
+
+    _collectFormBarcodes(prefix) {
+        const list = (this._formBarcodes && Array.isArray(this._formBarcodes[prefix])) ? [...this._formBarcodes[prefix]] : [];
+        const pendingVal = (document.getElementById(`${prefix}-barcode`)?.value || '').trim();
+        if (pendingVal) list.push(pendingVal);
+        return this.normalizeBarcodesField(list);
+    },
+
+    async addBarcodeToMedicine(medId, rawCode) {
+        const raw = String(rawCode || '').trim();
+        if (!raw) return UI.showToast('اكتب الباركود أولاً', 'warning');
+        try {
+            const med = await DB.get('medicineMaster', medId);
+            if (!med) return;
+            const parsed = this.parsePharmaBarcode(raw);
+            const code = String(parsed.barcode || raw).trim();
+            if (!code) return;
+
+            const existing = this.getMedicineBarcodes(med);
+            if (existing.includes(code)) {
+                UI.showToast(`الباركود ${code} مسجل بالفعل على هذا الدواء`, 'info');
+                return;
+            }
+            const { barcode, barcodes } = this.normalizeBarcodesField([...existing, code]);
+            med.barcode = barcode;
+            med.barcodes = barcodes;
+            med.lastUpdated = new Date().toISOString();
+            med.v = (med.v || 1) + 1;
+            await DB.put('medicineMaster', med);
+            if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+                window.Sync.push(med.id).catch(e => console.warn('Sync push add barcode error:', e));
+            }
+            UI.showToast(`تم إضافة الباركود ${code} ✅ (الإجمالي: ${barcodes.length})`, 'success');
+            await this.openMedicineDetails(medId);
+        } catch (err) {
+            console.error('Add barcode error:', err);
+            UI.showToast('تعذر إضافة الباركود', 'danger');
+        }
+    },
+
+    async quickScanAddBarcodeToMed(medId) {
+        this.startBarcodeScanner(
+            (scannedCode) => this.addBarcodeToMedicine(medId, scannedCode),
+            {
+                title: 'مسح وإضافة باركود للدواء',
+                subtitle: 'وجّه الكاميرا للباركود أو المربع 2D على العبوة ليُضاف لقائمة باركودات الدواء'
+            }
+        );
+    },
+
+    async removeMedicineBarcode(medId, barcodeToRemove) {
+        try {
+            const med = await DB.get('medicineMaster', medId);
+            if (!med) return;
+            const existing = this.getMedicineBarcodes(med);
+            const remaining = existing.filter(b => b !== String(barcodeToRemove).trim());
+            const { barcode, barcodes } = this.normalizeBarcodesField(remaining);
+            med.barcode = barcode;
+            med.barcodes = barcodes;
+            med.lastUpdated = new Date().toISOString();
+            med.v = (med.v || 1) + 1;
+            await DB.put('medicineMaster', med);
+            if (typeof window.Sync !== 'undefined' && window.Sync.push) {
+                window.Sync.push(med.id).catch(e => console.warn('Sync push remove barcode error:', e));
+            }
+            UI.showToast('تم حذف الباركود بنجاح (كود الدواء في القاعدة كما هو) 🗑️✅', 'success');
+            await this.openMedicineDetails(medId);
+        } catch (err) {
+            console.error('Remove barcode error:', err);
+            UI.showToast('تعذر حذف الباركود', 'danger');
+        }
+    },
+    // ===================== End Multi-Barcode Helpers =====================
 
     /**
      * Parse Pharmaceutical 2D GS1 DataMatrix / QR / Digital Link / 1D Barcodes (v18.18.0)
@@ -2008,7 +2280,7 @@ const App = {
             const nameAR = document.getElementById('m-name-ar')?.value.trim() || nameEN;
             const categoryId = document.getElementById('m-category')?.value;
             const activeIngredient = (document.getElementById('m-active')?.value || '').trim();
-            const barcode = (document.getElementById('m-barcode')?.value || '').trim();
+            const { barcode, barcodes } = this._collectFormBarcodes('m');
             const type = document.getElementById('m-type')?.value || 'medicine';
             const shouldSync = document.getElementById('m-sync')?.checked ?? true;
 
@@ -2052,6 +2324,7 @@ const App = {
                 activeIngredient,
                 categoryId,
                 barcode: barcode || '',
+                barcodes: barcodes,
                 type,
                 primaryLocation: primaryLoc || null,
                 allowedLocations: selectedLocIds.length > 0 ? selectedLocIds : null,
@@ -2153,13 +2426,16 @@ const App = {
                 selectedLocIds.unshift(primaryLoc);
             }
 
+            const { barcode: editPrimaryBc, barcodes: editBarcodes } = this._collectFormBarcodes('e');
+
             const updated = {
                 ...med,
                 nameEN: document.getElementById('e-name-en').value.trim(),
                 nameAR: document.getElementById('e-name-ar').value.trim() || document.getElementById('e-name-en').value.trim(),
                 activeIngredient: (document.getElementById('e-active')?.value || '').trim(),
-                // v18.14.0: Allow clearing barcode cleanly without touching med.id
-                barcode: (document.getElementById('e-barcode')?.value || '').trim(),
+                // v18.19.0: Multi-barcode array + synced primary barcode without touching med.id
+                barcode: editPrimaryBc,
+                barcodes: editBarcodes,
                 categoryId: document.getElementById('e-category').value,
                 type: document.getElementById('e-type').value,
                 primaryLocation: primaryLoc || null,
@@ -2640,7 +2916,13 @@ const App = {
             if (nameEnEl) nameEnEl.value = item.nameEN;
             if (nameArEl) nameArEl.value = item.nameAR;
             if (activeEl) activeEl.value = item.active || '';
-            if (barcodeEl && item.barcode) barcodeEl.value = item.barcode;
+            if (item.barcode) {
+                if (this._formBarcodes && Array.isArray(this._formBarcodes.m)) {
+                    this._addFormBarcode('m', item.barcode);
+                } else if (barcodeEl) {
+                    barcodeEl.value = item.barcode;
+                }
+            }
             if (catEl && item.categoryId && item.categoryId !== 'uncategorized') {
                 catEl.value = item.categoryId;
                 if (!catEl.value) {
@@ -3464,12 +3746,14 @@ const App = {
             changes.nameAR = { from: curAR, to: newAR };
         }
 
-        // 3. Verified EAN Barcode (fill if missing/internal ID, OR replace in overwrite mode)
-        const curBc = String(med.barcode || '').trim();
-        const hasRealBc = curBc && curBc !== String(med.id) && /^\d{8,14}$/.test(curBc);
+        // 3. Verified EAN Barcode (fill if missing/internal ID, OR add/replace in overwrite mode — multi-barcode aware)
+        const existingBcs = this.getMedicineBarcodes(med);
+        const curBc = existingBcs[0] || '';
+        const hasRealBc = existingBcs.some(b => /^\d{8,14}$/.test(b));
         const newBc = String(item.barcode || '').trim();
-        if (fields.fillBarcode && /^\d{8,14}$/.test(newBc) && (overwrite ? newBc !== curBc : !hasRealBc)) {
-            changes.barcode = { from: curBc === String(med.id) ? '' : curBc, to: newBc };
+        const alreadyHasNewBc = existingBcs.includes(newBc);
+        if (fields.fillBarcode && /^\d{8,14}$/.test(newBc) && !alreadyHasNewBc && (overwrite || !hasRealBc)) {
+            changes.barcode = { from: curBc, to: newBc };
         }
 
         // 4. English name (global updateEN OR per-row overwriteEN enabled on manual link/edit)
@@ -3720,7 +4004,11 @@ const App = {
             const now = new Date().toISOString();
             if (diff.changes.activeIngredient) med.activeIngredient = diff.changes.activeIngredient.to;
             if (diff.changes.nameAR) med.nameAR = diff.changes.nameAR.to;
-            if (diff.changes.barcode) med.barcode = diff.changes.barcode.to;
+            if (diff.changes.barcode) {
+                const { barcode, barcodes } = this.normalizeBarcodesField([diff.changes.barcode.to, ...this.getMedicineBarcodes(med)]);
+                med.barcode = barcode;
+                med.barcodes = barcodes;
+            }
             if (diff.changes.nameEN) med.nameEN = diff.changes.nameEN.to;
 
             const match = row.selectedIdx >= 0 ? row.matches[row.selectedIdx] : null;
@@ -4230,7 +4518,11 @@ const App = {
 
                 if (diff.changes.activeIngredient) med.activeIngredient = diff.changes.activeIngredient.to;
                 if (diff.changes.nameAR) med.nameAR = diff.changes.nameAR.to;
-                if (diff.changes.barcode) med.barcode = diff.changes.barcode.to;
+                if (diff.changes.barcode) {
+                const { barcode, barcodes } = this.normalizeBarcodesField([diff.changes.barcode.to, ...this.getMedicineBarcodes(med)]);
+                med.barcode = barcode;
+                med.barcodes = barcodes;
+            }
                 if (diff.changes.nameEN) med.nameEN = diff.changes.nameEN.to;
 
                 const match = row.selectedIdx >= 0 ? row.matches[row.selectedIdx] : null;
@@ -4270,6 +4562,7 @@ const App = {
             const med = await DB.get('medicineMaster', medId);
             if (!med) return;
             med.barcode = '';
+            med.barcodes = [];
             med.lastUpdated = new Date().toISOString();
             med.v = (med.v || 1) + 1;
             await DB.put('medicineMaster', med);
@@ -8996,12 +9289,8 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
         try {
             const masterMeds = (await DB.getAll('medicineMaster')) || [];
-            // Match by commercial barcode (EAN-13 or GTIN-14) first, then by exact id
-            let med = masterMeds.find(m => {
-                const mb = m.barcode ? String(m.barcode).trim() : '';
-                if (!mb) return false;
-                return mb === code || (gtin14 && mb === gtin14) || ('0' + mb === gtin14);
-            });
+            // Match across ALL commercial barcodes (`med.barcode` + `med.barcodes[]`) first, then by exact id
+            let med = masterMeds.find(m => this.medicineMatchesBarcode(m, code, gtin14));
             if (!med) {
                 med = masterMeds.find(m => String(m.id).trim() === code);
             }
@@ -9169,17 +9458,21 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             return;
         }
 
-        container.innerHTML = list.map(m => `
+        container.innerHTML = list.map(m => {
+            const existingCount = this.getMedicineBarcodes(m).length;
+            return `
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 10px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:8px;">
                 <div style="flex:1; min-width:0;">
                     <div style="font-size:12px; font-weight:800; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHTML(m.nameEN || m.nameAR)}</div>
                     ${m.nameAR && m.nameAR !== m.nameEN ? `<div style="font-size:10.5px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHTML(m.nameAR)}</div>` : ''}
+                    ${existingCount > 0 ? `<div style="font-size:10px; color:var(--primary); font-weight:600; margin-top:2px;">🔢 لديه ${existingCount} باركود — سيتم إضافته بجانبهم</div>` : ''}
                 </div>
                 <button type="button" class="btn-primary sm-btn" onclick="window.App.linkBarcodeAndCount('${Utils.escapeHTML(m.id)}')" style="font-size:11px; padding:5px 9px; border-radius:7px; white-space:nowrap; background:#7c3aed;">
-                    🔗 ربط وعدّ
+                    ${existingCount > 0 ? '➕ إضافة وعدّ' : '🔗 ربط وعدّ'}
                 </button>
             </div>
-        `).join('');
+            `;
+        }).join('');
     },
 
     async linkBarcodeAndCount(medId) {
@@ -9188,14 +9481,21 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         try {
             const med = await DB.get('medicineMaster', medId);
             if (!med) return;
-            med.barcode = st.code;
+            // v18.19.0: APPEND new barcode to med.barcodes[] instead of overwriting existing barcodes!
+            const existing = this.getMedicineBarcodes(med);
+            const { barcode, barcodes } = this.normalizeBarcodesField([...existing, st.code]);
+            med.barcode = barcode;
+            med.barcodes = barcodes;
             med.lastUpdated = new Date().toISOString();
             med.v = (med.v || 1) + 1;
             await DB.put('medicineMaster', med);
             if (typeof Sync !== 'undefined' && Sync.push) {
                 Sync.push(med.id).catch(() => {});
             }
-            UI.showToast(`تم ربط الباركود بالدواء «${med.nameEN || med.nameAR}» ✅`, 'success');
+            const msg = barcodes.length > 1
+                ? `تم إضافة باركود جديد لـ «${med.nameEN || med.nameAR}» (إجمالي ${barcodes.length} باركود) ✅`
+                : `تم ربط الباركود بالدواء «${med.nameEN || med.nameAR}» ✅`;
+            UI.showToast(msg, 'success');
             await this._openAuditCountForScannedMed(med, st.scanMeta || {});
         } catch (err) {
             console.error('Link barcode error:', err);
@@ -9209,8 +9509,14 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         await this.addMedicineDuringAudit(this.selectedAuditCategoryId || null);
         // Pre-fill modal fields with scanned barcode + catalog data if found!
         setTimeout(() => {
-            const bcEl = document.getElementById('m-barcode');
-            if (bcEl) bcEl.value = st.code || '';
+            if (st.code) {
+                if (this._formBarcodes && Array.isArray(this._formBarcodes.m)) {
+                    this._initFormBarcodes('m', [st.code]);
+                } else {
+                    const bcEl = document.getElementById('m-barcode');
+                    if (bcEl) bcEl.value = st.code;
+                }
+            }
             if (st.catalogHit) {
                 const enEl = document.getElementById('m-name-en');
                 const arEl = document.getElementById('m-name-ar');
@@ -9256,6 +9562,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         medicineId: item.medicineId,
                         nameEN: med.nameEN || med.nameAR,
                         nameAR: med.nameAR || med.nameEN,
+                        activeIngredient: med.activeIngredient || '',
+                        barcode: med.barcode || '',
+                        barcodes: this.getMedicineBarcodes(med),
                         imagePath: med.imagePath,
                         location: locName,
                         quantity: item.quantity,
@@ -9285,6 +9594,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                                 medicineId: medId,
                                 nameEN: med.nameEN || med.nameAR,
                                 nameAR: med.nameAR || med.nameEN,
+                                activeIngredient: med.activeIngredient || '',
+                                barcode: med.barcode || '',
+                                barcodes: this.getMedicineBarcodes(med),
                                 imagePath: med.imagePath,
                                 location: locName,
                                 quantity: b.quantity,
@@ -9446,7 +9758,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             filtered = Utils.smartFilter(
                 filtered,
                 query,
-                (pq, item) => Utils.smartScore(pq, [item.nameEN, item.nameAR], [item.location, item.activeIngredient, item.barcode]),
+                (pq, item) => Utils.smartScore(pq, [item.nameEN, item.nameAR], [item.location, item.activeIngredient, item.barcode, ...(item.barcodes || [])]),
                 { keepOrder: true }
             );
         }
