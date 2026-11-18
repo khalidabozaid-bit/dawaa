@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.19.0', // Multi-Barcode Support per Medicine (med.barcodes[] + chips UI + append-on-link + universal search)
+    VERSION: '18.20.0', // Stock Transfer (Location/Medicine) & Full Duplicate Medicine Merge Engine (live + open audits + barcodes)
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -1278,10 +1278,15 @@ const App = {
                 <!-- Action Buttons: Clean direct catalog actions -->
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:16px; border-top:1px solid var(--border-color); padding-top:14px;">
                     <button type="button" class="btn-primary sm-btn" onclick="window.App.openEditMedicine('${med.id}');" style="font-size:13px; font-weight:bold; display:flex; align-items:center; justify-content:center; gap:6px; padding:10px 14px;">
-                        <i class='bx bx-edit-alt'></i> <span>تعديل بيانات الدواء ✏️</span>
+                        <i class='bx bx-edit-alt'></i> <span>تعديل البيانات ✏️</span>
                     </button>
                     <button type="button" class="btn-ghost sm-btn" onclick="window.App.openMoveCategoryModal('${med.id}');" style="font-size:13px; font-weight:bold; display:flex; align-items:center; justify-content:center; gap:6px; padding:10px 14px; border:1px solid var(--border-color);">
-                        <i class='bx bx-transfer'></i> <span>نقل لتصنيف آخر ⇄</span>
+                        <i class='bx bx-folder-open'></i> <span>تغيير القسم ⇄</span>
+                    </button>
+                </div>
+                <div style="margin-top:8px;">
+                    <button type="button" class="btn-ghost sm-btn w-100" onclick="window.App.openTransferOrMergeModal('${med.id}');" style="font-size:13px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:7px; padding:10px 14px; border:1.5px solid rgba(124,58,237,0.4); color:#7c3aed; background:rgba(124,58,237,0.06); border-radius:10px;">
+                        <i class='bx bx-git-merge' style="font-size:18px;"></i> <span>نقل كمية لمكان/دواء آخر أو دمج دواء مكرر 🔀</span>
                     </button>
                 </div>
                 <div style="display:flex; gap:8px; margin-top:8px;">
@@ -8971,6 +8976,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     <h3 style="margin:0; font-size:14px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHTML(med.nameEN || med.nameAR)}</h3>
                     <p style="margin:2px 0 0 0; font-size:11px; color:var(--text-muted);"><i class='bx bx-map-pin'></i> المكان: <strong style="color:var(--text-main);">${Utils.escapeHTML(loc?.nameAR || 'المستودع')}</strong></p>
                 </div>
+                <button type="button" class="btn-ghost sm-btn" onclick="window.App.openTransferOrMergeModal('${Utils.escapeHTML(medicineId)}', { sourceContext: 'audit', sessionId: window.App.selectedAuditSessionId, locationId: window.App.selectedAuditLocationId })" title="نقل كمية لمكان أو دواء آخر أو دمج دواء مكرر" style="height:34px; padding:0 9px; font-size:11px; font-weight:700; border:1px solid rgba(124,58,237,0.35); color:#7c3aed; background:var(--surface); border-radius:8px; flex-shrink:0; display:inline-flex; align-items:center; gap:4px;">
+                    <i class='bx bx-git-merge' style="font-size:15px;"></i> نقل/دمج
+                </button>
             </div>
 
             <!-- 1. Registered Batches List -->
@@ -9528,6 +9536,1063 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         }, 60);
     },
     // ===================== End Audit Barcode Scanning Workflow =====================
+
+    // ===================== Stock Transfer & Medicine Merge Engine (v18.20.0) =====================
+    _mergeBatchesByExpiry(batchesA = [], batchesB = []) {
+        const map = new Map();
+        const addAll = (arr) => {
+            if (!Array.isArray(arr)) return;
+            for (const b of arr) {
+                if (!b) continue;
+                const qty = Math.round((parseFloat(b.quantity) || 0) * 1000) / 1000;
+                if (qty <= 0) continue;
+                const exp = String(b.expiryDate || '').trim();
+                map.set(exp, Math.round(((map.get(exp) || 0) + qty) * 1000) / 1000);
+            }
+        };
+        addAll(batchesA);
+        addAll(batchesB);
+        return Array.from(map.entries())
+            .map(([expiryDate, quantity]) => ({ quantity, expiryDate }))
+            .sort((a, b) => {
+                if (!a.expiryDate && !b.expiryDate) return 0;
+                if (!a.expiryDate) return 1;
+                if (!b.expiryDate) return -1;
+                return a.expiryDate.localeCompare(b.expiryDate);
+            });
+    },
+
+    _subtractFromBatches(sourceBatches = [], targetExpiry = '__ALL__', qtyToMove = Infinity) {
+        const cleanSrc = this._mergeBatchesByExpiry(sourceBatches, []);
+        const wantAll = targetExpiry === '__ALL__';
+        const normTarget = wantAll ? '__ALL__' : String(targetExpiry || '').trim();
+        let remainingNeed = wantAll ? Infinity : Math.max(0, Math.round((parseFloat(qtyToMove) || 0) * 1000) / 1000);
+
+        const remainingBatches = [];
+        const movedBatches = [];
+        let actualMoved = 0;
+
+        for (const b of cleanSrc) {
+            const matches = wantAll || (b.expiryDate === normTarget);
+            if (!matches || remainingNeed <= 0) {
+                remainingBatches.push({ ...b });
+                continue;
+            }
+            const take = wantAll ? b.quantity : Math.min(b.quantity, remainingNeed);
+            const left = Math.round((b.quantity - take) * 1000) / 1000;
+            if (take > 0) {
+                movedBatches.push({ quantity: take, expiryDate: b.expiryDate });
+                actualMoved = Math.round((actualMoved + take) * 1000) / 1000;
+                if (!wantAll) remainingNeed = Math.round((remainingNeed - take) * 1000) / 1000;
+            }
+            if (left > 0) {
+                remainingBatches.push({ quantity: left, expiryDate: b.expiryDate });
+            }
+        }
+        return { remainingBatches, movedBatches, actualMoved };
+    },
+
+    _extractRecordBatches(record) {
+        if (!record) return [];
+        if (Array.isArray(record.batches) && record.batches.length > 0) {
+            return this._mergeBatchesByExpiry(record.batches, []);
+        }
+        const q = parseFloat(record.quantity) || 0;
+        if (q <= 0) return [];
+        return [{ quantity: q, expiryDate: String(record.expiryDate || '').trim() }];
+    },
+
+    _buildCountRecordFromBatches(batches, userName) {
+        const merged = this._mergeBatchesByExpiry(batches, []);
+        const now = new Date().toISOString();
+        const total = Math.round(merged.reduce((s, b) => s + (parseFloat(b.quantity) || 0), 0) * 1000) / 1000;
+        if (total <= 0) {
+            return {
+                quantity: 0,
+                expiryDate: '',
+                batches: [{ quantity: 0, expiryDate: '' }],
+                countedAt: now,
+                userName: userName || this.getActiveUserName()
+            };
+        }
+        const earliest = merged.find(b => b.expiryDate)?.expiryDate || '';
+        return {
+            quantity: total,
+            expiryDate: earliest,
+            batches: merged,
+            countedAt: now,
+            userName: userName || this.getActiveUserName()
+        };
+    },
+
+    _findSimilarMedicines(sourceMed, allMeds = [], limit = 6) {
+        if (!sourceMed) return [];
+        const srcActive = this._normalizeActiveKey ? this._normalizeActiveKey(sourceMed.activeIngredient || '') : '';
+        const srcEnTokens = new Set(String(sourceMed.nameEN || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(t => t.length >= 2));
+        const srcArTokens = new Set(String(sourceMed.nameAR || '').replace(/[^\u0600-\u06FF0-9\s]/g, ' ').split(/\s+/).filter(t => t.length >= 2));
+        const srcEnPrefix = String(sourceMed.nameEN || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 5);
+        const srcArPrefix = String(sourceMed.nameAR || '').replace(/[^\u0600-\u06FF]/g, '').slice(0, 4);
+
+        const scored = [];
+        for (const m of allMeds) {
+            if (!m || m.id === sourceMed.id) continue;
+            let score = 0;
+            const reasons = [];
+
+            const mActive = this._normalizeActiveKey ? this._normalizeActiveKey(m.activeIngredient || '') : '';
+            if (srcActive && mActive && srcActive === mActive) {
+                score += 45;
+                reasons.push('نفس المادة الفعالة');
+            }
+
+            const mEnTokens = String(m.nameEN || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(t => t.length >= 2);
+            let enHits = 0;
+            for (const t of mEnTokens) if (srcEnTokens.has(t)) enHits++;
+            if (enHits > 0) {
+                score += Math.min(55, enHits * 28);
+                reasons.push('اسم إنجليزي متشابه');
+            } else if (srcEnPrefix.length >= 4 && String(m.nameEN || '').toLowerCase().replace(/[^a-z]/g, '').startsWith(srcEnPrefix)) {
+                score += 32;
+                reasons.push('بداية اسم متشابهة');
+            }
+
+            const mArTokens = String(m.nameAR || '').replace(/[^\u0600-\u06FF0-9\s]/g, ' ').split(/\s+/).filter(t => t.length >= 2);
+            let arHits = 0;
+            for (const t of mArTokens) if (srcArTokens.has(t)) arHits++;
+            if (arHits > 0) {
+                score += Math.min(50, arHits * 25);
+                if (!reasons.includes('اسم إنجليزي متشابه')) reasons.push('اسم عربي متشابه');
+            } else if (srcArPrefix.length >= 3 && String(m.nameAR || '').replace(/[^\u0600-\u06FF]/g, '').startsWith(srcArPrefix)) {
+                score += 26;
+                if (!reasons.length) reasons.push('بداية اسم متشابهة');
+            }
+
+            if (score >= 25) {
+                scored.push({ med: m, score, reason: reasons.join(' • ') });
+            }
+        }
+        scored.sort((a, b) => b.score - a.score || (a.med.nameEN || '').localeCompare(b.med.nameEN || ''));
+        return scored.slice(0, limit);
+    },
+
+    async _ensureMedHasLocation(medId, locId) {
+        if (!medId || !locId) return;
+        const med = await DB.get('medicineMaster', medId);
+        if (!med) return;
+        let changed = false;
+        if (!med.primaryLocation) {
+            med.primaryLocation = locId;
+            changed = true;
+        }
+        if (Array.isArray(med.allowedLocations)) {
+            if (!med.allowedLocations.includes(locId)) {
+                med.allowedLocations = [...med.allowedLocations, locId];
+                changed = true;
+            }
+        } else {
+            med.allowedLocations = med.primaryLocation === locId ? [locId] : [med.primaryLocation, locId];
+            changed = true;
+        }
+        if (changed) {
+            med.lastUpdated = new Date().toISOString();
+            med.v = (med.v || 1) + 1;
+            await DB.put('medicineMaster', med);
+            if (typeof Sync !== 'undefined' && Sync.push) {
+                Sync.push(med.id).catch(() => {});
+            }
+        }
+        if (med.categoryId && typeof Locations !== 'undefined' && Locations.addCategoryToLocation) {
+            Locations.addCategoryToLocation(locId, med.categoryId).catch(() => {});
+        }
+    },
+
+    async _getSourceStockMap(medId, sourceKey, allLocs, allInv, openSessions) {
+        const locNameToId = new Map(allLocs.map(l => [l.nameAR, l.id]));
+        const byLoc = new Map(); // locId -> [{ quantity, expiryDate }]
+
+        if (sourceKey === 'live') {
+            for (const item of allInv) {
+                if (item.medicineId !== medId) continue;
+                const q = parseFloat(item.quantity) || 0;
+                if (q <= 0) continue;
+                const locId = item.locationId || (item.location ? locNameToId.get(item.location) : null) || (allLocs[0]?.id || 'loc_cabinet');
+                if (!byLoc.has(locId)) byLoc.set(locId, []);
+                byLoc.get(locId).push({ quantity: q, expiryDate: String(item.expiryDate || '').trim() });
+            }
+        } else {
+            const session = openSessions.find(s => s.id === sourceKey);
+            if (session && session.counts) {
+                for (const [key, rec] of Object.entries(session.counts)) {
+                    const [locId, mId] = key.split('___');
+                    if (mId !== medId) continue;
+                    const batches = this._extractRecordBatches(rec);
+                    if (batches.length > 0) {
+                        byLoc.set(locId, batches);
+                    }
+                }
+            }
+        }
+
+        // Normalize & merge per location
+        const result = new Map();
+        for (const [locId, list] of byLoc.entries()) {
+            const merged = this._mergeBatchesByExpiry(list, []);
+            if (merged.length > 0) result.set(locId, merged);
+        }
+        return result;
+    },
+
+    async openTransferOrMergeModal(sourceMedId, opts = {}) {
+        try {
+            const [sourceMed, allMeds, allLocs, allInv, allSessions] = await Promise.all([
+                DB.get('medicineMaster', sourceMedId),
+                DB.getAll('medicineMaster'),
+                Locations.getAll(),
+                DB.getAll('inventory'),
+                Audit.getAllSessions()
+            ]);
+            if (!sourceMed) return UI.showToast('تعذر العثور على الدواء', 'warning');
+
+            const openSessions = (allSessions || []).filter(s => s && s.status !== 'finalized');
+            const defaultSource = (opts.sourceContext === 'audit' && opts.sessionId && openSessions.some(s => s.id === opts.sessionId))
+                ? opts.sessionId
+                : (openSessions.length > 0 && this.currentView === 'audit' && this.selectedAuditSessionId && openSessions.some(s => s.id === this.selectedAuditSessionId)
+                    ? this.selectedAuditSessionId
+                    : 'live');
+
+            const similarMeds = this._findSimilarMedicines(sourceMed, allMeds || [], 6);
+            const stockMap = await this._getSourceStockMap(sourceMedId, defaultSource, allLocs || [], allInv || [], openSessions);
+            const initialFromLoc = (opts.locationId && stockMap.has(opts.locationId))
+                ? opts.locationId
+                : (Array.from(stockMap.keys())[0] || '');
+
+            this._tmState = {
+                sourceMed,
+                allMeds: (allMeds || []).filter(m => m && m.id !== sourceMedId),
+                allLocs: allLocs || [],
+                allInv: allInv || [],
+                openSessions,
+                similarMeds,
+                mode: opts.initialMode || 'loc', // 'loc' | 'med' | 'merge'
+                sourceKey: defaultSource,
+                fromLocId: initialFromLoc,
+                toLocId: '',
+                selectedExpiry: '__ALL__',
+                qtyToMove: '',
+                targetMedId: '',
+                targetQuery: '',
+                fillMissingMeta: true,
+                trashSourceAfterMerge: true
+            };
+
+            const defaultToLoc = this._tmState.allLocs.find(l => l.id !== initialFromLoc)?.id || '';
+            this._tmState.toLocId = defaultToLoc;
+
+            const safeName = Utils.escapeHTML(sourceMed.nameEN || sourceMed.nameAR || 'دواء');
+            const safeAr = (sourceMed.nameAR && sourceMed.nameAR !== sourceMed.nameEN) ? Utils.escapeHTML(sourceMed.nameAR) : '';
+
+            UI.showModal(`
+                <div class="sheet-handle"></div>
+                <div class="modal-header" style="border-bottom:1px solid var(--border-color); padding-bottom:10px; margin-bottom:12px;">
+                    <h2 style="font-size:15.5px; margin:0; display:flex; align-items:center; gap:6px;">
+                        <i class='bx bx-git-merge' style="color:#7c3aed; font-size:21px;"></i>
+                        <span>نقل كمية أو دمج دواء</span>
+                    </h2>
+                    <div style="margin-top:6px; padding:7px 10px; border-radius:9px; background:var(--bg-secondary); border:1px solid var(--border-color); font-size:12px;">
+                        <span style="color:var(--text-muted);">الدواء المصدر:</span>
+                        <strong style="color:var(--text-main); display:inline-block; margin-right:4px;">${safeName}</strong>
+                        ${safeAr ? `<span style="color:var(--text-muted); font-size:11px;"> (${safeAr})</span>` : ''}
+                    </div>
+                </div>
+
+                <!-- 3-Mode Segmented Tabs -->
+                <div id="tm-mode-tabs" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:12px; background:var(--bg-secondary); padding:4px; border-radius:11px; border:1px solid var(--border-color);">
+                    <button type="button" id="tm-tab-loc" onclick="window.App._tmSetMode('loc')" style="border:none; border-radius:8px; padding:8px 4px; font-size:11.5px; font-weight:800; cursor:pointer; transition:all 0.15s;">
+                        📍 لمكان تاني
+                    </button>
+                    <button type="button" id="tm-tab-med" onclick="window.App._tmSetMode('med')" style="border:none; border-radius:8px; padding:8px 4px; font-size:11.5px; font-weight:800; cursor:pointer; transition:all 0.15s;">
+                        💊 لدواء تاني
+                    </button>
+                    <button type="button" id="tm-tab-merge" onclick="window.App._tmSetMode('merge')" style="border:none; border-radius:8px; padding:8px 4px; font-size:11.5px; font-weight:800; cursor:pointer; transition:all 0.15s;">
+                        🔗 دمج كامل
+                    </button>
+                </div>
+
+                <!-- Dynamic Body -->
+                <div id="tm-body"></div>
+
+                <div class="form-actions mt-15" style="display:flex; gap:8px;">
+                    <button type="button" id="tm-confirm-btn" class="btn-primary" onclick="window.App._tmExecute()" style="flex:1; height:42px; font-size:13px; border-radius:10px; background:#7c3aed;">
+                        تنفيذ
+                    </button>
+                    <button type="button" class="btn-ghost" onclick="window.UI.closeModal()" style="height:42px; padding:0 16px; border:1px solid var(--border-color); border-radius:10px;">
+                        إلغاء
+                    </button>
+                </div>
+            `);
+
+            await this._tmRenderBody();
+        } catch (err) {
+            console.error('openTransferOrMergeModal error:', err);
+            UI.showToast('حدث خطأ أثناء فتح نافذة النقل والدمج', 'danger');
+        }
+    },
+
+    async _tmSetMode(mode) {
+        if (!this._tmState) return;
+        this._tmState.mode = mode;
+        await this._tmRenderBody();
+    },
+
+    async _tmChangeSource(sourceKey) {
+        const st = this._tmState;
+        if (!st) return;
+        st.sourceKey = sourceKey;
+        const stockMap = await this._getSourceStockMap(st.sourceMed.id, sourceKey, st.allLocs, st.allInv, st.openSessions);
+        st.fromLocId = Array.from(stockMap.keys())[0] || '';
+        st.selectedExpiry = '__ALL__';
+        st.qtyToMove = '';
+        if (st.mode === 'loc' && st.toLocId === st.fromLocId) {
+            st.toLocId = st.allLocs.find(l => l.id !== st.fromLocId)?.id || '';
+        }
+        await this._tmRenderBody();
+    },
+
+    async _tmChangeFromLoc(locId) {
+        const st = this._tmState;
+        if (!st) return;
+        st.fromLocId = locId;
+        st.selectedExpiry = '__ALL__';
+        st.qtyToMove = '';
+        if (st.mode === 'loc' && st.toLocId === locId) {
+            st.toLocId = st.allLocs.find(l => l.id !== locId)?.id || '';
+        }
+        await this._tmRenderBody();
+    },
+
+    _tmChangeBatch(expiryVal) {
+        const st = this._tmState;
+        if (!st) return;
+        st.selectedExpiry = expiryVal;
+        const qtyWrap = document.getElementById('tm-qty-wrap');
+        const qtyInput = document.getElementById('tm-qty-input');
+        const selEl = document.getElementById('tm-batch-select');
+        const maxQty = selEl?.selectedOptions?.[0]?.dataset?.max || '';
+        if (expiryVal === '__ALL__') {
+            st.qtyToMove = '';
+            if (qtyWrap) qtyWrap.style.display = 'none';
+        } else {
+            st.qtyToMove = maxQty;
+            if (qtyWrap) qtyWrap.style.display = 'block';
+            if (qtyInput) {
+                qtyInput.max = maxQty;
+                qtyInput.value = maxQty;
+            }
+        }
+    },
+
+    _tmSearchTarget(query) {
+        const st = this._tmState;
+        if (!st) return;
+        st.targetQuery = query || '';
+        this._tmRenderTargetResults();
+    },
+
+    _tmSelectTarget(medId) {
+        const st = this._tmState;
+        if (!st) return;
+        st.targetMedId = medId;
+        this._tmRenderTargetResults();
+        this._tmRenderTargetPreview();
+        this._tmUpdateConfirmBtn();
+    },
+
+    _tmRenderTargetResults() {
+        const st = this._tmState;
+        const box = document.getElementById('tm-target-results');
+        if (!st || !box) return;
+
+        const q = String(st.targetQuery || '').trim();
+        let rows = [];
+        let heading = '';
+
+        if (!q) {
+            if (st.similarMeds.length > 0) {
+                heading = `<div style="font-size:11px; font-weight:800; color:#7c3aed; margin-bottom:4px;">✨ اقتراحات قريبة في الاسم أو المادة الفعالة:</div>`;
+                rows = st.similarMeds.map(x => ({ med: x.med, badge: x.reason }));
+            } else {
+                heading = `<div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">ابحث بالاسم أو المادة الفعالة أو الباركود لاختيار الدواء المستهدف:</div>`;
+                rows = st.allMeds.slice(0, 12).map(m => ({ med: m, badge: '' }));
+            }
+        } else {
+            const filtered = Utils.smartFilter(st.allMeds, q, (pq, m) => Utils.smartScoreMed(pq, m)).slice(0, 25);
+            rows = filtered.map(m => ({ med: m, badge: '' }));
+        }
+
+        if (rows.length === 0) {
+            box.innerHTML = `<div style="text-align:center; padding:12px; font-size:12px; color:var(--text-muted); background:var(--bg-secondary); border-radius:8px;">لا توجد أدوية مطابقة</div>`;
+            return;
+        }
+
+        box.innerHTML = heading + rows.map(({ med: m, badge }) => {
+            const isSel = st.targetMedId === m.id;
+            const bcCount = this.getMedicineBarcodes(m).length;
+            return `
+                <div onclick="window.App._tmSelectTarget('${Utils.escapeHTML(m.id)}')" style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 10px; border-radius:9px; cursor:pointer; background:${isSel ? 'rgba(124,58,237,0.1)' : 'var(--bg-secondary)'}; border:1.5px solid ${isSel ? '#7c3aed' : 'var(--border-color)'};">
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:12px; font-weight:800; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                            ${isSel ? '✅ ' : ''}${Utils.escapeHTML(m.nameEN || m.nameAR)}
+                        </div>
+                        ${m.nameAR && m.nameAR !== m.nameEN ? `<div style="font-size:10.5px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHTML(m.nameAR)}</div>` : ''}
+                        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:2px;">
+                            ${badge ? `<span style="font-size:9.5px; background:rgba(124,58,237,0.12); color:#7c3aed; padding:1px 5px; border-radius:4px; font-weight:700;">${Utils.escapeHTML(badge)}</span>` : ''}
+                            ${m.activeIngredient ? `<span style="font-size:9.5px; color:var(--primary);">💊 ${Utils.escapeHTML(m.activeIngredient)}</span>` : ''}
+                            ${bcCount > 0 ? `<span style="font-size:9.5px; color:var(--text-muted);">🔢 ${bcCount}</span>` : ''}
+                        </div>
+                    </div>
+                    <span style="font-size:11px; font-weight:700; color:${isSel ? '#7c3aed' : 'var(--text-muted)'}; flex-shrink:0;">
+                        ${isSel ? 'محدد' : 'اختيار'}
+                    </span>
+                </div>
+            `;
+        }).join('');
+    },
+
+    _tmRenderTargetPreview() {
+        const st = this._tmState;
+        const previewEl = document.getElementById('tm-merge-preview');
+        if (!st || !previewEl) return;
+
+        if (!st.targetMedId) {
+            previewEl.innerHTML = '';
+            return;
+        }
+        const target = st.allMeds.find(m => m.id === st.targetMedId);
+        if (!target) {
+            previewEl.innerHTML = '';
+            return;
+        }
+
+        if (st.mode !== 'merge') {
+            previewEl.innerHTML = `
+                <div style="margin-top:8px; padding:8px 10px; border-radius:9px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.35); font-size:11.5px; color:#065f46;">
+                    ✅ سيتم نقل الكمية المحددة إلى: <strong>${Utils.escapeHTML(target.nameEN || target.nameAR)}</strong> (مع دمج نفس تاريخ الصلاحية تلقائياً وإبقاء الدوائين في المستودع).
+                </div>
+            `;
+            return;
+        }
+
+        // Full Merge detailed preview
+        const srcBcs = this.getMedicineBarcodes(st.sourceMed);
+        const tgtBcs = this.getMedicineBarcodes(target);
+        const newBcsCount = srcBcs.filter(b => !tgtBcs.includes(b)).length;
+
+        const srcInvItems = st.allInv.filter(i => i.medicineId === st.sourceMed.id && (parseFloat(i.quantity) || 0) > 0);
+        const liveUnits = Math.round(srcInvItems.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0) * 1000) / 1000;
+
+        let auditSessionsAffected = 0;
+        let auditUnits = 0;
+        for (const sess of st.openSessions) {
+            let hit = false;
+            for (const [key, rec] of Object.entries(sess.counts || {})) {
+                const [, mId] = key.split('___');
+                if (mId === st.sourceMed.id) {
+                    hit = true;
+                    auditUnits += this._extractRecordBatches(rec).reduce((s, b) => s + b.quantity, 0);
+                }
+            }
+            if (hit) auditSessionsAffected++;
+        }
+        auditUnits = Math.round(auditUnits * 1000) / 1000;
+
+        previewEl.innerHTML = `
+            <div style="margin-top:10px; padding:10px 12px; border-radius:10px; background:rgba(124,58,237,0.06); border:1.5px solid rgba(124,58,237,0.35); font-size:11.5px;">
+                <div style="font-weight:800; color:#7c3aed; margin-bottom:6px; display:flex; align-items:center; gap:5px;">
+                    <i class='bx bx-list-check' style="font-size:16px;"></i> ملخص الدمج في «${Utils.escapeHTML(target.nameEN || target.nameAR)}»:
+                </div>
+                <ul style="margin:0; padding-right:16px; display:flex; flex-direction:column; gap:4px; color:var(--text-main);">
+                    <li>🔢 <strong>الباركودات:</strong> ${newBcsCount > 0 ? `سيُضاف <strong>+${newBcsCount} باركود</strong> جديد لباركودات الهدف (بدون مسح القديم)` : 'لا توجد باركودات جديدة للإضافة'}</li>
+                    <li>📦 <strong>المخزون العام (Live):</strong> ${liveUnits > 0 ? `نقل ودمج <strong>${liveUnits} وحدة</strong> (${srcInvItems.length} دفعة) حسب المكان والصلاحية` : 'لا يوجد رصيد في المخزون العام'}</li>
+                    <li>📋 <strong>جلسات الجرد المفتوحة:</strong> ${auditSessionsAffected > 0 ? `نقل ودمج <strong>${auditUnits} وحدة</strong> عبر <strong>${auditSessionsAffected} جلسة جرد</strong>` : 'لا توجد كميات في جلسات جرد مفتوحة'}</li>
+                    <li>📍 <strong>أماكن التخزين:</strong> دمج جميع أماكن الحفظ المعتمدة تلقائياً</li>
+                </ul>
+                <div style="margin-top:8px; padding-top:8px; border-top:1px dashed rgba(124,58,237,0.25); display:flex; flex-direction:column; gap:6px;">
+                    <label style="display:flex; align-items:center; gap:7px; cursor:pointer; font-size:11.5px; font-weight:700;">
+                        <input type="checkbox" ${st.fillMissingMeta ? 'checked' : ''} onchange="window.App._tmState.fillMissingMeta = this.checked;" style="width:16px; height:16px; accent-color:#7c3aed;">
+                        <span>استكمال البيانات الناقصة في الهدف (الاسم العربي / المادة الفعالة / الصورة) إن وُجدت</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:7px; cursor:pointer; font-size:11.5px; font-weight:700; color:var(--danger);">
+                        <input type="checkbox" ${st.trashSourceAfterMerge ? 'checked' : ''} onchange="window.App._tmState.trashSourceAfterMerge = this.checked;" style="width:16px; height:16px; accent-color:var(--danger);">
+                        <span>نقل الدواء القديم لسلة المهملات بعد الدمج 🗑️ (قابل للاسترجاع)</span>
+                    </label>
+                </div>
+            </div>
+        `;
+    },
+
+    _tmUpdateConfirmBtn() {
+        const st = this._tmState;
+        const btn = document.getElementById('tm-confirm-btn');
+        if (!st || !btn) return;
+        if (st.mode === 'loc') {
+            btn.innerHTML = `<i class='bx bx-transfer-alt'></i> تنفيذ النقل للمكان`;
+            btn.style.background = 'var(--primary)';
+        } else if (st.mode === 'med') {
+            btn.innerHTML = `<i class='bx bx-export'></i> نقل الكمية للدواء المحدد`;
+            btn.style.background = '#059669';
+        } else {
+            btn.innerHTML = `<i class='bx bx-git-merge'></i> تنفيذ الدمج الكامل`;
+            btn.style.background = '#7c3aed';
+        }
+    },
+
+    async _tmRenderBody() {
+        const st = this._tmState;
+        const body = document.getElementById('tm-body');
+        if (!st || !body) return;
+
+        // Style tabs
+        ['loc', 'med', 'merge'].forEach(t => {
+            const el = document.getElementById(`tm-tab-${t}`);
+            if (!el) return;
+            const active = st.mode === t;
+            el.style.background = active ? 'var(--surface)' : 'transparent';
+            el.style.color = active ? (t === 'merge' ? '#7c3aed' : 'var(--primary)') : 'var(--text-muted)';
+            el.style.boxShadow = active ? '0 2px 6px rgba(0,0,0,0.08)' : 'none';
+        });
+        this._tmUpdateConfirmBtn();
+
+        if (st.mode === 'merge') {
+            body.innerHTML = `
+                <div style="font-size:11.5px; color:var(--text-muted); margin-bottom:8px; line-height:1.45;">
+                    اختر <strong>الدواء الصحيح (الهدف)</strong> لدمج كل كميات وصلاحيات وباركودات وأماكن الدواء المكرر بداخله بأمان:
+                </div>
+                <div class="audit-search-wrapper" style="width:100%; margin-bottom:8px;">
+                    <i class='bx bx-search'></i>
+                    <input type="text" id="tm-target-search" class="audit-search-input" placeholder="🔍 ابحث عن الدواء المستهدف بالاسم أو الباركود..." value="${Utils.escapeHTML(st.targetQuery)}" oninput="window.App._tmSearchTarget(this.value)">
+                </div>
+                <div id="tm-target-results" style="max-height:26vh; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+                <div id="tm-merge-preview"></div>
+            `;
+            this._tmRenderTargetResults();
+            this._tmRenderTargetPreview();
+            return;
+        }
+
+        // Modes 'loc' and 'med' share Source Selector + Stock Picker
+        const stockMap = await this._getSourceStockMap(st.sourceMed.id, st.sourceKey, st.allLocs, st.allInv, st.openSessions);
+        const locMap = new Map(st.allLocs.map(l => [l.id, l]));
+        const availableLocIds = Array.from(stockMap.keys());
+        if (!availableLocIds.includes(st.fromLocId)) {
+            st.fromLocId = availableLocIds[0] || '';
+        }
+        const fromBatches = st.fromLocId ? (stockMap.get(st.fromLocId) || []) : [];
+        const fromTotal = Math.round(fromBatches.reduce((s, b) => s + b.quantity, 0) * 1000) / 1000;
+
+        const sourceOptionsHtml = `
+            <option value="live" ${st.sourceKey === 'live' ? 'selected' : ''}>📦 المخزون العام الحالي (المعتمد)</option>
+            ${st.openSessions.map(s => `
+                <option value="${Utils.escapeHTML(s.id)}" ${st.sourceKey === s.id ? 'selected' : ''}>
+                    📋 جلسة جرد: ${Utils.escapeHTML(s.name)} (${s.status === 'active' ? 'جارية 🟢' : 'معلقة ⏸️'})
+                </option>
+            `).join('')}
+        `;
+
+        const stockSectionHtml = availableLocIds.length === 0 ? `
+            <div style="padding:14px; border-radius:10px; background:rgba(245,158,11,0.08); border:1px dashed #f59e0b; text-align:center; font-size:12px; color:#92400e; margin-bottom:12px;">
+                ⚠️ لا توجد كميات مسجلة لهذا الدواء في <strong>${st.sourceKey === 'live' ? 'المخزون العام' : 'هذه الجلسة'}</strong>.
+                ${st.openSessions.length > 0 ? '<div style="margin-top:4px; font-size:11px;">جرّب اختيار مصدر آخر من القائمة أعلاه (المخزون العام أو جلسة الجرد الجارية).</div>' : ''}
+            </div>
+        ` : `
+            <div class="form-group mb-10">
+                <label class="form-label" style="font-size:12px;">📍 من مكان:</label>
+                <select id="tm-from-loc" class="form-select" onchange="window.App._tmChangeFromLoc(this.value)" style="font-size:12.5px; font-weight:700;">
+                    ${availableLocIds.map(lid => {
+                        const l = locMap.get(lid);
+                        const bs = stockMap.get(lid) || [];
+                        const tot = Math.round(bs.reduce((s, b) => s + b.quantity, 0) * 1000) / 1000;
+                        return `<option value="${Utils.escapeHTML(lid)}" ${lid === st.fromLocId ? 'selected' : ''}>${Utils.escapeHTML(l?.nameAR || lid)} — المتاح: ${tot} وحدة (${bs.length} دفعة)</option>`;
+                    }).join('')}
+                </select>
+            </div>
+
+            <div class="form-group mb-10">
+                <label class="form-label" style="font-size:12px;">📅 الدفعة / الكمية المطلوب نقلها:</label>
+                <select id="tm-batch-select" class="form-select" onchange="window.App._tmChangeBatch(this.value)" style="font-size:12.5px; font-weight:700;">
+                    <option value="__ALL__" data-max="${fromTotal}" ${st.selectedExpiry === '__ALL__' ? 'selected' : ''}>نقل كل الكمية في هذا المكان (${fromTotal} وحدة — ${fromBatches.length} دفعة)</option>
+                    ${fromBatches.map(b => {
+                        const labelExp = b.expiryDate || 'بدون صلاحية';
+                        return `<option value="${Utils.escapeHTML(b.expiryDate)}" data-max="${b.quantity}" ${st.selectedExpiry === b.expiryDate ? 'selected' : ''}>دفعة صلاحية ${Utils.escapeHTML(labelExp)} — متاح: ${b.quantity} وحدة</option>`;
+                    }).join('')}
+                </select>
+            </div>
+
+            <div id="tm-qty-wrap" class="form-group mb-10" style="display:${st.selectedExpiry === '__ALL__' ? 'none' : 'block'};">
+                <label class="form-label" style="font-size:12px;">🔢 الكمية المنقولة (جزئي أو كامل):</label>
+                <input type="number" id="tm-qty-input" class="form-input" min="0.5" step="any" value="${Utils.escapeHTML(st.qtyToMove)}" oninput="window.App._tmState.qtyToMove = this.value;" style="font-size:15px; font-weight:800; text-align:center;">
+            </div>
+        `;
+
+        if (st.mode === 'loc') {
+            const destLocs = st.allLocs.filter(l => l.id !== st.fromLocId);
+            if (!destLocs.some(l => l.id === st.toLocId)) {
+                st.toLocId = destLocs[0]?.id || '';
+            }
+            body.innerHTML = `
+                <div class="form-group mb-10">
+                    <label class="form-label" style="font-size:12px;">🗂️ مصدر الأرصدة:</label>
+                    <select class="form-select" onchange="window.App._tmChangeSource(this.value)" style="font-size:12px; font-weight:700;">
+                        ${sourceOptionsHtml}
+                    </select>
+                </div>
+                ${stockSectionHtml}
+                ${availableLocIds.length > 0 ? `
+                    <div class="form-group mb-10">
+                        <label class="form-label" style="font-size:12px;">🎯 إلى مكان:</label>
+                        <select id="tm-to-loc" class="form-select" onchange="window.App._tmState.toLocId = this.value;" style="font-size:12.5px; font-weight:700;">
+                            ${destLocs.map(l => `<option value="${Utils.escapeHTML(l.id)}" ${l.id === st.toLocId ? 'selected' : ''}>${Utils.escapeHTML(l.nameAR)}</option>`).join('')}
+                        </select>
+                        <small style="display:block; margin-top:4px; font-size:10.5px; color:var(--text-muted);">
+                            ✨ سيتم خصم الكمية من المكان الأول ودمجها تلقائياً مع نفس تاريخ الصلاحية في المكان الجديد.
+                        </small>
+                    </div>
+                ` : ''}
+            `;
+        } else {
+            // Mode 'med': Transfer quantity to another medicine (keeping both medicines)
+            const destLocVal = st.toLocId || st.fromLocId || (st.allLocs[0]?.id || '');
+            body.innerHTML = `
+                <div class="form-group mb-10">
+                    <label class="form-label" style="font-size:12px;">🗂️ مصدر الأرصدة:</label>
+                    <select class="form-select" onchange="window.App._tmChangeSource(this.value)" style="font-size:12px; font-weight:700;">
+                        ${sourceOptionsHtml}
+                    </select>
+                </div>
+                ${stockSectionHtml}
+                ${availableLocIds.length > 0 ? `
+                    <div class="form-group mb-10">
+                        <label class="form-label" style="font-size:12px;">📍 المكان المستلم للدواء الآخر:</label>
+                        <select id="tm-to-loc-med" class="form-select" onchange="window.App._tmState.toLocId = this.value;" style="font-size:12px; font-weight:700;">
+                            <option value="__SAME__" ${(!st.toLocId || st.toLocId === '__SAME__') ? 'selected' : ''}>نفس المكان (${Utils.escapeHTML(locMap.get(st.fromLocId)?.nameAR || '')})</option>
+                            ${st.allLocs.map(l => `<option value="${Utils.escapeHTML(l.id)}" ${st.toLocId === l.id ? 'selected' : ''}>${Utils.escapeHTML(l.nameAR)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group mb-8">
+                        <label class="form-label" style="font-size:12px;">💊 اختر الدواء المستلم:</label>
+                        <div class="audit-search-wrapper" style="width:100%; margin-bottom:6px;">
+                            <i class='bx bx-search'></i>
+                            <input type="text" id="tm-target-search" class="audit-search-input" placeholder="🔍 ابحث عن الدواء المستلم..." value="${Utils.escapeHTML(st.targetQuery)}" oninput="window.App._tmSearchTarget(this.value)">
+                        </div>
+                        <div id="tm-target-results" style="max-height:22vh; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+                        <div id="tm-merge-preview"></div>
+                    </div>
+                ` : ''}
+            `;
+            if (availableLocIds.length > 0) {
+                this._tmRenderTargetResults();
+                this._tmRenderTargetPreview();
+            }
+        }
+    },
+
+    async _transferLiveInventoryBatches({ fromMedId, fromLocId, toMedId, toLocId, targetExpiry = '__ALL__', qtyToMove = Infinity, allLocs }) {
+        const locMap = new Map(allLocs.map(l => [l.id, l]));
+        const locNameToId = new Map(allLocs.map(l => [l.nameAR, l.id]));
+        const getInvLocId = (item) => item.locationId || (item.location ? locNameToId.get(item.location) : null) || (allLocs[0]?.id || 'loc_cabinet');
+
+        const allInv = (await DB.getAll('inventory')) || [];
+        const wantAll = targetExpiry === '__ALL__';
+        const normExp = wantAll ? '__ALL__' : String(targetExpiry || '').trim();
+        let remainingNeed = wantAll ? Infinity : Math.max(0, Math.round((parseFloat(qtyToMove) || 0) * 1000) / 1000);
+
+        const sourceItems = allInv.filter(item => {
+            if (item.medicineId !== fromMedId) return false;
+            if ((parseFloat(item.quantity) || 0) <= 0) return false;
+            if (getInvLocId(item) !== fromLocId) return false;
+            if (!wantAll && String(item.expiryDate || '').trim() !== normExp) return false;
+            return true;
+        });
+
+        const movedBatches = [];
+        let totalMoved = 0;
+
+        for (const item of sourceItems) {
+            if (!wantAll && remainingNeed <= 0) break;
+            const curQty = Math.round((parseFloat(item.quantity) || 0) * 1000) / 1000;
+            const take = wantAll ? curQty : Math.min(curQty, remainingNeed);
+            if (take <= 0) continue;
+
+            const left = Math.round((curQty - take) * 1000) / 1000;
+            movedBatches.push({ quantity: take, expiryDate: String(item.expiryDate || '').trim() });
+            totalMoved = Math.round((totalMoved + take) * 1000) / 1000;
+            if (!wantAll) remainingNeed = Math.round((remainingNeed - take) * 1000) / 1000;
+
+            if (left <= 0) {
+                await DB.delete('inventory', item.id);
+                if (typeof Sync !== 'undefined' && Sync.deleteInventoryEntry) {
+                    Sync.deleteInventoryEntry(item.id).catch(() => {});
+                }
+            } else {
+                item.quantity = left;
+                item.timestamp = new Date().toISOString();
+                await DB.put('inventory', item);
+                if (typeof Sync !== 'undefined' && Sync.pushInventoryEntry) {
+                    Sync.pushInventoryEntry(item).catch(() => {});
+                }
+            }
+        }
+
+        if (totalMoved <= 0) return 0;
+
+        // Add/Merge moved batches into destination (toMedId, toLocId)
+        const mergedMoved = this._mergeBatchesByExpiry(movedBatches, []);
+        const freshInv = (await DB.getAll('inventory')) || [];
+        const toLocName = locMap.get(toLocId)?.nameAR || 'المستودع الرئيسي';
+        const targetMed = await DB.get('medicineMaster', toMedId);
+        const now = new Date().toISOString();
+        const uName = this.getActiveUserName();
+
+        for (const mb of mergedMoved) {
+            const existingTarget = freshInv.find(item =>
+                item.medicineId === toMedId &&
+                getInvLocId(item) === toLocId &&
+                String(item.expiryDate || '').trim() === mb.expiryDate
+            );
+            if (existingTarget) {
+                existingTarget.quantity = Math.round(((parseFloat(existingTarget.quantity) || 0) + mb.quantity) * 1000) / 1000;
+                existingTarget.locationId = toLocId;
+                existingTarget.location = toLocName;
+                existingTarget.timestamp = now;
+                await DB.put('inventory', existingTarget);
+                if (typeof Sync !== 'undefined' && Sync.pushInventoryEntry) {
+                    Sync.pushInventoryEntry(existingTarget).catch(() => {});
+                }
+            } else {
+                const newEntry = {
+                    id: Utils.generateId(),
+                    medicineId: toMedId,
+                    locationId: toLocId,
+                    location: toLocName,
+                    quantity: mb.quantity,
+                    expiryDate: mb.expiryDate || null,
+                    auditId: null,
+                    userName: uName,
+                    type: targetMed?.type || 'medicine',
+                    timestamp: now
+                };
+                await DB.put('inventory', newEntry);
+                freshInv.push(newEntry);
+                if (typeof Sync !== 'undefined' && Sync.pushInventoryEntry) {
+                    Sync.pushInventoryEntry(newEntry).catch(() => {});
+                }
+            }
+        }
+
+        await this._ensureMedHasLocation(toMedId, toLocId);
+        return totalMoved;
+    },
+
+    async _transferAuditSessionBatches({ sessionId, fromMedId, fromLocId, toMedId, toLocId, targetExpiry = '__ALL__', qtyToMove = Infinity }) {
+        const session = await Audit.getSession(sessionId);
+        if (!session) return 0;
+        if (!session.counts) session.counts = {};
+
+        const fromKey = `${fromLocId}___${fromMedId}`;
+        const toKey = `${toLocId}___${toMedId}`;
+        if (fromKey === toKey) return 0;
+
+        const fromBatches = this._extractRecordBatches(session.counts[fromKey]);
+        if (fromBatches.length === 0) return 0;
+
+        const { remainingBatches, movedBatches, actualMoved } = this._subtractFromBatches(fromBatches, targetExpiry, qtyToMove);
+        if (actualMoved <= 0) return 0;
+
+        const uName = this.getActiveUserName();
+        // Update source key (zero-count if emptied so finalize reconciles cleanly!)
+        session.counts[fromKey] = this._buildCountRecordFromBatches(remainingBatches, uName);
+
+        // Merge into destination key
+        const existingToBatches = this._extractRecordBatches(session.counts[toKey]);
+        const newToBatches = this._mergeBatchesByExpiry(existingToBatches, movedBatches);
+        session.counts[toKey] = this._buildCountRecordFromBatches(newToBatches, uName);
+
+        // Ensure destination location is included in session
+        if (!Array.isArray(session.locationIds)) session.locationIds = [];
+        if (!session.locationIds.includes(toLocId)) session.locationIds.push(toLocId);
+
+        await Audit.saveSession(session);
+        await this._ensureMedHasLocation(toMedId, toLocId);
+        return actualMoved;
+    },
+
+    async _tmExecute() {
+        const st = this._tmState;
+        if (!st) return;
+
+        const btn = document.getElementById('tm-confirm-btn');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<i class='bx bx-loader-alt bx-spin'></i> جاري التنفيذ...`;
+        }
+
+        try {
+            if (st.mode === 'loc') {
+                if (!st.fromLocId) {
+                    UI.showToast('لا توجد كمية متاحة للنقل في المصدر المحدد', 'warning');
+                    return;
+                }
+                if (!st.toLocId || st.toLocId === st.fromLocId) {
+                    UI.showToast('يرجى اختيار مكان مستلم مختلف', 'warning');
+                    return;
+                }
+                const qtyVal = st.selectedExpiry === '__ALL__' ? Infinity : parseFloat(document.getElementById('tm-qty-input')?.value || st.qtyToMove);
+                if (st.selectedExpiry !== '__ALL__' && (isNaN(qtyVal) || qtyVal <= 0)) {
+                    UI.showToast('يرجى إدخال كمية صحيحة أكبر من صفر', 'warning');
+                    return;
+                }
+
+                let moved = 0;
+                if (st.sourceKey === 'live') {
+                    moved = await this._transferLiveInventoryBatches({
+                        fromMedId: st.sourceMed.id,
+                        fromLocId: st.fromLocId,
+                        toMedId: st.sourceMed.id,
+                        toLocId: st.toLocId,
+                        targetExpiry: st.selectedExpiry,
+                        qtyToMove: qtyVal,
+                        allLocs: st.allLocs
+                    });
+                } else {
+                    moved = await this._transferAuditSessionBatches({
+                        sessionId: st.sourceKey,
+                        fromMedId: st.sourceMed.id,
+                        fromLocId: st.fromLocId,
+                        toMedId: st.sourceMed.id,
+                        toLocId: st.toLocId,
+                        targetExpiry: st.selectedExpiry,
+                        qtyToMove: qtyVal
+                    });
+                }
+
+                if (moved <= 0) {
+                    UI.showToast('لم يتم نقل أي كمية (تحقق من الرصيد المتاح)', 'warning');
+                    return;
+                }
+                const toLocName = st.allLocs.find(l => l.id === st.toLocId)?.nameAR || '';
+                UI.closeModal();
+                UI.showToast(`تم نقل ${moved} وحدة إلى «${toLocName}» بنجاح 🔀✅`, 'success');
+                await this.refreshAllViews();
+                return;
+            }
+
+            if (st.mode === 'med') {
+                if (!st.fromLocId) {
+                    UI.showToast('لا توجد كمية متاحة للنقل في المصدر المحدد', 'warning');
+                    return;
+                }
+                if (!st.targetMedId) {
+                    UI.showToast('يرجى اختيار الدواء المستلم أولاً', 'warning');
+                    return;
+                }
+                const targetMed = st.allMeds.find(m => m.id === st.targetMedId);
+                if (!targetMed) return;
+                const destLocEl = document.getElementById('tm-to-loc-med');
+                const chosenToLoc = (destLocEl?.value && destLocEl.value !== '__SAME__') ? destLocEl.value : st.fromLocId;
+                const qtyVal = st.selectedExpiry === '__ALL__' ? Infinity : parseFloat(document.getElementById('tm-qty-input')?.value || st.qtyToMove);
+                if (st.selectedExpiry !== '__ALL__' && (isNaN(qtyVal) || qtyVal <= 0)) {
+                    UI.showToast('يرجى إدخال كمية صحيحة أكبر من صفر', 'warning');
+                    return;
+                }
+
+                let moved = 0;
+                if (st.sourceKey === 'live') {
+                    moved = await this._transferLiveInventoryBatches({
+                        fromMedId: st.sourceMed.id,
+                        fromLocId: st.fromLocId,
+                        toMedId: targetMed.id,
+                        toLocId: chosenToLoc,
+                        targetExpiry: st.selectedExpiry,
+                        qtyToMove: qtyVal,
+                        allLocs: st.allLocs
+                    });
+                } else {
+                    moved = await this._transferAuditSessionBatches({
+                        sessionId: st.sourceKey,
+                        fromMedId: st.sourceMed.id,
+                        fromLocId: st.fromLocId,
+                        toMedId: targetMed.id,
+                        toLocId: chosenToLoc,
+                        targetExpiry: st.selectedExpiry,
+                        qtyToMove: qtyVal
+                    });
+                }
+
+                if (moved <= 0) {
+                    UI.showToast('لم يتم نقل أي كمية (تحقق من الرصيد المتاح)', 'warning');
+                    return;
+                }
+                UI.closeModal();
+                UI.showToast(`تم نقل ${moved} وحدة إلى «${targetMed.nameEN || targetMed.nameAR}» بنجاح 💊✅`, 'success');
+                await this.refreshAllViews();
+                return;
+            }
+
+            if (st.mode === 'merge') {
+                if (!st.targetMedId) {
+                    UI.showToast('يرجى اختيار الدواء المستهدف للدمج أولاً', 'warning');
+                    return;
+                }
+                await this.executeFullMedicineMerge(st.sourceMed.id, st.targetMedId, {
+                    fillMissingMeta: st.fillMissingMeta,
+                    trashSourceAfterMerge: st.trashSourceAfterMerge
+                });
+            }
+        } catch (err) {
+            console.error('_tmExecute error:', err);
+            UI.showToast('حدث خطأ أثناء التنفيذ: ' + err.message, 'danger');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                this._tmUpdateConfirmBtn();
+            }
+        }
+    },
+
+    async executeFullMedicineMerge(sourceMedId, targetMedId, { fillMissingMeta = true, trashSourceAfterMerge = true } = {}) {
+        if (!sourceMedId || !targetMedId || sourceMedId === targetMedId) return;
+        const [source, target, allLocs, allInv, allSessions] = await Promise.all([
+            DB.get('medicineMaster', sourceMedId),
+            DB.get('medicineMaster', targetMedId),
+            Locations.getAll(),
+            DB.getAll('inventory'),
+            Audit.getAllSessions()
+        ]);
+        if (!source || !target) return UI.showToast('تعذر العثور على الدوائين', 'danger');
+
+        const now = new Date().toISOString();
+        const uName = this.getActiveUserName();
+
+        // 1. Merge Barcodes (append all unique source barcodes into target.barcodes[])
+        const srcBcs = this.getMedicineBarcodes(source);
+        const tgtBcs = this.getMedicineBarcodes(target);
+        const addedBarcodesCount = srcBcs.filter(b => !tgtBcs.includes(b)).length;
+        const { barcode, barcodes } = this.normalizeBarcodesField([...tgtBcs, ...srcBcs]);
+        target.barcode = barcode;
+        target.barcodes = barcodes;
+
+        // 2. Merge Allowed Locations & Primary Location
+        const locSet = new Set([
+            ...(Array.isArray(target.allowedLocations) ? target.allowedLocations : []),
+            ...(Array.isArray(source.allowedLocations) ? source.allowedLocations : []),
+            ...(target.primaryLocation ? [target.primaryLocation] : []),
+            ...(source.primaryLocation ? [source.primaryLocation] : [])
+        ]);
+        if (locSet.size > 0) target.allowedLocations = Array.from(locSet);
+        if (!target.primaryLocation && source.primaryLocation) target.primaryLocation = source.primaryLocation;
+
+        // 3. Optionally fill missing metadata on target
+        if (fillMissingMeta) {
+            if ((!target.nameAR || target.nameAR === target.nameEN) && source.nameAR && source.nameAR !== source.nameEN) {
+                target.nameAR = source.nameAR;
+            }
+            if (!target.activeIngredient && source.activeIngredient) {
+                target.activeIngredient = source.activeIngredient;
+            }
+            const tgtHasImg = target.imagePath && !target.imagePath.includes('default-med.png');
+            const srcHasImg = source.imagePath && !source.imagePath.includes('default-med.png');
+            if (!tgtHasImg && srcHasImg) {
+                target.imagePath = source.imagePath;
+            }
+        }
+
+        target.lastUpdated = now;
+        target.v = (target.v || 1) + 1;
+        await DB.put('medicineMaster', target);
+        if (typeof Sync !== 'undefined' && Sync.push) {
+            Sync.push(target.id).catch(() => {});
+        }
+        // Ensure target's category is allowed in all merged locations
+        if (target.categoryId && target.allowedLocations && typeof Locations !== 'undefined' && Locations.addCategoryToLocation) {
+            for (const lid of target.allowedLocations) {
+                Locations.addCategoryToLocation(lid, target.categoryId).catch(() => {});
+            }
+        }
+
+        // 4. Move & Merge Live Inventory across every location (same location + same expiry merged!)
+        const locNameToId = new Map((allLocs || []).map(l => [l.nameAR, l.id]));
+        const getInvLocId = (item) => item.locationId || (item.location ? locNameToId.get(item.location) : null) || ((allLocs && allLocs[0]?.id) || 'loc_cabinet');
+        const srcInvLocs = new Set(
+            (allInv || [])
+                .filter(i => i.medicineId === sourceMedId && (parseFloat(i.quantity) || 0) > 0)
+                .map(i => getInvLocId(i))
+        );
+        let movedLiveTotal = 0;
+        for (const lid of srcInvLocs) {
+            movedLiveTotal += await this._transferLiveInventoryBatches({
+                fromMedId: sourceMedId,
+                fromLocId: lid,
+                toMedId: targetMedId,
+                toLocId: lid,
+                targetExpiry: '__ALL__',
+                qtyToMove: Infinity,
+                allLocs: allLocs || []
+            });
+        }
+        // Clean any leftover zero-qty inventory rows for sourceMedId
+        for (const item of (allInv || [])) {
+            if (item.medicineId === sourceMedId && (parseFloat(item.quantity) || 0) <= 0) {
+                await DB.delete('inventory', item.id);
+                if (typeof Sync !== 'undefined' && Sync.deleteInventoryEntry) {
+                    Sync.deleteInventoryEntry(item.id).catch(() => {});
+                }
+            }
+        }
+
+        // 5. Move & Merge counts inside ALL open (non-finalized) Audit Sessions
+        let movedAuditTotal = 0;
+        let touchedSessions = 0;
+        for (const session of (allSessions || [])) {
+            if (!session || session.status === 'finalized' || !session.counts) continue;
+            const srcKeys = Object.keys(session.counts).filter(k => k.split('___')[1] === String(sourceMedId));
+            if (srcKeys.length === 0) continue;
+
+            for (const srcKey of srcKeys) {
+                const locId = srcKey.split('___')[0];
+                const toKey = `${locId}___${targetMedId}`;
+                const srcBatches = this._extractRecordBatches(session.counts[srcKey]);
+                const tgtBatches = this._extractRecordBatches(session.counts[toKey]);
+                const merged = this._mergeBatchesByExpiry(tgtBatches, srcBatches);
+                movedAuditTotal += srcBatches.reduce((s, b) => s + b.quantity, 0);
+
+                if (merged.length > 0 || session.counts[toKey]) {
+                    session.counts[toKey] = this._buildCountRecordFromBatches(merged, uName);
+                }
+                delete session.counts[srcKey];
+            }
+
+            await Audit.saveSession(session);
+            if (typeof Sync !== 'undefined' && Sync.deleteAuditCountKeys) {
+                Sync.deleteAuditCountKeys(session.id, srcKeys).catch(() => {});
+            }
+            touchedSessions++;
+        }
+
+        // 6. Safely move old duplicate to Recycle Bin (Trash) if selected
+        if (trashSourceAfterMerge) {
+            await Categories.deleteMedicine(sourceMedId);
+        }
+
+        this._dashCache = null;
+        UI.closeModal();
+        const parts = [];
+        if (movedLiveTotal > 0) parts.push(`${Math.round(movedLiveTotal * 1000) / 1000} وحدة مخزون`);
+        if (movedAuditTotal > 0) parts.push(`${Math.round(movedAuditTotal * 1000) / 1000} وحدة جرد (${touchedSessions} جلسة)`);
+        if (addedBarcodesCount > 0) parts.push(`+${addedBarcodesCount} باركود`);
+        const detailsText = parts.length > 0 ? ` (${parts.join(' • ')})` : '';
+        UI.showToast(`تم دمج «${source.nameEN || source.nameAR}» في «${target.nameEN || target.nameAR}» بنجاح${detailsText} 🔗✨`, 'success');
+        await this.refreshAllViews();
+    },
+    // ===================== End Stock Transfer & Medicine Merge Engine =====================
 
     // --- Dedicated Expiry Monitor with Audit Reference & Session Selector ---
     async openExpiryMonitorModal() {
