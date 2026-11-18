@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.21.0', // Linked Drug Groups (drug_groups + cloud sync + Large Merged Card Toggle + Boxed Excel Group Export)
+    VERSION: '18.22.0', // Inverted Negative-Polarity QR/DataMatrix Scanner + Torch + Sticky Keyboard Save/Scan Bar in Audit Count
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -2108,16 +2108,50 @@ const App = {
     },
 
     /**
-     * Universal Camera Barcode & 2D GS1 DataMatrix / QR Scanner (v18.18.0)
+     * Invert & boost contrast of a video frame onto a canvas for Negative-Polarity
+     * (white-on-black / dark) QR & GS1 DataMatrix codes (v18.22.0).
+     */
+    _renderInvertedScannerFrame(video, canvas, ctx, contrast = 1.38) {
+        const vw = video?.videoWidth || 0;
+        const vh = video?.videoHeight || 0;
+        if (!vw || !vh) return false;
+
+        // Scale down to max 640px wide for ultra-fast mobile frame inversion
+        const scale = vw > 640 ? (640 / vw) : 1;
+        const cw = Math.max(1, Math.round(vw * scale));
+        const ch = Math.max(1, Math.round(vh * scale));
+        if (canvas.width !== cw || canvas.height !== ch) {
+            canvas.width = cw;
+            canvas.height = ch;
+        }
+
+        ctx.drawImage(video, 0, 0, cw, ch);
+        const imgData = ctx.getImageData(0, 0, cw, ch);
+        const d = imgData.data;
+        for (let i = 0; i < d.length; i += 4) {
+            // Convert to luminance, invert polarity, and stretch contrast
+            const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+            const inv = 255 - lum;
+            const c = Math.max(0, Math.min(255, ((inv - 128) * contrast) + 128));
+            d[i] = c;
+            d[i + 1] = c;
+            d[i + 2] = c;
+        }
+        ctx.putImageData(imgData, 0, 0);
+        return true;
+    },
+
+    /**
+     * Universal Camera Barcode & 2D GS1 DataMatrix / QR Scanner (v18.22.0)
      * Accepts either a targetInputId (string) OR a callback function (code, parsed) => void.
      * Supports native BarcodeDetector (Android Chrome), html5-qrcode fallback (iOS Safari),
-     * GS1 DataMatrix (extracts EAN-13 + Expiry Date automatically), QR, and USB/Manual entry.
+     * Auto + Manual Inverted/Negative Polarity QR & DataMatrix, Flashlight Torch, GS1 parsing, and USB/Manual entry.
      */
     async startBarcodeScanner(targetInputIdOrCallback, options = {}) {
         const isCallback = typeof targetInputIdOrCallback === 'function';
         const hasBarcodeDetector = typeof window !== 'undefined' && 'BarcodeDetector' in window;
         const titleText = options.title || 'ماسح الباركود المباشر';
-        const subtitleText = options.subtitle || 'وجّه الكاميرا نحو الباركود المطبوع على علبة الدواء';
+        const subtitleText = options.subtitle || 'وجّه الكاميرا نحو الباركود أو كود 2D (يدعم العادي والمعكوس تلقائياً)';
 
         // Remove any previous overlay
         document.getElementById('barcode-scanner-overlay')?.remove();
@@ -2140,11 +2174,23 @@ const App = {
                 <button type="button" id="close-scanner-btn" style="background:rgba(255,255,255,0.15); border:none; color:white; font-size:22px; width:36px; height:36px; border-radius:50%; cursor:pointer;">✕</button>
             </div>
 
-            <div id="scanner-viewport-wrap" style="position:relative; width:100%; max-width:350px; min-height:240px; border-radius:18px; overflow:hidden; background:#000; box-shadow:0 8px 32px rgba(0,0,0,0.5); border:2px solid rgba(59,130,246,0.7); margin:12px 0;">
-                <video id="scanner-video" playsinline muted style="width:100%; height:240px; object-fit:cover; display:block;"></video>
-                <div id="html5qr-fallback-reader" style="display:none; width:100%;"></div>
-                <div id="scanner-laser-frame" style="position:absolute; inset:25px 20px; border:2px dashed #3b82f6; border-radius:12px; pointer-events:none; display:flex; align-items:center; justify-content:center;">
-                    <div style="width:100%; height:2px; background:rgba(239,68,68,0.9); box-shadow:0 0 10px #ef4444; animation:scanline 1.6s infinite alternate;"></div>
+            <div style="width:100%; max-width:350px; display:flex; flex-direction:column; align-items:center; gap:10px; margin:10px 0;">
+                <div id="scanner-viewport-wrap" style="position:relative; width:100%; min-height:240px; border-radius:18px; overflow:hidden; background:#000; box-shadow:0 8px 32px rgba(0,0,0,0.5); border:2px solid rgba(59,130,246,0.7);">
+                    <video id="scanner-video" playsinline muted style="width:100%; height:240px; object-fit:cover; display:block; transition:filter 0.15s;"></video>
+                    <div id="html5qr-fallback-reader" style="display:none; width:100%;"></div>
+                    <div id="scanner-laser-frame" style="position:absolute; inset:25px 20px; border:2px dashed #3b82f6; border-radius:12px; pointer-events:none; display:flex; align-items:center; justify-content:center;">
+                        <div style="width:100%; height:2px; background:rgba(239,68,68,0.9); box-shadow:0 0 10px #ef4444; animation:scanline 1.6s infinite alternate;"></div>
+                    </div>
+                </div>
+
+                <!-- Polarity & Torch Quick Controls -->
+                <div style="display:flex; gap:8px; width:100%; justify-content:center; flex-wrap:wrap;">
+                    <button type="button" id="toggle-invert-btn" style="flex:1; min-width:160px; padding:8px 12px; border-radius:10px; border:1px solid rgba(167,139,250,0.55); background:rgba(124,58,237,0.22); color:#e9d5ff; font-size:12px; font-weight:800; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:6px;">
+                        <span>🌓</span> <span id="toggle-invert-label">الكود المعكوس: تلقائي</span>
+                    </button>
+                    <button type="button" id="toggle-torch-btn" style="display:none; padding:8px 12px; border-radius:10px; border:1px solid rgba(250,204,21,0.5); background:rgba(250,204,21,0.16); color:#fef08a; font-size:12px; font-weight:800; cursor:pointer; align-items:center; justify-content:center; gap:5px;">
+                        <span>🔦</span> <span>كشاف</span>
+                    </button>
                 </div>
             </div>
 
@@ -2157,6 +2203,7 @@ const App = {
                 </div>
                 <button type="button" id="manual-cancel-btn" style="padding:9px 26px; background:rgba(255,255,255,0.14); border:1px solid rgba(255,255,255,0.25); color:white; border-radius:12px; font-weight:700; cursor:pointer;">إغلاق</button>
             </div>
+            <div id="html5qr-invert-helper" style="display:none;"></div>
             <style>
                 @keyframes scanline { 0% { transform: translateY(-75px); } 100% { transform: translateY(75px); } }
             </style>
@@ -2167,10 +2214,47 @@ const App = {
         let stream = null;
         let animationFrameId = null;
         let html5QrInstance = null;
+        let html5InvertInterval = null;
         let handled = false;
+        let forceInverted = false;
+        let torchOn = false;
+
+        // Offscreen canvas for Negative-Polarity frame inversion
+        const invertCanvas = document.createElement('canvas');
+        const invertCtx = invertCanvas.getContext('2d', { willReadFrequently: true });
+
+        const invertBtn = overlay.querySelector('#toggle-invert-btn');
+        const invertLabel = overlay.querySelector('#toggle-invert-label');
+        const torchBtn = overlay.querySelector('#toggle-torch-btn');
+
+        const updateInvertUI = () => {
+            const vid = overlay.querySelector('#scanner-video') || overlay.querySelector('#html5qr-fallback-reader video');
+            if (vid) {
+                vid.style.filter = forceInverted ? 'invert(1) contrast(1.3)' : 'none';
+            }
+            if (invertLabel) {
+                invertLabel.textContent = forceInverted ? 'الوضع المعكوس مثبّت ✓' : 'الكود المعكوس: تلقائي';
+            }
+            if (invertBtn) {
+                invertBtn.style.background = forceInverted ? '#7c3aed' : 'rgba(124,58,237,0.22)';
+                invertBtn.style.color = forceInverted ? '#ffffff' : '#e9d5ff';
+                invertBtn.style.borderColor = forceInverted ? '#a78bfa' : 'rgba(167,139,250,0.55)';
+            }
+        };
+
+        if (invertBtn) {
+            invertBtn.onclick = () => {
+                forceInverted = !forceInverted;
+                updateInvertUI();
+            };
+        }
 
         const cleanup = async () => {
             if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            if (html5InvertInterval) {
+                clearInterval(html5InvertInterval);
+                html5InvertInterval = null;
+            }
             if (html5QrInstance) {
                 try { await html5QrInstance.stop(); } catch (e) {}
                 try { html5QrInstance.clear(); } catch (e) {}
@@ -2183,7 +2267,7 @@ const App = {
             overlay.remove();
         };
 
-        const onCodeFound = async (rawValue) => {
+        const onCodeFound = async (rawValue, wasInverted = false) => {
             if (handled) return;
             const parsed = this.parsePharmaBarcode(rawValue);
             const code = parsed.barcode;
@@ -2195,7 +2279,7 @@ const App = {
             await cleanup();
 
             if (isCallback) {
-                targetInputIdOrCallback(code, parsed);
+                targetInputIdOrCallback(code, { ...parsed, inverted: wasInverted });
             } else {
                 const input = document.getElementById(targetInputIdOrCallback);
                 if (input) {
@@ -2204,8 +2288,8 @@ const App = {
                     input.dispatchEvent(new Event('change', { bubbles: true }));
                 }
                 const extraInfo = parsed.isGS1
-                    ? ` (2D${parsed.expiry ? ' • صلاحية: ' + parsed.expiry : ''})`
-                    : '';
+                    ? ` (2D${parsed.expiry ? ' • صلاحية: ' + parsed.expiry : ''}${wasInverted ? ' • معكوس' : ''})`
+                    : (wasInverted ? ' (معكوس 🌓)' : '');
                 UI.showToast(`تم المسح بنجاح: ${code}${extraInfo} 🎯`, 'success');
             }
         };
@@ -2216,11 +2300,11 @@ const App = {
         const manualInp = overlay.querySelector('#manual-barcode-entry');
         const manualOk = overlay.querySelector('#manual-barcode-ok');
         if (manualOk && manualInp) {
-            manualOk.onclick = () => onCodeFound(manualInp.value);
+            manualOk.onclick = () => onCodeFound(manualInp.value, false);
             manualInp.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
-                    onCodeFound(manualInp.value);
+                    onCodeFound(manualInp.value, false);
                 }
             });
         }
@@ -2234,6 +2318,25 @@ const App = {
                 video.srcObject = stream;
                 await video.play();
 
+                // Setup Flashlight Torch if camera supports it
+                const videoTrack = stream.getVideoTracks?.()[0];
+                if (videoTrack && typeof videoTrack.getCapabilities === 'function' && torchBtn) {
+                    try {
+                        const caps = videoTrack.getCapabilities();
+                        if (caps && caps.torch) {
+                            torchBtn.style.display = 'inline-flex';
+                            torchBtn.onclick = async () => {
+                                torchOn = !torchOn;
+                                try {
+                                    await videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
+                                    torchBtn.style.background = torchOn ? '#eab308' : 'rgba(250,204,21,0.16)';
+                                    torchBtn.style.color = torchOn ? '#0f172a' : '#fef08a';
+                                } catch (e) {}
+                            };
+                        }
+                    } catch (e) {}
+                }
+
                 // Enable GS1 DataMatrix + QR + 1D formats safely by intersecting with browser-supported formats
                 const desiredFormats = ['data_matrix', 'qr_code', 'ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'itf', 'aztec', 'pdf417'];
                 let activeFormats = desiredFormats;
@@ -2246,21 +2349,35 @@ const App = {
                 } catch (e) {}
 
                 const detector = new window.BarcodeDetector({ formats: activeFormats });
+                let frameTick = 0;
 
                 const scanLoop = async () => {
                     if (handled || !overlay.parentNode) return;
+                    frameTick++;
                     try {
-                        const barcodes = await detector.detect(video);
-                        if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
-                            onCodeFound(barcodes[0].rawValue);
-                            return;
+                        // In forced-inverted mode, decode inverted canvas every frame;
+                        // In auto dual mode, alternate normal video frame + inverted canvas frame!
+                        const tryInvertedThisTick = forceInverted || (frameTick % 2 === 0);
+
+                        if (!forceInverted && !tryInvertedThisTick) {
+                            const barcodes = await detector.detect(video);
+                            if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+                                onCodeFound(barcodes[0].rawValue, false);
+                                return;
+                            }
+                        } else if (invertCtx && this._renderInvertedScannerFrame(video, invertCanvas, invertCtx)) {
+                            const invBarcodes = await detector.detect(invertCanvas);
+                            if (invBarcodes && invBarcodes.length > 0 && invBarcodes[0].rawValue) {
+                                onCodeFound(invBarcodes[0].rawValue, true);
+                                return;
+                            }
                         }
                     } catch (detectErr) {}
                     animationFrameId = requestAnimationFrame(scanLoop);
                 };
                 scanLoop();
             } else {
-                // iOS Safari / Firefox fallback via html5-qrcode (supports DataMatrix, QR, EAN-13)
+                // iOS Safari / Firefox fallback via html5-qrcode (supports DataMatrix, QR, EAN-13 + inverted canvas worker)
                 const statusEl = overlay.querySelector('#scanner-status-text');
                 if (statusEl) statusEl.textContent = 'جاري تشغيل قارئ الباركود و DataMatrix / QR...';
                 const videoEl = overlay.querySelector('#scanner-video');
@@ -2285,10 +2402,34 @@ const App = {
                 await html5QrInstance.start(
                     { facingMode: 'environment' },
                     { fps: 12, qrbox: { width: 250, height: 200 } },
-                    (decodedText) => onCodeFound(decodedText),
+                    (decodedText) => onCodeFound(decodedText, false),
                     () => {}
                 );
                 if (statusEl) statusEl.textContent = subtitleText;
+
+                // Parallel inverted-frame decoder for iOS Safari / Firefox (every 700ms)
+                const invScanner = new Html5Qrcode('html5qr-invert-helper', config);
+                let invBusy = false;
+                html5InvertInterval = setInterval(() => {
+                    if (handled || invBusy || !overlay.parentNode) return;
+                    const fbVid = fallbackDiv?.querySelector('video');
+                    if (!fbVid || !invertCtx) return;
+                    if (!this._renderInvertedScannerFrame(fbVid, invertCanvas, invertCtx)) return;
+                    invBusy = true;
+                    invertCanvas.toBlob(async (blob) => {
+                        try {
+                            if (blob && !handled) {
+                                const file = new File([blob], 'inv.png', { type: 'image/png' });
+                                const res = await invScanner.scanFile(file, false);
+                                if (res) onCodeFound(res, true);
+                            }
+                        } catch (e) {
+                            // No inverted code in this frame
+                        } finally {
+                            invBusy = false;
+                        }
+                    }, 'image/png');
+                }, 700);
             }
         } catch (err) {
             console.warn('Camera stream error:', err);
@@ -9158,7 +9299,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 <div style="display:grid; grid-template-columns: 1fr 1.6fr; gap: 8px; margin-bottom: 10px;">
                     <div>
                         <label class="form-label" style="font-size: 11px; margin-bottom:3px;">الكمية (العدد):</label>
-                        <input type="number" id="new-batch-qty" class="form-input" min="1" step="1" placeholder="مثال: 15" style="font-size: 16px; font-weight: 800; text-align: center; padding: 6px;">
+                        <input type="number" id="new-batch-qty" class="form-input" inputmode="decimal" enterkeyhint="done" min="0" step="any" placeholder="مثال: 15" style="font-size: 16px; font-weight: 800; text-align: center; padding: 6px;" onkeydown="if(event.key==='Enter'){event.preventDefault(); window.App.saveCountFromModal('${Utils.escapeHTML(medicineId)}', false);}">
                     </div>
                     <div>
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
@@ -9200,6 +9341,107 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                 <button type="button" class="btn-ghost" onclick="window.UI.closeModal()" style="width:100%; height:36px; padding:6px; font-size:13px; border:1px solid var(--border-color); border-radius:10px;">إلغاء</button>
             </div>
         `);
+
+        // v18.22.0: Attach Sticky Keyboard Accessory Bar above numeric keypad (Save + Save & Scan Next + Add Batch)
+        this._setupCountKeyboardBar(medicineId);
+    },
+
+    _setupCountKeyboardBar(medicineId) {
+        this._cleanupCountKeyboardBar();
+        const safeMedId = String(medicineId || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+        const bar = document.createElement('div');
+        bar.id = 'count-kb-accessory-bar';
+        bar.style.cssText = `
+            position: fixed; left: 0; right: 0; bottom: 0; z-index: 100001;
+            display: none; align-items: center; gap: 6px;
+            padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)) 10px;
+            background: var(--surface, #ffffff);
+            border-top: 2px solid rgba(124,58,237,0.35);
+            box-shadow: 0 -6px 22px rgba(0,0,0,0.18);
+            direction: rtl;
+        `;
+        bar.innerHTML = `
+            <button type="button" onpointerdown="event.preventDefault()" onmousedown="event.preventDefault()" onclick="window.App.addNewBatchFromBox(true)" style="height:42px; padding:0 11px; border-radius:10px; border:1.5px solid var(--primary); background:rgba(59,130,246,0.1); color:var(--primary); font-size:12px; font-weight:800; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:4px; white-space:nowrap; flex-shrink:0;">
+                <i class='bx bx-plus' style="font-size:16px;"></i> دفعة
+            </button>
+            <button type="button" onpointerdown="event.preventDefault()" onmousedown="event.preventDefault()" onclick="window.App.saveCountFromModal('${safeMedId}', false)" style="flex:1; height:42px; padding:0 10px; border-radius:10px; border:none; background:var(--primary); color:#ffffff; font-size:13px; font-weight:800; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:5px; white-space:nowrap;">
+                <i class='bx bx-check-circle' style="font-size:17px;"></i> حفظ
+            </button>
+            <button type="button" onpointerdown="event.preventDefault()" onmousedown="event.preventDefault()" onclick="window.App.saveCountFromModal('${safeMedId}', true)" style="flex:1.25; height:42px; padding:0 10px; border-radius:10px; border:none; background:#7c3aed; color:#ffffff; font-size:12.5px; font-weight:800; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:5px; white-space:nowrap;">
+                <i class='bx bx-barcode-reader' style="font-size:17px;"></i> حفظ ومسح
+            </button>
+        `;
+        document.body.appendChild(bar);
+
+        let hideTimer = null;
+        const updatePosition = () => {
+            if (!bar.isConnected) return;
+            if (window.visualViewport) {
+                const vv = window.visualViewport;
+                const offsetBottom = Math.max(0, Math.round(window.innerHeight - (vv.height + vv.offsetTop)));
+                bar.style.bottom = `${offsetBottom}px`;
+            } else {
+                bar.style.bottom = '0px';
+            }
+        };
+
+        const showBar = () => {
+            if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+            bar.style.display = 'flex';
+            updatePosition();
+            setTimeout(updatePosition, 120);
+            setTimeout(updatePosition, 300);
+        };
+
+        const scheduleHide = () => {
+            if (hideTimer) clearTimeout(hideTimer);
+            hideTimer = setTimeout(() => {
+                const active = document.activeElement;
+                if (active && (active.id === 'new-batch-qty' || active.id === 'new-batch-expiry')) return;
+                if (bar.isConnected) bar.style.display = 'none';
+            }, 180);
+        };
+
+        const qtyEl = document.getElementById('new-batch-qty');
+        const expEl = document.getElementById('new-batch-expiry');
+        if (qtyEl) {
+            qtyEl.addEventListener('focus', showBar);
+            qtyEl.addEventListener('blur', scheduleHide);
+        }
+        if (expEl) {
+            expEl.addEventListener('focus', showBar);
+            expEl.addEventListener('blur', scheduleHide);
+        }
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', updatePosition);
+            window.visualViewport.addEventListener('scroll', updatePosition);
+        }
+
+        this._countKbCleanup = () => {
+            if (hideTimer) clearTimeout(hideTimer);
+            if (qtyEl) {
+                qtyEl.removeEventListener('focus', showBar);
+                qtyEl.removeEventListener('blur', scheduleHide);
+            }
+            if (expEl) {
+                expEl.removeEventListener('focus', showBar);
+                expEl.removeEventListener('blur', scheduleHide);
+            }
+            if (window.visualViewport) {
+                window.visualViewport.removeEventListener('resize', updatePosition);
+                window.visualViewport.removeEventListener('scroll', updatePosition);
+            }
+            bar.remove();
+        };
+    },
+
+    _cleanupCountKeyboardBar() {
+        if (typeof this._countKbCleanup === 'function') {
+            try { this._countKbCleanup(); } catch (e) {}
+            this._countKbCleanup = null;
+        }
+        document.getElementById('count-kb-accessory-bar')?.remove();
     },
 
     renderModalBatchesHtml() {
@@ -9251,7 +9493,7 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         return this._modalBatches.reduce((s, b) => s + (parseFloat(b.quantity) || 0), 0);
     },
 
-    addNewBatchFromBox() {
+    addNewBatchFromBox(keepFocus = false) {
         const qtyEl = document.getElementById('new-batch-qty');
         const expEl = document.getElementById('new-batch-expiry');
         if (!qtyEl || !expEl) return;
@@ -9291,11 +9533,15 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             }
         }
 
-        // Reset Box Inputs & close mobile keyboard (v18.13.1: do NOT re-focus qtyEl!)
+        // Reset Box Inputs (close keyboard by default; keep focus when tapped from Sticky Keyboard Bar's "+ دفعة")
         qtyEl.value = '';
-        qtyEl.blur();
-        if (document.activeElement && typeof document.activeElement.blur === 'function') {
-            document.activeElement.blur();
+        if (keepFocus) {
+            qtyEl.focus();
+        } else {
+            qtyEl.blur();
+            if (document.activeElement && typeof document.activeElement.blur === 'function') {
+                document.activeElement.blur();
+            }
         }
 
         // Refresh List & Total

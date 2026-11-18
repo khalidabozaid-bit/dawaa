@@ -177,6 +177,9 @@ export const UI = {
 
     closeModal() {
         console.log('UI: Closing Modal...');
+        if (window.App && typeof window.App._cleanupCountKeyboardBar === 'function') {
+            window.App._cleanupCountKeyboardBar();
+        }
         if (this._closeTimeout) {
             clearTimeout(this._closeTimeout);
             this._closeTimeout = null;
