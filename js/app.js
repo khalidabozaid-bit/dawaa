@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.22.2', // Warehouse Barcode Camera Scan-to-Find / Scan-to-Add (with 27K catalog prefill + multi-barcode link)
+    VERSION: '18.22.3', // Reopen Finalized & Archived Audit Sessions for Editing with Clean Re-Finalization
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -7349,13 +7349,13 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         const isFinal = s.status === 'finalized';
                         return `
                             <div style="background: var(--surface); border-radius: 14px; border: 1px solid var(--border-color); padding: 14px 16px;">
-                                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
-                                    <div style="flex: 1; min-width: 0;">
-                                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                                <div style="display: flex; flex-direction: column; gap: 10px;">
+                                    <div style="min-width: 0;">
+                                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px; flex-wrap: wrap;">
                                             <span style="padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 800; ${isFinal ? 'background: rgba(16,185,129,0.12); color: #065f46;' : 'background: var(--bg-secondary); color: var(--text-muted);'}">
                                                 ${isFinal ? '✅ معتمد' : '📦 مؤرشف'}
                                             </span>
-                                            <strong style="font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${Utils.escapeHTML(s.name)}</strong>
+                                            <strong style="font-size: 14px; word-break: break-word;">${Utils.escapeHTML(s.name)}</strong>
                                         </div>
                                         <div style="font-size: 11px; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap;">
                                             <span><i class='bx bx-user'></i> ${s.host || 'النظام'}</span>
@@ -7365,18 +7365,24 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                                             <span>${new Date(s.finalizedAt || s.startedAt).toLocaleDateString('ar-EG')}</span>
                                         </div>
                                     </div>
-                                    <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
-                                        <button class="sm-btn btn-ghost" onclick="window.App.openAuditReportModal('${s.id}')" title="عرض" style="padding: 6px 10px; font-size: 12px;">
+                                    <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap; border-top: 1px dashed var(--border-color); padding-top: 8px;">
+                                        <button class="sm-btn btn-ghost" onclick="window.App.openAuditReportModal('${s.id}')" title="عرض الكشف" style="height: 32px; padding: 0 10px; font-size: 12px; border: 1px solid var(--border-color); border-radius: 8px;">
                                             <i class='bx bx-show'></i> كشف
                                         </button>
-                                        <button class="sm-btn btn-ghost" onclick="window.App.openExportOptionsModal('${s.id}')" title="Excel" style="padding: 6px 10px; font-size: 12px;">
+                                        <button class="sm-btn btn-ghost" onclick="window.App.openExportOptionsModal('${s.id}')" title="تصدير Excel" style="height: 32px; padding: 0 10px; font-size: 12px; border: 1px solid var(--border-color); border-radius: 8px;">
                                             <i class='bx bx-download'></i> Excel
                                         </button>
-                                        <button class="icon-btn" onclick="window.App.unarchiveAuditSession('${s.id}')" title="استعادة" style="width:30px; height:30px;">
-                                            <i class='bx bx-undo' style="font-size:14px;"></i>
-                                        </button>
-                                        <button class="icon-btn" onclick="window.App.deleteAuditSession('${s.id}')" title="حذف" style="width:30px; height:30px;">
-                                            <i class='bx bx-trash' style="font-size:14px; color: var(--danger);"></i>
+                                        ${isFinal ? `
+                                            <button class="sm-btn btn-ghost" onclick="window.App.reopenAuditSession('${s.id}')" title="إعادة فتح الجلسة المعتمدة للتعديل" style="height: 32px; padding: 0 10px; font-size: 12px; font-weight: 800; border: 1px solid rgba(124,58,237,0.4); color: #7c3aed; background: rgba(124,58,237,0.07); border-radius: 8px;">
+                                                <i class='bx bx-lock-open-alt'></i> إعادة فتح للتعديل
+                                            </button>
+                                        ` : `
+                                            <button class="sm-btn btn-ghost" onclick="window.App.unarchiveAuditSession('${s.id}')" title="استعادة من الأرشيف" style="height: 32px; padding: 0 10px; font-size: 12px; font-weight: 700; border: 1px solid var(--primary); color: var(--primary); background: rgba(59,130,246,0.06); border-radius: 8px;">
+                                                <i class='bx bx-undo'></i> استعادة
+                                            </button>
+                                        `}
+                                        <button class="icon-btn" onclick="window.App.deleteAuditSession('${s.id}')" title="حذف نهائي" style="width:32px; height:32px; margin-right:auto;">
+                                            <i class='bx bx-trash' style="font-size:15px; color: var(--danger);"></i>
                                         </button>
                                     </div>
                                 </div>
@@ -7495,7 +7501,20 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
     async unarchiveAuditSession(sessionId) {
         await Audit.unarchiveSession(sessionId);
-        UI.showToast('تمت استعادة الجلسة من الأرشيف ↩️', 'success');
+        UI.showToast('تمت استعادة الجلسة لقائمة الجلسات الجارية ↩️', 'success');
+        this.renderAuditView();
+        if (typeof this.renderDashboard === 'function') this.renderDashboard();
+    },
+
+    async reopenAuditSession(sessionId) {
+        const session = await Audit.getSession(sessionId);
+        if (!session) return;
+        const sName = session.name || 'هذه الجلسة';
+        if (!confirm(`هل تريد إعادة فتح الجلسة المعتمدة «${sName}» للتعديل؟\n\nستعود لقائمة الجلسات الجارية بكل أرقامها وتواريخها القديمة كما هي، وعند إعادة اعتمادها سيتحدّث المخزون العام بالتعديلات الجديدة بدون مضاعفة.`)) {
+            return;
+        }
+        await Audit.reopenSession(sessionId);
+        UI.showToast(`تم إعادة فتح الجلسة «${sName}» للتعديل 🔓✅`, 'success');
         this.renderAuditView();
         if (typeof this.renderDashboard === 'function') this.renderDashboard();
     },

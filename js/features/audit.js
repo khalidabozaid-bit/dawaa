@@ -236,7 +236,22 @@ export const Audit = {
         const session = await this.getSession(id);
         if (!session) return false;
         session.isArchived = false;
+        if (session.status === 'finalized') {
+            session.status = 'active';
+            session.reopenedAt = new Date().toISOString();
+        }
         await this.saveSession(session);
+        return true;
+    },
+
+    async reopenSession(id) {
+        const session = await this.getSession(id);
+        if (!session) return false;
+        session.isArchived = false;
+        session.status = 'active';
+        session.reopenedAt = new Date().toISOString();
+        await this.saveSession(session);
+        this.currentSessionId = id;
         return true;
     },
 
