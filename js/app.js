@@ -32,7 +32,7 @@ window.storage = storage;
  */
 
 const App = {
-    VERSION: '18.22.1', // Linked Groups: Load ALL medicines + Category Filter + Smart Auto-Suggestions (Active & Brand)
+    VERSION: '18.22.2', // Warehouse Barcode Camera Scan-to-Find / Scan-to-Add (with 27K catalog prefill + multi-barcode link)
     activeAudit: null, 
     inventoryUnsubscribe: null, // v14.0.0 Sync Handle
     isJoined: false,   
@@ -5872,6 +5872,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                     <button class="btn-primary sm-btn" onclick="window.App.openAddMedicine()" style="display:flex; align-items:center; gap:5px; padding:8px 14px; border-radius:10px; font-size:12px; font-weight:800;">
                         <i class='bx bx-plus'></i> إضافة دواء جديد
                     </button>
+                    <button class="btn-primary sm-btn" onclick="window.App.startWarehouseBarcodeScan()" style="display:flex; align-items:center; gap:5px; padding:8px 14px; border-radius:10px; font-size:12px; font-weight:800; background:#7c3aed;">
+                        <i class='bx bx-barcode-reader' style="font-size:16px;"></i> مسح بالباركود
+                    </button>
                     <button class="btn-ghost sm-btn" onclick="window.App.openAddCategoryModal()" style="display:flex; align-items:center; gap:5px; padding:8px 14px; border-radius:10px; font-size:12px; font-weight:800; border:1px solid var(--border-color);">
                         <i class='bx bx-folder-plus'></i> قسم جديد
                     </button>
@@ -6007,6 +6010,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
             <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
                 <button class="btn-primary sm-btn" onclick="window.App.openAddMedicineWithCat('${cat.id}')" style="display:flex; align-items:center; gap:5px; padding:7px 12px; border-radius:10px; font-size:11.5px; font-weight:800;">
                     <i class='bx bx-plus-medical'></i> إضافة دواء جديد
+                </button>
+                <button class="btn-primary sm-btn" onclick="window.App.startWarehouseBarcodeScan('${cat.id}')" style="display:flex; align-items:center; gap:5px; padding:7px 12px; border-radius:10px; font-size:11.5px; font-weight:800; background:#7c3aed;">
+                    <i class='bx bx-barcode-reader' style="font-size:15px;"></i> مسح بالباركود
                 </button>
                 <button class="btn-ghost sm-btn" onclick="window.App.openPullMedToCategoryModal('${cat.id}')" style="display:flex; align-items:center; gap:5px; padding:7px 12px; border-radius:10px; font-size:11.5px; font-weight:800; border:1px solid var(--primary); color:var(--primary); background:rgba(59,130,246,0.06);">
                     <i class='bx bx-transfer'></i> نقل دواء لهذا القسم
@@ -6223,9 +6229,12 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
 
             container.innerHTML = `
                 <!-- Action Button -->
-                <div style="display:flex; gap:8px; margin-bottom:12px;">
+                <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
                     <button class="btn-primary sm-btn" onclick="window.App.openAddLocationModal()" style="display:flex; align-items:center; gap:5px; padding:8px 14px; border-radius:10px; font-size:12px; font-weight:800;">
                         <i class='bx bx-plus'></i> مكان تخزين جديد
+                    </button>
+                    <button class="btn-primary sm-btn" onclick="window.App.startWarehouseBarcodeScan()" style="display:flex; align-items:center; gap:5px; padding:8px 14px; border-radius:10px; font-size:12px; font-weight:800; background:#7c3aed;">
+                        <i class='bx bx-barcode-reader' style="font-size:16px;"></i> مسح بالباركود
                     </button>
                 </div>
 
@@ -6304,6 +6313,9 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
                         <div style="font-size:11px; color:var(--text-muted);">${totalInLoc} صنف في هذا المكان</div>
                     </div>
                 </div>
+                <button class="icon-btn" onclick="window.App.startWarehouseBarcodeScan()" title="بحث بالباركود بالكاميرا" style="width:32px; height:32px; color:#7c3aed; border:1px solid rgba(124,58,237,0.3); border-radius:8px;">
+                    <i class='bx bx-barcode-reader' style="font-size:17px;"></i>
+                </button>
                 <button class="icon-btn" onclick="window.App.openEditLocationModal('${loc.id}')" title="تعديل المكان" style="width:32px; height:32px;">
                     <i class='bx bx-edit' style="font-size:15px;"></i>
                 </button>
@@ -9932,6 +9944,204 @@ auditLevel: 'sessions', // 'sessions' | 'locations' | 'categories' | 'medicines'
         }, 60);
     },
     // ===================== End Audit Barcode Scanning Workflow =====================
+
+    // ===================== Warehouse Barcode Scan-to-Find / Scan-to-Add (v18.22.2) =====================
+    async startWarehouseBarcodeScan(preSelectedCatId = null) {
+        this.startBarcodeScanner(
+            (scannedCode, parsed) => this.handleScannedWarehouseBarcode(scannedCode, parsed, preSelectedCatId),
+            {
+                title: 'بحث وإضافة بالباركود في المستودع',
+                subtitle: 'وجّه الكاميرا للباركود أو كود 2D — لو موجود هيفتح تفاصيله، ولو مش موجود تقدر تضيفه فوراً'
+            }
+        );
+    },
+
+    async handleScannedWarehouseBarcode(rawCode, parsed = null, preSelectedCatId = null) {
+        const info = parsed || this.parsePharmaBarcode(rawCode);
+        const code = String(info.barcode || '').trim();
+        const gtin14 = info.gtin14 ? String(info.gtin14).trim() : null;
+        if (!code) return;
+
+        const scanMeta = {
+            scannedExpiry: info.expiry || null,
+            scannedBatch: info.batch || null,
+            isGS1: !!info.isGS1
+        };
+
+        try {
+            const masterMeds = (await DB.getAll('medicineMaster')) || [];
+            let med = masterMeds.find(m => this.medicineMatchesBarcode(m, code, gtin14));
+            if (!med) {
+                med = masterMeds.find(m => String(m.id).trim() === code);
+            }
+
+            if (med) {
+                UI.showToast(`✅ تم العثور على «${med.nameEN || med.nameAR}»`, 'success');
+                await this.openMedicineDetails(med.id);
+                return;
+            }
+
+            // Not in pharmacy's medicineMaster yet — check the 27,601 Egyptian drugs catalog!
+            let catalogHit = null;
+            try {
+                const catalog = await EgyptianDrugs.ensureLoaded();
+                catalogHit = catalog.find(c => {
+                    const cb = c.barcode ? String(c.barcode).trim() : '';
+                    return cb && (cb === code || (gtin14 && cb === gtin14));
+                }) || null;
+            } catch (e) {}
+
+            await this.openWarehouseUnmatchedBarcodeModal(code, catalogHit, masterMeds, scanMeta, preSelectedCatId);
+        } catch (err) {
+            console.error('Warehouse barcode scan error:', err);
+            UI.showToast('حدث خطأ أثناء البحث عن الباركود', 'danger');
+        }
+    },
+
+    async openWarehouseUnmatchedBarcodeModal(code, catalogHit, masterMeds, scanMeta = {}, preSelectedCatId = null) {
+        const suggestedQuery = catalogHit ? (catalogHit.nameEN || '').split(/\s+/)[0] : '';
+        this._whScanState = {
+            code,
+            catalogHit,
+            scanMeta: scanMeta || {},
+            preSelectedCatId: preSelectedCatId || this.whSelectedCatId || null,
+            masterMeds: masterMeds || (await DB.getAll('medicineMaster')) || []
+        };
+
+        UI.showModal(`
+            <div class="sheet-handle"></div>
+            <div class="modal-header" style="margin-bottom:10px;">
+                <h2 style="font-size:15.5px; display:flex; align-items:center; gap:6px;">
+                    <i class='bx bx-barcode' style="color:#7c3aed; font-size:22px;"></i> دواء غير مسجل في مستودعك
+                </h2>
+                <div style="margin-top:6px; padding:6px 10px; border-radius:8px; background:var(--bg-secondary); font-family:monospace; font-size:13px; font-weight:800; color:var(--primary); text-align:center;">
+                    🔢 ${Utils.escapeHTML(code)}${scanMeta.isGS1 ? ' <span style="font-size:10px; background:rgba(124,58,237,0.12); color:#7c3aed; padding:1px 5px; border-radius:4px;">2D GS1</span>' : ''}
+                </div>
+            </div>
+
+            ${catalogHit ? `
+                <div style="padding:10px 12px; border-radius:10px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.35); margin-bottom:12px;">
+                    <div style="font-size:11px; font-weight:800; color:#059669; margin-bottom:4px;">✨ تم التعرف عليه من قاعدة الأدوية المصرية (27K):</div>
+                    <strong style="font-size:13px; color:var(--text-main); display:block;">${Utils.escapeHTML(catalogHit.nameEN)}</strong>
+                    ${catalogHit.nameAR ? `<div style="font-size:12px; color:var(--text-muted);">${Utils.escapeHTML(catalogHit.nameAR)}</div>` : ''}
+                    ${catalogHit.active ? `<div style="font-size:11px; color:#059669; margin-top:2px;">💊 ${Utils.escapeHTML(catalogHit.active)}</div>` : ''}
+                </div>
+            ` : `
+                <div style="padding:8px 10px; border-radius:9px; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.3); font-size:12px; color:#92400e; margin-bottom:12px;">
+                    هذا الباركود غير مسجل على أي دواء في مستودعك حالياً — يمكنك إضافته كدواء جديد أو ربطه بدواء موجود.
+                </div>
+            `}
+
+            <!-- Action 1: Add as New Medicine -->
+            <button type="button" class="btn-primary w-100" onclick="window.App.addMedFromWarehouseScannedBarcode()" style="margin-bottom:14px; display:flex; align-items:center; justify-content:center; gap:6px; padding:11px; font-size:13px; border-radius:10px;">
+                <i class='bx bx-plus-medical' style="font-size:17px;"></i> ${catalogHit ? 'إضافته للمستودع الآن (بيانات جاهزة ✨)' : 'إضافة دواء جديد بهذا الباركود ➕'}
+            </button>
+
+            <!-- Action 2: Link to Existing Medicine & Open Details -->
+            <div style="border-top:1px dashed var(--border-color); padding-top:12px;">
+                <div style="font-size:12px; font-weight:800; margin-bottom:6px; color:var(--text-main);">
+                    🔗 أو أضفه كباركود لدواء موجود عندك بالفعل:
+                </div>
+                <div class="audit-search-wrapper" style="width:100%; margin-bottom:8px;">
+                    <i class='bx bx-search'></i>
+                    <input type="text" id="wh-link-bc-search" class="audit-search-input" placeholder="🔍 ابحث عن الدواء في مستودعك..." value="${Utils.escapeHTML(suggestedQuery)}" oninput="window.App._renderWhLinkBarcodeList(this.value)">
+                </div>
+                <div id="wh-link-bc-results" style="max-height:28vh; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+            </div>
+
+            <div class="form-actions mt-15" style="display:flex; gap:8px;">
+                <button type="button" class="btn-ghost sm-btn" onclick="window.UI.closeModal(); window.App.startWarehouseBarcodeScan();" style="flex:1; border:1px solid var(--border-color);">
+                    <i class='bx bx-camera'></i> مسح باركود آخر
+                </button>
+                <button type="button" class="btn-ghost sm-btn" onclick="window.UI.closeModal()" style="flex:0.6;">إغلاق</button>
+            </div>
+        `);
+
+        this._renderWhLinkBarcodeList(suggestedQuery);
+    },
+
+    _renderWhLinkBarcodeList(query = '') {
+        const st = this._whScanState;
+        const container = document.getElementById('wh-link-bc-results');
+        if (!st || !container) return;
+
+        const q = String(query || '').trim();
+        let list = st.masterMeds;
+        if (q) {
+            list = Utils.smartFilter(list, q, (pq, m) => Utils.smartScoreMed(pq, m));
+        }
+        list = list.slice(0, 30);
+
+        if (list.length === 0) {
+            container.innerHTML = `<div style="text-align:center; padding:12px; font-size:12px; color:var(--text-muted); background:var(--bg-secondary); border-radius:8px;">لا توجد أدوية مطابقة</div>`;
+            return;
+        }
+
+        container.innerHTML = list.map(m => {
+            const existingCount = this.getMedicineBarcodes(m).length;
+            return `
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 10px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:8px;">
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:12px; font-weight:800; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHTML(m.nameEN || m.nameAR)}</div>
+                        ${m.nameAR && m.nameAR !== m.nameEN ? `<div style="font-size:10.5px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHTML(m.nameAR)}</div>` : ''}
+                        ${existingCount > 0 ? `<div style="font-size:10px; color:var(--primary); font-weight:600;">🔢 لديه ${existingCount} باركود — سيُضاف بجانبهم</div>` : ''}
+                    </div>
+                    <button type="button" class="btn-primary sm-btn" onclick="window.App.linkWarehouseBarcodeAndOpen('${Utils.escapeHTML(m.id)}')" style="font-size:11px; padding:5px 9px; border-radius:7px; white-space:nowrap; background:#7c3aed;">
+                        ${existingCount > 0 ? '➕ إضافة وفتح' : '🔗 ربط وفتح'}
+                    </button>
+                </div>
+            `;
+        }).join('');
+    },
+
+    async linkWarehouseBarcodeAndOpen(medId) {
+        const st = this._whScanState;
+        if (!st || !st.code) return;
+        try {
+            const med = await DB.get('medicineMaster', medId);
+            if (!med) return;
+            const existing = this.getMedicineBarcodes(med);
+            const { barcode, barcodes } = this.normalizeBarcodesField([...existing, st.code]);
+            med.barcode = barcode;
+            med.barcodes = barcodes;
+            med.lastUpdated = new Date().toISOString();
+            med.v = (med.v || 1) + 1;
+            await DB.put('medicineMaster', med);
+            if (typeof Sync !== 'undefined' && Sync.push) {
+                Sync.push(med.id).catch(() => {});
+            }
+            UI.showToast(`تم حفظ الباركود على «${med.nameEN || med.nameAR}» (إجمالي ${barcodes.length}) ✅`, 'success');
+            await this.openMedicineDetails(med.id);
+        } catch (err) {
+            console.error('linkWarehouseBarcodeAndOpen error:', err);
+            UI.showToast('فشل ربط الباركود', 'danger');
+        }
+    },
+
+    async addMedFromWarehouseScannedBarcode() {
+        const st = this._whScanState;
+        if (!st) return;
+        await this.openAddMedicine(st.preSelectedCatId || null);
+        setTimeout(() => {
+            if (st.code) {
+                if (this._formBarcodes && Array.isArray(this._formBarcodes.m)) {
+                    this._initFormBarcodes('m', [st.code]);
+                } else {
+                    const bcEl = document.getElementById('m-barcode');
+                    if (bcEl) bcEl.value = st.code;
+                }
+            }
+            if (st.catalogHit) {
+                const enEl = document.getElementById('m-name-en');
+                const arEl = document.getElementById('m-name-ar');
+                const actEl = document.getElementById('m-active');
+                if (enEl && st.catalogHit.nameEN) enEl.value = st.catalogHit.nameEN;
+                if (arEl && st.catalogHit.nameAR) arEl.value = st.catalogHit.nameAR;
+                if (actEl && st.catalogHit.active) actEl.value = st.catalogHit.active;
+            }
+        }, 60);
+    },
+    // ===================== End Warehouse Barcode Scan-to-Find / Scan-to-Add =====================
 
     // ===================== Stock Transfer & Medicine Merge Engine (v18.20.0) =====================
     _mergeBatchesByExpiry(batchesA = [], batchesB = []) {
